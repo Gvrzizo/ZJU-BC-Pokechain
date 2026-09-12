@@ -11,6 +11,10 @@ import { getItemType, ITEM_TYPES } from '../game-data/items.data';
  *
  * 不在此表里的道具（如 master-ball，仅作为奖励发放）既不出售、也不回收：
  * 购买抛 `NOT_FOR_SALE`，卖出抛 `NOT_SELLABLE`。
+ *
+ * 传说区钥匙（kind='key'，2026-09）：**上架但不回收**——每把 5000P 是长线积分 sink
+ * （约等于月级目标），且钥匙是可交易的稀缺品，回收价会凭空造出积分 faucet。
+ * 回收排除见 `shopSellPrice`。
  */
 export const SHOP_PRICES: Readonly<Record<string, number>> = {
   'poke-ball': 50,
@@ -27,6 +31,13 @@ export const SHOP_PRICES: Readonly<Record<string, number>> = {
   'bottle-cap': 3000,
   'gold-bottle-cap': 15000,
   'rare-candy': 1000,
+  // 传说区钥匙（天空之柱 / 海底洞窟 / 熔岩洞窟 / 古代遗迹 / 南方孤岛 / 诞生之岛）
+  'sky-key': 5000,
+  'ocean-key': 5000,
+  'magma-key': 5000,
+  'ruins-key': 5000,
+  'island-key': 5000,
+  'birth-key': 5000,
 };
 
 /** 单次买/卖的数量上限：积分才是真正的约束，这里只挡误操作与整数溢出。 */
@@ -37,8 +48,13 @@ export function shopPrice(typeId: string): number | undefined {
   return SHOP_PRICES[typeId];
 }
 
-/** 回收价 = 半价向下取整（不足 1 取 1）；非卖品返回 undefined。 */
+/**
+ * 回收价 = 半价向下取整（不足 1 取 1）；非卖品返回 undefined。
+ * **钥匙（kind='key'）一律不可回收**（返回 undefined → 卖出抛 `NOT_SELLABLE`）：
+ * 钥匙进捕只需持有、永不消耗，回收会让"买钥匙 → 卖回"变成免手续费往返，也会削弱稀缺性。
+ */
 export function shopSellPrice(typeId: string): number | undefined {
+  if (getItemType(typeId)?.kind === 'key') return undefined;
   const price = SHOP_PRICES[typeId];
   return price === undefined ? undefined : Math.max(1, Math.floor(price / 2));
 }

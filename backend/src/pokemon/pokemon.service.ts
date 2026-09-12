@@ -7,6 +7,7 @@ import { ChainEventsService } from '../fabric/chain-events.service';
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, GrowthPatch, PokemonState, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { getMove } from '../game-data/moves.data';
+import { zonesForSpecies } from '../game-data/encounter.data';
 import { EVOLUTIONS, getSpecies, SPECIES } from '../game-data/species.data';
 import { getItemType } from '../game-data/items.data';
 import { PokemonRename } from './entities/pokemon-rename.entity';
@@ -205,6 +206,12 @@ export class PokemonService implements OnModuleInit {
       type: s.type,
       spriteUri: s.spriteUri,
       ownedCount: owned.get(s.id) ?? 0,
+      /**
+       * 该种族会出现的区域（栖息地反查，`GET /capture/zones` 提供区域详情）：
+       * 普通区按等级带 + 属性栖息地过滤，传说种族只出现在对应的传说区；从不出现的为 []。
+       */
+      habitatOf: zonesForSpecies(s.id),
+      legendary: s.legendary === true,
       /**
        * 该种族的进化分支（图鉴详情展示进化链与条件）；无进化为 []。
        * 图鉴条目不对应具体个体，等级一律按 0 传（levelOk/canEvolveNow 恒 false，只展示条件）。

@@ -9,7 +9,9 @@
  *
  * 设计口径（见 backend/README.md「图鉴数据」）：
  *   - type：PokeAPI 第一属性（slot 1）；双属性只保留主属性（本作战斗是单属性模型）
- *   - inWild：传说/幻之 = false；手调的 4 个进化型（26/134/135/136）保持 false；其余 true
+ *   - inWild/legendary：开放野生遭遇的只有"非传说 + 手调 4 个进化型（26/134/135/136）以外"的种族，
+ *     以及**第三世代传说 #377–384/386**（`SPECIAL_ZONE_IDS`：inWild=true 但只进传说区池，legendary=true）；
+ *     Kanto/城都传说与基拉祈 inWild=false（仍未开放遭遇）
  *   - defaultMoves：按「主属性+副属性」技能按威力升序取 4 个摊开，不足用一般属性补齐
  *   - EVOLUTIONS：进化链两端都在 #1–386 内即收录；minLevel 取 PokeAPI，非升级进化给保守默认值
  *
@@ -78,6 +80,8 @@ function movesFor(types) {
 /* ---------------- 物种条目生成 ---------------- */
 const STAT_KEYS = ['hp', 'attack', 'defense', 'special-attack', 'special-defense', 'speed'];
 const EVO_ONLY = new Set([26, 134, 135, 136]);
+/** 第三世代传说：开放野生遭遇但只经传说区池（encounter.data.ts 的 LEGENDARY_ZONE_IDS）出现 */
+const SPECIAL_ZONE_IDS = [377, 378, 379, 380, 381, 382, 383, 384, 386];
 /**
  * PokeAPI zh-hans 的两处偏差（已核对官方简体中文）：
  *  - #233 官方于 2020-03 把「多边兽Ⅱ」改名为「多边兽2型」
@@ -96,11 +100,14 @@ for (let id = 1; id <= 386; id++) {
   const base = Object.fromEntries(STAT_KEYS.map((k) => [k, p.stats[k]]));
   const ability = (p.abilities.find((a) => !a.hidden) ?? p.abilities[0]).name;
   const legendary = s.isLegendary || s.isMythical;
-  const inWild = !legendary && !EVO_ONLY.has(id);
+  // 第三世代传说（#377–384/386）开放野生遭遇，但**只经传说区池**（encounter.data.ts）出现；
+  // 其余传说/幻之仍未开放（inWild=false）。
+  const specialZone = SPECIAL_ZONE_IDS.includes(id);
+  const inWild = !EVO_ONLY.has(id) && (!legendary || specialZone);
   const nameZh = id <= 151 ? zhNames151[id] : (ZH_FIXES[id] ?? s.zhHans);
   if (!nameZh) throw new Error(`#${id} 缺中文名`);
   if (legendary) legendaries.push(id);
-  else if (inWild) wildIds.push(id);
+  if (inWild) wildIds.push(id);
   entries.push({
     id,
     name: s.name,
@@ -134,7 +141,7 @@ const HAND_TUNED_BLOCK = `    S(25, 'pikachu', '皮卡丘', 'electric', { hp: 35
 
 const generatedLines = entries
   .filter((e) => !HAND_TUNED_IDS.has(e.id))
-  .map((e) => `    S(${e.id}, '${e.name}', '${e.nameZh}', '${e.type}', ${statLine(e.base)}, '${e.ability}', ${fmtMoves(e.moves)}, ${e.catchRate}${e.inWild ? '' : ', false'}),`);
+  .map((e) => `    S(${e.id}, '${e.name}', '${e.nameZh}', '${e.type}', ${statLine(e.base)}, '${e.ability}', ${fmtMoves(e.moves)}, ${e.catchRate}${e.inWild ? '' : ', false'}${e.legendary ? `, ${e.inWild ? 'true, ' : ''}true` : ''}),`);
 
 /* ---------------- 进化规则 ---------------- */
 const HAND_TUNED_EVOS = [
@@ -194,8 +201,14 @@ export interface SpeciesDef {
    */
   catchRate: number;
   spriteUri: string;
-  /** false for legendary/mythical species and evolution-only entries (not in the wild table) */
+  /**
+   * 能否在野外遇到：false = 手调的进化型（26/134/135/136）与未开放遭遇的传说/幻之
+   * （#144–151、#243–251、#385 基拉祈）。**第三世代传说**（377–384、386）为 true，
+   * 但它们只出现在 \`encounter.data.ts\` 的**传说区池**（钥匙门控），不进普通区池。
+   */
   inWild: boolean;
+  /** 传说/幻之标记：普通区池按它排除，传说区池按它收录（见 encounter.data.ts） */
+  legendary: boolean;
 }
 
 const S = (
@@ -208,6 +221,7 @@ const S = (
   defaultMoves: string[],
   catchRate: number,
   inWild = true,
+  legendary = false,
 ): SpeciesDef => ({
   id,
   name,
@@ -219,6 +233,7 @@ const S = (
   catchRate,
   spriteUri: \`minio://assets/sprites/\${id}.png\`,
   inWild,
+  legendary,
 });
 
 /**
@@ -233,8 +248,14 @@ ${generatedLines.join('\n')}
   ].map((s) => [s.id, s]),
 );
 
-/** Wild encounter table: every non-legendary/mythical species (except the hand-tuned evolution-only entries). */
-export const WILD_TABLE: SpeciesDef[] = Object.values(SPECIES).filter((s) => s.inWild);
+/**
+ * 普通区野生池：手调 4 个进化型（26/134/135/136）与传说/幻之全部排除，
+ * **不含第三世代传说**（它们只进 encounter.data.ts 的传说区池，见 LEGENDARY_WILD_TABLE）。
+ */
+export const WILD_TABLE: SpeciesDef[] = Object.values(SPECIES).filter((s) => s.inWild && !s.legendary);
+
+/** 传说区池的来源表：#377–384/386（inWild + legendary）；其他传说/幻之（inWild=false）仍未开放遭遇。 */
+export const LEGENDARY_WILD_TABLE: SpeciesDef[] = Object.values(SPECIES).filter((s) => s.inWild && s.legendary);
 
 export function getSpecies(id: number): SpeciesDef | undefined {
   return SPECIES[id];

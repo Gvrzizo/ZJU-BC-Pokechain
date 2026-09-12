@@ -18,3 +18,7 @@ backend/.env.local
 # 演示资产（由使用者自行放入）
 frontend/public/assets/vendor/
 minio-data/
+
+# Python 工具缓存（frontend/tools/*.py）
+__pycache__/
+*.pyc

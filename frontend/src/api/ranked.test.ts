@@ -11,7 +11,7 @@ import {
 } from './ranked';
 
 describe('段位分档（docs/backend-api.md §11）', () => {
-  it('青铜 <1200 白银 <1400 黄金 <1600 白金 <1800 大师', () => {
+  it('新人训练家 <1200 精英训练家 <1400 道馆馆主 <1600 四天王 <1800 联盟冠军（内部 id 不变）', () => {
     expect(tierOf(1000).key).toBe('bronze');
     expect(tierOf(1199).key).toBe('bronze');
     expect(tierOf(1200).key).toBe('silver');
@@ -21,6 +21,29 @@ describe('段位分档（docs/backend-api.md §11）', () => {
     expect(tierOf(1600).key).toBe('platinum');
     expect(tierOf(1800).key).toBe('master');
     expect(tierOf(99999).key).toBe('master');
+  });
+
+  it('显示名换成原作风段位，且与 locales 里的文案一致', () => {
+    expect(RANK_TIERS.map((t) => t.nameZh)).toEqual([
+      '新人训练家',
+      '精英训练家',
+      '道馆馆主',
+      '四天王',
+      '联盟冠军',
+    ]);
+    expect(RANK_TIERS.map((t) => t.nameEn)).toEqual([
+      'Rookie',
+      'Ace Trainer',
+      'Gym Leader',
+      'Elite Four',
+      'Champion',
+    ]);
+    for (const tier of RANK_TIERS) {
+      expect(MESSAGES.zh.ui[`ranked.tier.${tier.key}`]).toBe(tier.nameZh);
+      expect(MESSAGES.en.ui[`ranked.tier.${tier.key}`]).toBe(tier.nameEn);
+    }
+    expect(MESSAGES.zh.ui['ranked.maxTier']).toContain('联盟冠军');
+    expect(MESSAGES.en.ui['ranked.maxTier']).toContain('Champion');
   });
 
   it('段位表覆盖 0-99999 且分段连续', () => {
@@ -46,7 +69,7 @@ describe('段位分档（docs/backend-api.md §11）', () => {
 });
 
 describe('积分场准入（docs/backend-api.md §10/§11）', () => {
-  it('准入额按段位：青铜 20 / 白银 50 / 黄金 100 / 白金 200 / 大师 400', () => {
+  it('准入额按段位：新人训练家 20 / 精英训练家 50 / 道馆馆主 100 / 四天王 200 / 联盟冠军 400', () => {
     expect(ARENA_ENTRY_FEES).toEqual({ bronze: 20, silver: 50, gold: 100, platinum: 200, master: 400 });
     expect(arenaEntryFor(0)).toBe(20);
     expect(arenaEntryFor(1199)).toBe(20);

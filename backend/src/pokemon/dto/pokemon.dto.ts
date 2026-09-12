@@ -13,8 +13,12 @@ export class EncounterDto {
   lureTier?: number;
 
   /**
-   * 遇敌区域（地图 y 带，frontend OverworldScene 传入）：south / mid / north；缺省按南部。
-   * 合法值由 game-data/encounter.data.ts 的 ZONES 决定，服务层校验并抛 INVALID_ZONE（test/capture.spec 同口径）。
+   * 遇敌区域（docs/backend-api.md §2「区域与栖息地野生池」）：普通区 7 个
+   * （route-grass / forest / route-mid / cave / coast / route-north / volcano）+ 传说区 6 个
+   * （sky-pillar / seafloor / magma / ruins / southern-island / birth-island，需钥匙）；
+   * 兼容别名 south / mid / north → route-grass / route-mid / route-north；缺省按 route-grass。
+   * 合法值由 game-data/encounter.data.ts 的 ZONES 决定，服务层校验并抛 INVALID_ZONE；
+   * 传说区额外校验钥匙（403 KEY_REQUIRED）与"每人每池一只"（409 LEGENDARY_OWNED）。
    */
   @IsOptional()
   @IsString()

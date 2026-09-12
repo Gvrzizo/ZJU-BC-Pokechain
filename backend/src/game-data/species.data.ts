@@ -23,8 +23,14 @@ export interface SpeciesDef {
    */
   catchRate: number;
   spriteUri: string;
-  /** false for legendary/mythical species and evolution-only entries (not in the wild table) */
+  /**
+   * 能否在野外遇到：false = 手调的进化型（26/134/135/136）与未开放遭遇的传说/幻之
+   * （#144–151、#243–251、#385 基拉祈）。**第三世代传说**（377–384、386）为 true，
+   * 但它们只出现在 `encounter.data.ts` 的**传说区池**（钥匙门控），不进普通区池。
+   */
   inWild: boolean;
+  /** 传说/幻之标记：普通区池按它排除，传说区池按它收录（见 encounter.data.ts） */
+  legendary: boolean;
 }
 
 const S = (
@@ -37,6 +43,7 @@ const S = (
   defaultMoves: string[],
   catchRate: number,
   inWild = true,
+  legendary = false,
 ): SpeciesDef => ({
   id,
   name,
@@ -48,6 +55,7 @@ const S = (
   catchRate,
   spriteUri: `minio://assets/sprites/${id}.png`,
   inWild,
+  legendary,
 });
 
 /**
@@ -202,13 +210,13 @@ export const SPECIES: Record<number, SpeciesDef> = Object.fromEntries(
     S(140, 'kabuto', '化石盔', 'rock', { hp: 30, atk: 80, def: 90, spatk: 55, spdef: 45, speed: 55 }, 'swift-swim', ['water-gun', 'rock-slide', 'surf', 'hydro-pump'], 45),
     S(141, 'kabutops', '镰刀盔', 'rock', { hp: 60, atk: 115, def: 105, spatk: 65, spdef: 70, speed: 80 }, 'swift-swim', ['water-gun', 'rock-slide', 'surf', 'hydro-pump'], 45),
     S(142, 'aerodactyl', '化石翼龙', 'rock', { hp: 80, atk: 105, def: 65, spatk: 60, spdef: 75, speed: 130 }, 'rock-head', ['wing-attack', 'rock-slide', 'fly', 'tackle'], 45),
-    S(144, 'articuno', '急冻鸟', 'ice', { hp: 90, atk: 85, def: 100, spatk: 95, spdef: 125, speed: 85 }, 'pressure', ['wing-attack', 'fly', 'ice-beam', 'tackle'], 3, false),
-    S(145, 'zapdos', '闪电鸟', 'electric', { hp: 90, atk: 90, def: 85, spatk: 125, spdef: 90, speed: 100 }, 'pressure', ['thunder-shock', 'spark', 'thunderbolt', 'thunder'], 3, false),
-    S(146, 'moltres', '火焰鸟', 'fire', { hp: 90, atk: 100, def: 90, spatk: 125, spdef: 85, speed: 90 }, 'pressure', ['ember', 'fire-fang', 'flamethrower', 'fire-blast'], 3, false),
+    S(144, 'articuno', '急冻鸟', 'ice', { hp: 90, atk: 85, def: 100, spatk: 95, spdef: 125, speed: 85 }, 'pressure', ['wing-attack', 'fly', 'ice-beam', 'tackle'], 3, false, true),
+    S(145, 'zapdos', '闪电鸟', 'electric', { hp: 90, atk: 90, def: 85, spatk: 125, spdef: 90, speed: 100 }, 'pressure', ['thunder-shock', 'spark', 'thunderbolt', 'thunder'], 3, false, true),
+    S(146, 'moltres', '火焰鸟', 'fire', { hp: 90, atk: 100, def: 90, spatk: 125, spdef: 85, speed: 90 }, 'pressure', ['ember', 'fire-fang', 'flamethrower', 'fire-blast'], 3, false, true),
     S(147, 'dratini', '迷你龙', 'dragon', { hp: 41, atk: 64, def: 45, spatk: 50, spdef: 50, speed: 50 }, 'shed-skin', ['dragon-breath', 'dragon-claw', 'tackle', 'quick-attack'], 45),
     S(148, 'dragonair', '哈克龙', 'dragon', { hp: 61, atk: 84, def: 65, spatk: 70, spdef: 70, speed: 70 }, 'shed-skin', ['dragon-breath', 'dragon-claw', 'tackle', 'quick-attack'], 45),
-    S(150, 'mewtwo', '超梦', 'psychic', { hp: 106, atk: 110, def: 90, spatk: 154, spdef: 90, speed: 130 }, 'pressure', ['psybeam', 'psychic', 'tackle', 'quick-attack'], 3, false),
-    S(151, 'mew', '梦幻', 'psychic', { hp: 100, atk: 100, def: 100, spatk: 100, spdef: 100, speed: 100 }, 'synchronize', ['psybeam', 'psychic', 'tackle', 'quick-attack'], 45, false),
+    S(150, 'mewtwo', '超梦', 'psychic', { hp: 106, atk: 110, def: 90, spatk: 154, spdef: 90, speed: 130 }, 'pressure', ['psybeam', 'psychic', 'tackle', 'quick-attack'], 3, false, true),
+    S(151, 'mew', '梦幻', 'psychic', { hp: 100, atk: 100, def: 100, spatk: 100, spdef: 100, speed: 100 }, 'synchronize', ['psybeam', 'psychic', 'tackle', 'quick-attack'], 45, false, true),
     S(152, 'chikorita', '菊草叶', 'grass', { hp: 45, atk: 49, def: 65, spatk: 49, spdef: 65, speed: 45 }, 'overgrow', ['absorb', 'razor-leaf', 'giga-drain', 'solar-beam'], 45),
     S(153, 'bayleef', '月桂叶', 'grass', { hp: 60, atk: 62, def: 80, spatk: 63, spdef: 80, speed: 60 }, 'overgrow', ['absorb', 'razor-leaf', 'giga-drain', 'solar-beam'], 45),
     S(154, 'meganium', '大竺葵', 'grass', { hp: 80, atk: 82, def: 100, spatk: 83, spdef: 100, speed: 80 }, 'overgrow', ['absorb', 'razor-leaf', 'giga-drain', 'solar-beam'], 45),
@@ -300,15 +308,15 @@ export const SPECIES: Record<number, SpeciesDef> = Object.fromEntries(
     S(240, 'magby', '鸭嘴宝宝', 'fire', { hp: 45, atk: 75, def: 37, spatk: 70, spdef: 55, speed: 83 }, 'flame-body', ['ember', 'fire-fang', 'flamethrower', 'fire-blast'], 45),
     S(241, 'miltank', '大奶罐', 'normal', { hp: 95, atk: 80, def: 105, spatk: 40, spdef: 70, speed: 100 }, 'thick-fat', ['tackle', 'quick-attack', 'body-slam', 'hyper-beam'], 45),
     S(242, 'blissey', '幸福蛋', 'normal', { hp: 255, atk: 10, def: 10, spatk: 75, spdef: 135, speed: 55 }, 'natural-cure', ['tackle', 'quick-attack', 'body-slam', 'hyper-beam'], 30),
-    S(243, 'raikou', '雷公', 'electric', { hp: 90, atk: 85, def: 75, spatk: 115, spdef: 100, speed: 115 }, 'pressure', ['thunder-shock', 'spark', 'thunderbolt', 'thunder'], 3, false),
-    S(244, 'entei', '炎帝', 'fire', { hp: 115, atk: 115, def: 85, spatk: 90, spdef: 75, speed: 100 }, 'pressure', ['ember', 'fire-fang', 'flamethrower', 'fire-blast'], 3, false),
-    S(245, 'suicune', '水君', 'water', { hp: 100, atk: 75, def: 115, spatk: 90, spdef: 115, speed: 85 }, 'pressure', ['water-gun', 'aqua-tail', 'surf', 'hydro-pump'], 3, false),
+    S(243, 'raikou', '雷公', 'electric', { hp: 90, atk: 85, def: 75, spatk: 115, spdef: 100, speed: 115 }, 'pressure', ['thunder-shock', 'spark', 'thunderbolt', 'thunder'], 3, false, true),
+    S(244, 'entei', '炎帝', 'fire', { hp: 115, atk: 115, def: 85, spatk: 90, spdef: 75, speed: 100 }, 'pressure', ['ember', 'fire-fang', 'flamethrower', 'fire-blast'], 3, false, true),
+    S(245, 'suicune', '水君', 'water', { hp: 100, atk: 75, def: 115, spatk: 90, spdef: 115, speed: 85 }, 'pressure', ['water-gun', 'aqua-tail', 'surf', 'hydro-pump'], 3, false, true),
     S(246, 'larvitar', '幼基拉斯', 'rock', { hp: 50, atk: 64, def: 50, spatk: 45, spdef: 50, speed: 41 }, 'guts', ['rock-slide', 'dig', 'earthquake', 'tackle'], 45),
     S(247, 'pupitar', '沙基拉斯', 'rock', { hp: 70, atk: 84, def: 70, spatk: 65, spdef: 70, speed: 51 }, 'shed-skin', ['rock-slide', 'dig', 'earthquake', 'tackle'], 45),
     S(248, 'tyranitar', '班基拉斯', 'rock', { hp: 100, atk: 134, def: 110, spatk: 95, spdef: 100, speed: 61 }, 'sand-stream', ['bite', 'rock-slide', 'crunch', 'dark-pulse'], 45),
-    S(249, 'lugia', '洛奇亚', 'psychic', { hp: 106, atk: 90, def: 130, spatk: 90, spdef: 154, speed: 110 }, 'pressure', ['wing-attack', 'psybeam', 'psychic', 'fly'], 3, false),
-    S(250, 'ho-oh', '凤王', 'fire', { hp: 106, atk: 130, def: 90, spatk: 110, spdef: 154, speed: 90 }, 'pressure', ['ember', 'fire-fang', 'flamethrower', 'fire-blast'], 3, false),
-    S(251, 'celebi', '时拉比', 'psychic', { hp: 100, atk: 100, def: 100, spatk: 100, spdef: 100, speed: 100 }, 'natural-cure', ['absorb', 'razor-leaf', 'leaf-blade', 'solar-beam'], 45, false),
+    S(249, 'lugia', '洛奇亚', 'psychic', { hp: 106, atk: 90, def: 130, spatk: 90, spdef: 154, speed: 110 }, 'pressure', ['wing-attack', 'psybeam', 'psychic', 'fly'], 3, false, true),
+    S(250, 'ho-oh', '凤王', 'fire', { hp: 106, atk: 130, def: 90, spatk: 110, spdef: 154, speed: 90 }, 'pressure', ['ember', 'fire-fang', 'flamethrower', 'fire-blast'], 3, false, true),
+    S(251, 'celebi', '时拉比', 'psychic', { hp: 100, atk: 100, def: 100, spatk: 100, spdef: 100, speed: 100 }, 'natural-cure', ['absorb', 'razor-leaf', 'leaf-blade', 'solar-beam'], 45, false, true),
     S(252, 'treecko', '木守宫', 'grass', { hp: 40, atk: 45, def: 35, spatk: 65, spdef: 55, speed: 70 }, 'overgrow', ['absorb', 'razor-leaf', 'giga-drain', 'solar-beam'], 45),
     S(253, 'grovyle', '森林蜥蜴', 'grass', { hp: 50, atk: 65, def: 45, spatk: 85, spdef: 65, speed: 95 }, 'overgrow', ['absorb', 'razor-leaf', 'giga-drain', 'solar-beam'], 45),
     S(254, 'sceptile', '蜥蜴王', 'grass', { hp: 70, atk: 85, def: 65, spatk: 105, spdef: 85, speed: 120 }, 'overgrow', ['absorb', 'razor-leaf', 'giga-drain', 'solar-beam'], 45),
@@ -434,21 +442,28 @@ export const SPECIES: Record<number, SpeciesDef> = Object.fromEntries(
     S(374, 'beldum', '铁哑铃', 'steel', { hp: 40, atk: 55, def: 80, spatk: 35, spdef: 60, speed: 30 }, 'clear-body', ['metal-claw', 'psybeam', 'psychic', 'iron-tail'], 3),
     S(375, 'metang', '金属怪', 'steel', { hp: 60, atk: 75, def: 100, spatk: 55, spdef: 80, speed: 50 }, 'clear-body', ['metal-claw', 'psybeam', 'psychic', 'iron-tail'], 3),
     S(376, 'metagross', '巨金怪', 'steel', { hp: 80, atk: 135, def: 130, spatk: 95, spdef: 90, speed: 70 }, 'clear-body', ['metal-claw', 'psybeam', 'psychic', 'iron-tail'], 3),
-    S(377, 'regirock', '雷吉洛克', 'rock', { hp: 80, atk: 100, def: 200, spatk: 50, spdef: 100, speed: 50 }, 'clear-body', ['rock-slide', 'tackle', 'quick-attack', 'body-slam'], 3, false),
-    S(378, 'regice', '雷吉艾斯', 'ice', { hp: 80, atk: 50, def: 100, spatk: 100, spdef: 200, speed: 50 }, 'clear-body', ['ice-beam', 'tackle', 'quick-attack', 'body-slam'], 3, false),
-    S(379, 'registeel', '雷吉斯奇鲁', 'steel', { hp: 80, atk: 75, def: 150, spatk: 75, spdef: 150, speed: 50 }, 'clear-body', ['metal-claw', 'iron-tail', 'tackle', 'quick-attack'], 3, false),
-    S(380, 'latias', '拉帝亚斯', 'dragon', { hp: 80, atk: 80, def: 90, spatk: 110, spdef: 130, speed: 110 }, 'levitate', ['dragon-breath', 'psybeam', 'dragon-claw', 'psychic'], 3, false),
-    S(381, 'latios', '拉帝欧斯', 'dragon', { hp: 80, atk: 90, def: 80, spatk: 130, spdef: 110, speed: 110 }, 'levitate', ['dragon-breath', 'psybeam', 'dragon-claw', 'psychic'], 3, false),
-    S(382, 'kyogre', '盖欧卡', 'water', { hp: 100, atk: 100, def: 90, spatk: 150, spdef: 140, speed: 90 }, 'drizzle', ['water-gun', 'aqua-tail', 'surf', 'hydro-pump'], 3, false),
-    S(383, 'groudon', '固拉多', 'ground', { hp: 100, atk: 150, def: 140, spatk: 100, spdef: 90, speed: 90 }, 'drought', ['dig', 'earthquake', 'tackle', 'quick-attack'], 3, false),
-    S(384, 'rayquaza', '烈空坐', 'dragon', { hp: 105, atk: 150, def: 90, spatk: 150, spdef: 90, speed: 95 }, 'air-lock', ['dragon-breath', 'wing-attack', 'dragon-claw', 'fly'], 45, false),
-    S(385, 'jirachi', '基拉祈', 'steel', { hp: 100, atk: 100, def: 100, spatk: 100, spdef: 100, speed: 100 }, 'serene-grace', ['metal-claw', 'psybeam', 'psychic', 'iron-tail'], 3, false),
-    S(386, 'deoxys', '代欧奇希斯', 'psychic', { hp: 50, atk: 150, def: 50, spatk: 150, spdef: 50, speed: 150 }, 'pressure', ['psybeam', 'psychic', 'tackle', 'quick-attack'], 3, false),
+    // 第三世代传说：#377–384/386 经特殊区池（钥匙门控）遭遇，见 encounter.data.ts「传说区」
+    S(377, 'regirock', '雷吉洛克', 'rock', { hp: 80, atk: 100, def: 200, spatk: 50, spdef: 100, speed: 50 }, 'clear-body', ['rock-slide', 'tackle', 'quick-attack', 'body-slam'], 3, true, true),
+    S(378, 'regice', '雷吉艾斯', 'ice', { hp: 80, atk: 50, def: 100, spatk: 100, spdef: 200, speed: 50 }, 'clear-body', ['ice-beam', 'tackle', 'quick-attack', 'body-slam'], 3, true, true),
+    S(379, 'registeel', '雷吉斯奇鲁', 'steel', { hp: 80, atk: 75, def: 150, spatk: 75, spdef: 150, speed: 50 }, 'clear-body', ['metal-claw', 'iron-tail', 'tackle', 'quick-attack'], 3, true, true),
+    S(380, 'latias', '拉帝亚斯', 'dragon', { hp: 80, atk: 80, def: 90, spatk: 110, spdef: 130, speed: 110 }, 'levitate', ['dragon-breath', 'psybeam', 'dragon-claw', 'psychic'], 3, true, true),
+    S(381, 'latios', '拉帝欧斯', 'dragon', { hp: 80, atk: 90, def: 80, spatk: 130, spdef: 110, speed: 110 }, 'levitate', ['dragon-breath', 'psybeam', 'dragon-claw', 'psychic'], 3, true, true),
+    S(382, 'kyogre', '盖欧卡', 'water', { hp: 100, atk: 100, def: 90, spatk: 150, spdef: 140, speed: 90 }, 'drizzle', ['water-gun', 'aqua-tail', 'surf', 'hydro-pump'], 3, true, true),
+    S(383, 'groudon', '固拉多', 'ground', { hp: 100, atk: 150, def: 140, spatk: 100, spdef: 90, speed: 90 }, 'drought', ['dig', 'earthquake', 'tackle', 'quick-attack'], 3, true, true),
+    S(384, 'rayquaza', '烈空坐', 'dragon', { hp: 105, atk: 150, def: 90, spatk: 150, spdef: 90, speed: 95 }, 'air-lock', ['dragon-breath', 'wing-attack', 'dragon-claw', 'fly'], 45, true, true),
+    S(385, 'jirachi', '基拉祈', 'steel', { hp: 100, atk: 100, def: 100, spatk: 100, spdef: 100, speed: 100 }, 'serene-grace', ['metal-claw', 'psybeam', 'psychic', 'iron-tail'], 3, false, true),
+    S(386, 'deoxys', '代欧奇希斯', 'psychic', { hp: 50, atk: 150, def: 50, spatk: 150, spdef: 50, speed: 150 }, 'pressure', ['psybeam', 'psychic', 'tackle', 'quick-attack'], 3, true, true),
   ].map((s) => [s.id, s]),
 );
 
-/** Wild encounter table: every non-legendary/mythical species (except the hand-tuned evolution-only entries). */
-export const WILD_TABLE: SpeciesDef[] = Object.values(SPECIES).filter((s) => s.inWild);
+/**
+ * 普通区野生池：手调 4 个进化型（26/134/135/136）与传说/幻之全部排除，
+ * **不含第三世代传说**（它们只进 encounter.data.ts 的传说区池，见 LEGENDARY_WILD_TABLE）。
+ */
+export const WILD_TABLE: SpeciesDef[] = Object.values(SPECIES).filter((s) => s.inWild && !s.legendary);
+
+/** 传说区池的来源表：#377–384/386（inWild + legendary）；其他传说/幻之（inWild=false）仍未开放遭遇。 */
+export const LEGENDARY_WILD_TABLE: SpeciesDef[] = Object.values(SPECIES).filter((s) => s.inWild && s.legendary);
 
 export function getSpecies(id: number): SpeciesDef | undefined {
   return SPECIES[id];

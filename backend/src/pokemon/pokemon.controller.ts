@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { identityForUser } from '../fabric/chain.types';
+import { zoneTable } from '../game-data/encounter.data';
 import { CaptureService } from './capture.service';
 import {
   AttemptDto,
@@ -42,6 +43,15 @@ export class PokemonController {
   @Post('pokemon/center/heal')
   centerHeal(@CurrentUser() user: AuthUser) {
     return this.pokemon.centerHeal(identityForUser(user));
+  }
+
+  /**
+   * 区域表（docs/backend-api.md §2）：普通区 7 个（等级带 / 阶段门槛 / 栖息地属性）
+   * + 传说区 6 个（固定池、窄等级带、所需钥匙 typeId），并给出缺省区与旧三区别名。
+   */
+  @Get('capture/zones')
+  zones() {
+    return zoneTable();
   }
 
   @Post('capture/encounter')

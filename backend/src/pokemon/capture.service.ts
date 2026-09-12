@@ -6,7 +6,8 @@ import { DeriveStream, sha256hex } from '../common/utils/crypto.util';
 import { ChainAdapter } from '../fabric/chain.adapter';
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, SYSTEM_IDENTITY } from '../fabric/chain.types';
-import { ZONE_IDS, ZoneId, resolveZone } from '../game-data/encounter.data';
+import { ZONE_IDS, ZoneDef, ZoneId, resolveZone, zoneSpeciesIds } from '../game-data/encounter.data';
+import { getItemType } from '../game-data/items.data';
 import { getSpecies } from '../game-data/species.data';
 import { computeStats, normalizeEvs } from '../game-data/stats';
 import { resolveOwnedBall } from './ball';
@@ -68,14 +69,26 @@ export class CaptureService {
     if (!lure) {
       throw new AppException('INVALID_LURE_TIER', `lureTier must be 0, 1 or 2 (got ${String(lureTierInput)})`, HttpStatus.BAD_REQUEST);
     }
-    // 区域（docs/backend-api.md §2「区域等级带」）：未传按南部；非法 id 直接拒绝
+    // 区域（docs/backend-api.md §2「区域与栖息地野生池」）：未传按草丛；别名归一；非法 id 直接拒绝
     const zone = resolveZone(zoneIdInput);
     if (!zone) {
       throw new AppException(
         'INVALID_ZONE',
-        `zoneId must be one of ${ZONE_IDS.join('|')} (got ${String(zoneIdInput)})`,
+        `zoneId must be one of ${ZONE_IDS.join('|')} (aliases: south→route-grass, mid→route-mid, north→route-north) (got ${String(zoneIdInput)})`,
         HttpStatus.BAD_REQUEST,
       );
+    }
+    // 传说区门控（docs/backend-api.md §2「传说区」）：禁止诱饵 + 钥匙 + 每人每池一只。
+    // 全部校验先于 Commit 与任何扣费：被拒时链上不留痕、积分不变。
+    if (zone.legendary) {
+      if (tier > 0) {
+        throw new AppException(
+          'LURE_NOT_ALLOWED',
+          `${zone.name} 是传说区，禁止使用诱饵（lureTier=${tier}）`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      await this.assertLegendaryAccess(as, zone);
     }
     const serverSeed = randomBytes(32).toString('hex');
     const clientSeed = clientSeedInput && /^[0-9a-f]{8,64}$/i.test(clientSeedInput)
@@ -138,7 +151,17 @@ export class CaptureService {
 
     return {
       eventId,
-      zone: { id: zone.id, name: zone.name, minLevel: zone.minLevel, maxLevel: zone.maxLevel, maxStage: zone.maxStage },
+      zone: {
+        id: zone.id,
+        name: zone.name,
+        minLevel: zone.minLevel,
+        maxLevel: zone.maxLevel,
+        maxStage: zone.maxStage,
+        habitats: [...zone.habitats],
+        legendary: zone.legendary === true,
+        keyTypeId: zone.keyTypeId ?? null,
+        keyNameZh: zone.keyTypeId ? (getItemType(zone.keyTypeId)?.nameZh ?? null) : null,
+      },
       wild: {
         speciesId: species.id,
         name: species.name,
@@ -152,6 +175,38 @@ export class CaptureService {
       commitHash,
       clientSeed,
     };
+  }
+
+  /**
+   * 传说区进入校验（docs/backend-api.md §2「传说区门控」）：
+   * ① 背包里有对应钥匙——本人名下 `status=IDLE`、`quantity≥1` 的该 typeId 堆叠，**不消耗**；
+   *    没有则 403 `KEY_REQUIRED`（消息同时带 typeId 与中文名）。
+   * ② 本人**尚未拥有**该区任一传说种族——`QueryByOwner` 按 speciesId 过滤（含交易/对战锁定中）；
+   *    已拥有则 409 `LEGENDARY_OWNED`。放生（ownerId 置空）或交易走后即可再来（每人每池一只）。
+   */
+  private async assertLegendaryAccess(as: ChainIdentity, zone: ZoneDef): Promise<void> {
+    const keyTypeId = zone.keyTypeId;
+    const keyType = keyTypeId ? getItemType(keyTypeId) : undefined;
+    const stacks = await this.contract.queryItemsByOwner(as.userId);
+    const held = stacks.some((item) => item.typeId === keyTypeId && item.status === 'IDLE' && item.quantity >= 1);
+    if (!held) {
+      throw new AppException(
+        'KEY_REQUIRED',
+        `${zone.name}需要${keyType?.nameZh ?? ''}（${keyTypeId}）才能进入，背包里没有可用的钥匙`,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const poolIds = new Set(zoneSpeciesIds(zone));
+    const owned = await this.contract.queryPokemonByOwner(as.userId);
+    const alreadyOwned = owned.find((p) => poolIds.has(p.speciesId));
+    if (alreadyOwned) {
+      const species = getSpecies(alreadyOwned.speciesId);
+      throw new AppException(
+        'LEGENDARY_OWNED',
+        `你已经拥有 ${species?.nameZh ?? alreadyOwned.speciesId}，传说仅此一只（放生或交易走后可再来）`,
+        HttpStatus.CONFLICT,
+      );
+    }
   }
 
   async attempt(as: ChainIdentity, eventId: string, ballItemId: string) {

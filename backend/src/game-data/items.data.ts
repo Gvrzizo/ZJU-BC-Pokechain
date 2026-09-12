@@ -2,7 +2,7 @@ export interface ItemTypeDef {
   typeId: string;
   name: string;
   nameZh: string;
-  kind: 'ball' | 'potion' | 'stone' | 'tm' | 'other';
+  kind: 'ball' | 'potion' | 'stone' | 'tm' | 'other' | 'key';
   /** capture ball multiplier */
   ballBonus?: number;
   /** potion heal amount (off-chain battle convenience) */
@@ -38,6 +38,14 @@ export const ITEM_TYPES: Record<string, ItemTypeDef> = Object.fromEntries(
     I('bottle-cap', 'Bottle Cap', '银色王冠', 'other'),
     I('gold-bottle-cap', 'Gold Bottle Cap', '金色王冠', 'other'),
     I('rare-candy', 'Rare Candy', '神奇糖果', 'other'),
+    // 传说区钥匙（kind='key'）：**非消耗品**，只用于通过 capture 的进入校验；
+    // 不可使用（POST /items/:id/use → NOT_USABLE）、不可回收（shop 卖出 → NOT_SELLABLE，见 shop.data.ts）
+    I('sky-key', 'Sky Key', '天空之钥', 'key'),
+    I('ocean-key', 'Ocean Key', '海洋之钥', 'key'),
+    I('magma-key', 'Magma Key', '熔岩之钥', 'key'),
+    I('ruins-key', 'Ruins Key', '遗迹之钥', 'key'),
+    I('island-key', 'Island Key', '岛之钥', 'key'),
+    I('birth-key', 'Birth Island Ticket', '诞生岛船票', 'key'),
   ].map((i) => [i.typeId, i]),
 );
 

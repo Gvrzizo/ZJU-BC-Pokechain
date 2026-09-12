@@ -17,15 +17,23 @@ export interface RankTier {
   max: number;
   /** 徽章底色（像素风） */
   color: string;
+  /** 显示名（中文，原作风：新人训练家/精英训练家/道馆馆主/四天王/联盟冠军；locales `ranked.tier.*` 同值） */
+  nameZh: string;
+  /** 显示名（英文）：Rookie / Ace Trainer / Gym Leader / Elite Four / Champion */
+  nameEn: string;
 }
 
-/** 段位表与后端 docs/backend-api.md §11 / backend/src/ranked/elo.ts 一致 */
+/**
+ * 段位表与后端 docs/backend-api.md §11 / backend/src/ranked/elo.ts 一致。
+ * **只换显示名**（原作风段位），内部 id 与分数线不动；文案在 locales `ranked.tier.<key>`，
+ * 单测保证两边一致（改名字要同时改这里与 zh.ts / en.ts）。
+ */
 export const RANK_TIERS: RankTier[] = [
-  { key: 'bronze', min: 0, max: 1200, color: '#a9663a' },
-  { key: 'silver', min: 1200, max: 1400, color: '#b9c2cc' },
-  { key: 'gold', min: 1400, max: 1600, color: '#e6c53c' },
-  { key: 'platinum', min: 1600, max: 1800, color: '#7fd6e8' },
-  { key: 'master', min: 1800, max: 100000, color: '#d05ce3' },
+  { key: 'bronze', min: 0, max: 1200, color: '#a9663a', nameZh: '新人训练家', nameEn: 'Rookie' },
+  { key: 'silver', min: 1200, max: 1400, color: '#b9c2cc', nameZh: '精英训练家', nameEn: 'Ace Trainer' },
+  { key: 'gold', min: 1400, max: 1600, color: '#e6c53c', nameZh: '道馆馆主', nameEn: 'Gym Leader' },
+  { key: 'platinum', min: 1600, max: 1800, color: '#7fd6e8', nameZh: '四天王', nameEn: 'Elite Four' },
+  { key: 'master', min: 1800, max: 100000, color: '#d05ce3', nameZh: '联盟冠军', nameEn: 'Champion' },
 ];
 
 /** 积分场准入积分（按段位收；与 backend/src/ranked/arena.ts 一致） */

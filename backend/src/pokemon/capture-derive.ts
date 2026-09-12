@@ -11,11 +11,14 @@ import { SpeciesDef } from '../game-data/species.data';
  * disjoint blocks (documented for auditors, see FairnessModule):
  *
  *   n=0          wild species: weighted index into the zone pool
- *                (zone = player-chosen band, see game-data/encounter.data.ts;
- *                 the pool holds stage <= zone.maxStage species weighted by rarity)
+ *                (zone = player-chosen area, see game-data/encounter.data.ts;
+ *                 normal zones: stage <= zone.maxStage AND species type in zone.habitats,
+ *                 weighted by rarity; legendary zones: fixed pool of legendary species,
+ *                 equal weights, key-gated — see docs/backend-api.md §2)
  *   n=1          wild level = zone.minLevel + floor(rand * (zone.maxLevel - zone.minLevel + 1))
  *                (+2/+5 for lure tier 1/2, clamped to zone.maxLevel — the band is
- *                 fully independent of the player's party levels)
+ *                 fully independent of the player's party levels; legendary zones reject
+ *                 paid lures entirely)
  *   attempt k:   base = 2 + (k-1)*10
  *     +0  catch roll   -> success iff roll < captureProbability(...)
  *     +1..+6  IVs hp/atk/def/spatk/spdef/speed = floor(rand*32)
@@ -43,10 +46,12 @@ import { SpeciesDef } from '../game-data/species.data';
  */
 export const CAPTURE_DERIVATION_DOC =
   'rand(n)=HMAC-SHA256(key=serverSeed,msg=`${clientSeed}|${eventId}|${n}`) first 8 bytes BE / 2^64; ' +
-  'n=0 wild species = weighted index into the zone wild pool ' +
-  '(zone=Commit.meta.zone; pool = stage<=zone.maxStage, weights 60/30/10 by catchRate >=200/>=80/<80, x0.3 when baseStatTotal>=500), ' +
+  'n=0 wild species = weighted index into the zone pool ' +
+  '(zone=Commit.meta.zone; normal zones: pool = stage<=zone.maxStage AND primary type in zone.habitats, ' +
+  'weights 60/30/10 by catchRate >=200/>=80/<80, x0.3 when baseStatTotal>=500; ' +
+  'legendary zones: fixed poolSpeciesIds, equal weights, key-gated), ' +
   `n=1 wild level = zone.minLevel + floor(r*(zone.maxLevel-zone.minLevel+1)) (zones: ${ZONES.map((z) => `${z.id}=Lv${z.minLevel}-Lv${z.maxLevel}/stage<=${z.maxStage}`).join(', ')}), ` +
-  '+2 (tier 1) / +5 (tier 2) lure bonus clamped to zone.maxLevel; ' +
+  '+2 (tier 1) / +5 (tier 2) lure bonus clamped to zone.maxLevel (legendary zones reject paid lures); ' +
   'attempt k uses base=2+(k-1)*10: +0 catch roll vs ' +
   'p=min(1,a/255), a=((3*maxHP-2*curHP)*catchRate*ballBonus)/(3*maxHP), ' +
   '+1..6 IVs=floor(r*32), +7 nature=r*25, +8 shiny=r<shinyChance (1/4096, x4 with lure tier 2), +9 shakes=1+floor(r*3); ' +
@@ -108,7 +113,7 @@ export function captureProbability(
 
 /**
  * 野怪等级：**带内均匀** `zone.minLevel + floor(rand(1) × (zone.maxLevel − zone.minLevel + 1))`，
- * 再叠加诱饵等级加成并封顶 `zone.maxLevel`（docs/backend-api.md §2「区域等级带」）。
+ * 再叠加诱饵等级加成并封顶 `zone.maxLevel`（docs/backend-api.md §2「区域与栖息地野生池」）。
  * 与玩家队伍等级彻底脱钩——抓多少高级宝可梦都不会改变某个区域出怪的等级。
  */
 export function deriveWildLevel(stream: DeriveStream, zone: ZoneDef, levelBonus = 0): number {

@@ -28,8 +28,9 @@ Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + r
 |---|---|---|
 | GET | `/pokemon?owner=me` | 我的宝可梦（链上 QueryByOwner，Redis 缓存 5s；每只附带 `evs`、`stats` 六项能力值、**羁绊战斗加成百分比 `bondBonus`**（见下「能力值计算」）、**当前 HP `currentHp`/`fainted`**（链下伤势，见下）、**改名次数 `renameCount`**（链下 PG，见下「改名」）与进化链 `evolution`/`evolutions`） |
 | GET | `/pokemon/:id` | 详情（同上附带 `evs`、`stats`、`bondBonus`、`currentHp`/`fainted`、`renameCount` 与进化链） |
-| GET | `/pokedex` | 图鉴（species 静态表 + 我拥有数） |
-| POST | `/capture/encounter` | `{clientSeed?, lureTier?, zoneId?}` 随机遇敌：服务端生成 serverSeed+eventId，**先提交链码 `RandomContract.Commit`**，再从已验证派生流决定 species/等级（种类 `n=0`、等级 `n=1`）。**区域等级带**：`zoneId` ∈ `south`/`mid`/`north`（缺省 `south`，非法抛 `INVALID_ZONE`），区域固定**等级带**与**野生池门槛**——`south` Lv2-6 只出未进化型 / `mid` Lv8-16 可出一段进化型 / `north` Lv17-28 可出二段进化型；`等级 = zone.minLevel + floor(rand(1) × 带宽)`，**与玩家队伍等级彻底脱钩**（抓高级怪不再抬高野怪等级）；野生池按 `stage ≤ maxStage` 过滤 + 稀有度加权（见下「区域等级带与野生池」）。**付费诱饵 `lureTier`**：0 免费 / 1 = 50 积分（带内 +2 级）/ 2 = 200 积分（带内 +5 级、闪光概率 ×4 → 1/1024），加成**封顶 `zone.maxLevel`**；付费经链码 `AddPoints(-cost, reason='lure:tierN')` 原子扣减（余额不足抛 `INSUFFICIENT_POINTS`），并把 `{zone,lureTier?,cost?}` 写入 `RandomCommit.meta` 上链留痕（`GET /fairness/:eventId` 的 `event.meta` 可见，审计可据此复算 `n=0/n=1`）。返回 `{eventId, zone:{id,name,minLevel,maxLevel,maxStage}, wild:{speciesId,name,nameZh,level,previewSpriteUri,catchRate}, lure:{tier,cost,levelBonus,shinyMultiplier}, commitHash, clientSeed}`；`eventId` 是后续**野怪战斗**（主流程）或**快速捕捉**（兼容路径）的唯一凭据 |
+| GET | `/pokedex` | 图鉴（species 静态表 + 我拥有数 + **出现区域 `habitatOf`**：该种族会出现的区域 id 列表（栖息地反查，含传说区；从不出现的为 `[]`）+ `legendary` 标记；区域详情/中文名见 `GET /capture/zones`） |
+| GET | `/capture/zones` | **区域表**（前端渲染 + 调试）：`{default, aliases, zones:[{id, name（中文名）, minLevel, maxLevel, maxStage, habitats, legendary, keyTypeId, keyNameZh, lureAllowed, poolSize}]}`——普通区给等级带/阶段门槛/栖息地属性/池规模，传说区给所需钥匙 typeId 与中文名（`lureAllowed=false`）。完整表见下「区域与栖息地野生池」 |
+| POST | `/capture/encounter` | `{clientSeed?, lureTier?, zoneId?}` 随机遇敌：服务端生成 serverSeed+eventId，**先提交链码 `RandomContract.Commit`**，再从已验证派生流决定 species/等级（种类 `n=0`、等级 `n=1`）。**区域**：`zoneId` ∈ 普通区 7 个（`route-grass`/`forest`/`route-mid`/`cave`/`coast`/`route-north`/`volcano`）+ 传说区 6 个（`sky-pillar`/`seafloor`/`magma`/`ruins`/`southern-island`/`birth-island`），缺省 `route-grass`、非法抛 `INVALID_ZONE`、旧 id 别名 `south`/`mid`/`north` 归一为 `route-grass`/`route-mid`/`route-north`（响应与 `Commit.meta.zone` 一律记规范 id）；每区固定**等级带** + **阶段门槛** + **栖息地属性**（池见下「区域与栖息地野生池」），`等级 = zone.minLevel + floor(rand(1) × 带宽)`，**与玩家队伍等级彻底脱钩**。**传说区额外门控**：需要对应钥匙（`sky-key`/`ocean-key`/`magma-key`/`ruins-key`/`island-key`/`birth-key`，持有即通行、**不消耗**）否则 403 `KEY_REQUIRED`（消息带 typeId 与中文名）；本人已拥有该区任一传说（含锁定中）否则 409 `LEGENDARY_OWNED`；**禁止付费诱饵**（400 `LURE_NOT_ALLOWED`，不扣费），闪光仍按基准 1/4096 判定。**付费诱饵 `lureTier`**（仅普通区）：0 免费 / 1 = 50 积分（带内 +2 级）/ 2 = 200 积分（带内 +5 级、闪光概率 ×4 → 1/1024），加成**封顶 `zone.maxLevel`**；付费经链码 `AddPoints(-cost, reason='lure:tierN')` 原子扣减（余额不足抛 `INSUFFICIENT_POINTS`），并把 `{zone,lureTier?,cost?}` 写入 `RandomCommit.meta` 上链留痕（`GET /fairness/:eventId` 的 `event.meta` 可见，审计可据此复算 `n=0/n=1`）。返回 `{eventId, zone:{id,name,minLevel,maxLevel,maxStage,habitats,legendary,keyTypeId,keyNameZh}, wild:{speciesId,name,nameZh,level,previewSpriteUri,catchRate}, lure:{tier,cost,levelBonus,shinyMultiplier}, commitHash, clientSeed}`；`eventId` 是后续**野怪战斗**（主流程）或**快速捕捉**（兼容路径）的唯一凭据 |
 | POST | `/wild/start` | `{eventId, partyPokemonId?}` 开启服务端权威的**野怪战斗（PvE 捕捉主流程）**：队伍取链上 owner 名下 `status=IDLE` **且非濒死（0 HP）**的宝可梦（等级降序，并列取最早获得），首发默认等级最高者，可用 `partyPokemonId` 指定（非法/非 IDLE 抛 `INVALID_PARTY_POKEMON`，**指定濒死成员抛 `FAINTED`，全队濒死同样 `FAINTED`**）。**以链下当前 HP 出战**（伤势持久化，见下）。野怪个体由派生流野怪区域固定。返回会话 id 与初始状态（含队伍列表、各球当前捕捉成功率）。同一 `eventId` 幂等（重复 start 返回同一会话） |
 | POST | `/wild/:id/action` | `{action:{type:'move',moveId}\|{type:'ball',ballItemId}\|{type:'switch',targetPokemonId}\|{type:'run'}}` → 推进一个回合并返回新状态。规则见下文「野怪战斗」。已结束/超时的会话只返回终态（幂等，不再消耗球） |
 | GET | `/wild/:id` | 当前会话状态（重进战斗界面用；仅会话所有者可读） |
@@ -182,26 +183,58 @@ p = min(1, a / 255)                                                   // 大师�
   4. 纯伤害技能 `effect: null`（`hyper-beam`/`solar-beam` 等高威力招只标注"简化引擎不模拟充能回合"）。
   掷点顺序（PvP 顺序消费 / 野怪固定槽位，见下）：麻痹检查（仅麻痹者）→ 命中 → 暴击 → 伤害浮动 → 追加效果（仅 `stat`/`status`）。
 - **无队伍降级路径**：账号名下没有任何 `IDLE` 宝可梦时 `/wild/start` 抛 `NO_TEAM_POKEMON`，前端自动降级为"直接投球"（`POST /capture/attempt`，满血判定）并在界面上说明原因——保证新账号仍能抓到第一只宝可梦；`POST /capture/encounter` 额外返回 `wild.catchRate` 供该降级界面显示成功率。
-- 错误码：`WILD_SESSION_NOT_FOUND`(404)、`WILD_BATTLE_FINISHED`(409，快速捕捉路径对已结束会话)、`MUST_SWITCH`(409，濒死必须先换宠)、`FAINTED`(409，队伍提交/野怪出战遇到 0 HP 宝可梦)、`EVENT_CONSUMED`(409)、`NOT_OWNER`(403)、`INVALID_ACTION`/`UNKNOWN_MOVE`/`NO_TEAM_POKEMON`/`NOT_A_BALL`/`INSUFFICIENT_QUANTITY`/`INVALID_PARTY_POKEMON`/`INVALID_SWITCH`/`SWITCH_TO_ACTIVE`/`SWITCH_TO_FAINTED`/`INVALID_LURE_TIER`/`INVALID_ZONE`/`INSUFFICIENT_POINTS`(400)。
+- 错误码：`WILD_SESSION_NOT_FOUND`(404)、`WILD_BATTLE_FINISHED`(409，快速捕捉路径对已结束会话)、`MUST_SWITCH`(409，濒死必须先换宠)、`FAINTED`(409，队伍提交/野怪出战遇到 0 HP 宝可梦)、`KEY_REQUIRED`(403，传说区缺钥匙)、`LEGENDARY_OWNED`(409，已拥有该区传说)、`EVENT_CONSUMED`(409)、`NOT_OWNER`(403)、`INVALID_ACTION`/`UNKNOWN_MOVE`/`NO_TEAM_POKEMON`/`NOT_A_BALL`/`INSUFFICIENT_QUANTITY`/`INVALID_PARTY_POKEMON`/`INVALID_SWITCH`/`SWITCH_TO_ACTIVE`/`SWITCH_TO_FAINTED`/`INVALID_LURE_TIER`/`LURE_NOT_ALLOWED`/`INVALID_ZONE`/`INSUFFICIENT_POINTS`(400)。
 
-**区域等级带与野生池（`backend/src/game-data/encounter.data.ts`，2026-09 重做遇敌模型）**
+**区域与栖息地野生池（`backend/src/game-data/encounter.data.ts`，2026-09 重做遇敌模型）**
 
-野怪不再"任何等级都能遇到任何怪"，也不再跟随队伍等级浮动。地图（前端 `frontend/src/game/scenes/OverworldScene.ts` 的 40×30 程序化地图）按 y 坐标分三个区域，遇敌时前端把 `zoneId` 随 `POST /capture/encounter` 传给后端（缺省 `south`，非法抛 `INVALID_ZONE`）：
+野怪不再"任何等级都能遇到任何怪"，也不再跟随队伍等级浮动。遇敌时前端把 `zoneId` 随 `POST /capture/encounter` 传给后端（缺省 `route-grass`，非法抛 `INVALID_ZONE`，旧 id `south`/`mid`/`north` 作为**兼容别名**归一为 `route-grass`/`route-mid`/`route-north`）：
 
-| 区域 | id | 地图 y 带（前端） | 等级带 | 野生池门槛 | 说明 |
+| 区域 | id | 等级带 | 阶段门槛 | 栖息地属性 | 池规模 |
 |---|---|---|---|---|---|
-| 101 号道路·南 | `south` | 20–29（出生区） | **Lv2-6** | `stage ≤ 0` | 只出未进化型，御三家 Lv5 足够打 |
-| 101 号道路·中 | `mid` | 10–19 | **Lv8-16** | `stage ≤ 1` | 可出一段进化型 |
-| 101 号道路·北 | `north` | 0–9 | **Lv17-28** | `stage ≤ 2` | 可出二段进化型（妙蛙花/喷火龙/准神等） |
+| 101 号道路·草丛 | `route-grass` | **Lv2-6** | `stage ≤ 0` | normal / bug / grass / electric / flying | 74 |
+| 橙华森林 | `forest` | **Lv4-10** | `stage ≤ 0` | bug / grass / flying / poison / **fairy** | 42 |
+| 104 号道路·丘陵 | `route-mid` | **Lv8-16** | `stage ≤ 1` | normal / flying / fighting / ground | 78 |
+| 石之洞窟 | `cave` | **Lv12-20** | `stage ≤ 1` | rock / ground / poison / dark / **ghost** / **ice** | 73 |
+| 108 号水道·海滨 | `coast` | **Lv15-25** | `stage ≤ 1` | water | 59 |
+| 冠军之路 | `route-north` | **Lv17-28** | `stage ≤ 2` | flying / dragon / steel / fighting / **psychic** | 47 |
+| 烟囱山 | `volcano` | **Lv20-30** | `stage ≤ 2` | fire / ground / rock | 58 |
 
+- **入池条件 = 阶段门槛 ∧ 栖息地属性**：普通区的池 = `WILD_TABLE`（全部非传说种族）里 `stage ≤ zone.maxStage` **且**种族属性命中 `zone.habitats` 的那些，按图鉴 id 升序、按稀有度加权。因此**去哪片区域决定了能遇到什么**：水系只在海滨、火系只在烟囱山、龙/钢/格斗/超能在冠军之路、毒/妖精在森林、幽灵与冰系在洞窟（**18 属性全部有栖息地**）。
+- **属性口径（重要）**：图鉴数据只存**主属性**（`tools/gen-pokedex.mjs` 取 PokeAPI 第一属性，战斗也是单属性模型），栖息地过滤因此按主属性判定——双属性种族按其第一属性归类（波波 normal/flying 算一般、超音蝠 poison/flying 算毒）。过滤器本身按"属性集合"实现（`speciesTypes()`），日后引入副属性表只需改这一个函数。
+- **空池兜底**：若某区栖息地过滤后为空（数据缺失/新属性），退回"只看阶段门槛"的池，保证遇敌永不空转。当前数据下不会触发（`backend/test/encounter-zone.spec.ts` 断言每区池非空且属性自洽、池规模与上表一致）。
+- **覆盖缺口（2026-09 补全后）**：栖息地集合已覆盖**全部 18 属性**，因此**每个基础形态（`stage = 0`）都能在野外遇到**；仍有 **64 个进化型**（stage ≥ 1，如皮卡丘/妙蛙草/水箭龟/雷丘/九尾）因为所在区域的门槛更低而不出现在野生池里，只能靠**进化**获得——这是"门槛"设计的正常结果，不是数据缺口。`GET /pokedex` 的 `habitatOf: []` 即"不出现在野外"，据此可自查（386 个种族里 306 个可野外遇到：370 个野生种族 − 64 个进化型）。
 - **进化阶段 `stage`**：沿 `species.data.ts` 的 `EVOLUTIONS` 回溯（与 `tools/gen-learnsets.mjs` 同口径）——0 = 基础形态、1 = 一段进化、2 = 二段进化（皮丘→皮卡丘→雷丘 ⇒ 皮卡丘 1、雷丘 2；伊布 0、水伊布 1）。
 - **稀有度权重**（加权抽样的权重，`rarityWeight()`）：官方捕获率 `≥200` 常见 **60** / `80–199` 少见 **30** / `<80` 稀有 **10**；**种族值总量 ≥500**（`baseStatTotal ≥ RARE_BST`，准神/高种族值）在上述档位上再 **×0.3**（即 18/9/3）。例：波波（255）60 权重，妙蛙花（45、BST 525）3 权重——**出率差 20 倍**。
 - **等级**：`level = zone.minLevel + floor(rand(1) × (zone.maxLevel − zone.minLevel + 1))`，**只由区域决定**；付费诱饵在带内 `+2`（tier 1）/ `+5`（tier 2）并**封顶 `zone.maxLevel`**；闪光阈值口径不变（基准 1/4096，tier 2 → 1/1024）。
-- **池规模**：`south` 181 种（全部 stage 0）/ `mid` 317 种 / `north` 361 种（= 野生池全量）；门槛单调 `south ⊂ mid ⊂ north`。
-- **上链留痕**：`Commit.meta` 恒含 `zone`（免费档也写，`{"zone":"south"}`），付费档追加 `{"lureTier":n,"cost":c}`——审计者据此在 `/fairness` 复算 `n=0` 的加权抽样与 `n=1` 的等级。
-- **为什么与队伍等级脱钩**：旧口径 `clamp(队伍最高等级 − 2 + floor(rand×5), 2, 100)` 会让"抓高等级野怪 → 队伍等级上涨 → 野怪等级继续上涨"滚雪球，养成失去意义；现在南部永远 Lv2-6，高等级队伍也不会改变遇敌强度，成长的意义回到**选择去更北的区域**与培育本身。
+- **上链留痕**：`Commit.meta` 恒含 `zone`（规范 id，免费档也写，`{"zone":"sky-pillar"}`），付费档追加 `{"lureTier":n,"cost":c}`——审计者据此在 `/fairness` 复算 `n=0` 的加权抽样与 `n=1` 的等级。
+- **为什么与队伍等级脱钩**：旧口径 `clamp(队伍最高等级 − 2 + floor(rand×5), 2, 100)` 会让"抓高等级野怪 → 队伍等级上涨 → 野怪等级继续上涨"滚雪球，养成失去意义；现在区域固定出货，成长的意义回到**选择去哪片区域**与培育本身。
 
-**分块派生布局（实现口径，`backend/src/pokemon/capture-derive.ts`）**：一个 eventId 覆盖一次 encounter **加其后的野怪战斗与全部 attempt**；`n=0` 野生种类（**区域野生池的加权索引**：权重区间累计和落入 `rand(0)×总权重`，池与权重见上「区域等级带与野生池」）、`n=1` 野生**等级** `zone.minLevel + floor(rand × 带宽)`（诱饵带内 +2/+5，封顶 `zone.maxLevel`）；第 k 次投球（k=1,2,…）使用块 `base = 2+(k-1)*10`：`+0` 捕捉判定（`rand < p`，p 见上式）、`+1..+6` IV 六维 `floor(rand*32)`、`+7` 性格（25 种索引）、`+8` 闪光（`rand < shinyChance`，基准 1/4096、诱饵 tier 2 → 1/1024）、`+9` 失败摇晃 `1+floor(rand*3)`（1..3）；野怪战斗区域 `base = 20000`（`+0..+5` IV、`+6` 性格、`+7` 闪光，整场会话固定并用于铸造）与回合块 `base = 30000+(t-1)*16`（`+0` 野怪 AI 选招、`+1..+5` 我方 麻痹/命中/暴击/浮动/追加效果、`+6..+10` 野怪同五项、`+11` 平速裁决、`+12..+15` 预留）。该布局经 `GET /fairness/:eventId` 对外公示，完整论证见 `docs/randomness.md` §3。
+**传说区（钥匙门控 + 每人每池一只，2026-09 新增）**
+
+| 区域 | id | 传说 | 等级带 | 池规模 | 钥匙 |
+|---|---|---|---|---|---|
+| 天空之柱 | `sky-pillar` | 烈空坐 #384 | **Lv45-50** | 1 | `sky-key` 天空之钥 |
+| 海底洞窟 | `seafloor` | 盖欧卡 #382 | **Lv45-50** | 1 | `ocean-key` 海洋之钥 |
+| 熔岩洞窟 | `magma` | 固拉多 #383 | **Lv45-50** | 1 | `magma-key` 熔岩之钥 |
+| 古代遗迹 | `ruins` | 雷吉洛克 #377 / 雷吉艾斯 #378 / 雷吉斯奇鲁 #379 | **Lv40（固定）** | 3 | `ruins-key` 遗迹之钥 |
+| 南方孤岛 | `southern-island` | 拉帝亚斯 #380 / 拉帝欧斯 #381 | **Lv40（固定）** | 2 | `island-key` 岛之钥 |
+| 诞生之岛 | `birth-island` | 代欧奇希斯 #386 | **Lv45（固定）** | 1 | `birth-key` 诞生岛船票 |
+
+- **池固定、等权**：传说区的池由 `poolSpeciesIds` 显式指定（**不**经阶段门槛与稀有度加权，权重统一为 1，`ruins` 三神柱各 1/3），池内只有传说种族；这些种族 `inWild = true`（**只经传说区出现**，绝不进普通区池，`legendary` 标记区分），Kanto/城都传说与基拉祈 `inWild = false`（仍未开放遭遇）。
+- **钥匙门控**：进入前校验本人名下是否存在 `status=IDLE`、`quantity ≥ 1` 的对应 key typeId 堆叠——**持有即通行、永不消耗**（可反复进入同一区）；缺钥匙抛 403 `KEY_REQUIRED`，消息带所需 typeId 与中文名（如 `天空之柱需要天空之钥（sky-key）才能进入，背包里没有可用的钥匙`）。锁定中（押注/交易托管）或数量为 0 的堆叠不算持有。
+- **每人每池一只**：本人**当前拥有**该区任一种族（`QueryByOwner` 按 speciesId 过滤，**含锁定中**的个体）即 409 `LEGENDARY_OWNED`（如 `你已经拥有 烈空坐，传说仅此一只（放生或交易走后可再来）`）。口径是"看当前归属，不看历史"：**放生**（`ownerId` 置空）或**交易/押注转手**后即可再捕；其他玩家持有不影响你（稀缺性由钥匙价格 + 每人一只共同保证）。
+- **传说区禁用诱饵**：`lureTier > 0` 一律 400 `LURE_NOT_ALLOWED`，不扣费也不留 Commit；闪光判定仍按基准 1/4096（不享受 tier 2 的 ×4）。
+- **校验先于一切链上写**：钥匙/归属/诱饵三项校验都在 `Commit` 与扣费之前完成，被拒时不建事件、不扣分、链上不留痕。
+
+**`GET /capture/zones`（区域表，前端渲染 + 调试）**
+
+无需参数，返回 `{default:'route-grass', aliases:{south,mid,north}, zones:[...]}`；每个区域条目：
+
+`{id, name（中文名）, minLevel, maxLevel, maxStage, habitats:[属性], legendary:bool, keyTypeId|null, keyNameZh|null, lureAllowed:bool, poolSize}`
+
+`poolSize` 即该区加权池的种族数（上表"池规模"），`lureAllowed = !legendary`；前端据此渲染区域选择/传说区钥匙提示，无需再查道具表。
+
+**分块派生布局（实现口径，`backend/src/pokemon/capture-derive.ts`）**：一个 eventId 覆盖一次 encounter **加其后的野怪战斗与全部 attempt**；`n=0` 野生种类（**区域野生池的加权索引**：权重区间累计和落入 `rand(0)×总权重`；普通区池 = 阶段门槛 ∧ 栖息地属性，传说区池 = 固定传说种族等权，池与权重见上「区域与栖息地野生池」）、`n=1` 野生**等级** `zone.minLevel + floor(rand × 带宽)`（诱饵带内 +2/+5，封顶 `zone.maxLevel`；传说区禁用诱饵、等级带本身就窄/固定）；第 k 次投球（k=1,2,…）使用块 `base = 2+(k-1)*10`：`+0` 捕捉判定（`rand < p`，p 见上式）、`+1..+6` IV 六维 `floor(rand*32)`、`+7` 性格（25 种索引）、`+8` 闪光（`rand < shinyChance`，基准 1/4096、诱饵 tier 2 → 1/1024）、`+9` 失败摇晃 `1+floor(rand*3)`（1..3）；野怪战斗区域 `base = 20000`（`+0..+5` IV、`+6` 性格、`+7` 闪光，整场会话固定并用于铸造）与回合块 `base = 30000+(t-1)*16`（`+0` 野怪 AI 选招、`+1..+5` 我方 麻痹/命中/暴击/浮动/追加效果、`+6..+10` 野怪同五项、`+11` 平速裁决、`+12..+15` 预留）。该布局经 `GET /fairness/:eventId` 对外公示，完整论证见 `docs/randomness.md` §3。
 
 ## 3. 道具
 
@@ -219,8 +252,9 @@ p = min(1, a / 255)                                                   // 大师�
 | 途径 | 内容 | 实现 |
 |---|---|---|
 | 新手礼包 | 精灵球×5 + 伤药×2（注册后一次） | `POST /users/me/starter`（§1、§10） |
-| 商店购买 | 积分买入任意在售道具（见下表） | `POST /shop/buy`（`backend/src/shop/`） |
+| 商店购买 | 积分买入任意在售道具（见下表；**传说区钥匙 5000P/把，不可回收**） | `POST /shop/buy`（`backend/src/shop/`） |
 | 野怪战斗掉落 | 收服成功或击倒野怪时 **20%** 掉落一件（60% 伤药 / 30% 精灵球 / 10% 超级球），数量 ×1 | `backend/src/wild/wild.service.ts::grantDrop`，派生布局见 `docs/randomness.md` §3（40000 区）；战斗状态返回 `drop` 字段 |
+| 传说区钥匙 | `sky-key`/`ocean-key`/`magma-key`/`ruins-key`/`island-key`/`birth-key`（`kind='key'`）：**非消耗品**，持有即可进入对应传说区（§2）；**不可使用**（`NOT_USABLE`）、**不可回收**（`NOT_SELLABLE`） | `backend/src/game-data/items.data.ts` + `backend/src/shop/shop.data.ts` |
 | admin 投放 | 任意（演示/补偿） | `POST /admin/items/mint` |
 
 **道具使用效果（`backend/src/items/items.service.ts`，全部 `ConsumeItem` + `ApplyGrowth`）**
@@ -247,12 +281,20 @@ p = min(1, a / 255)                                                   // 大师�
 | `potion` | 伤药 | 50 | 25 | `bottle-cap` | 银色王冠 | 3000 | 1500 |
 | `super-potion` | 好伤药 | 120 | 60 | `gold-bottle-cap` | 金色王冠 | 15000 | 7500 |
 | `thunder-stone` | 雷之石 | 800 | 400 | `rare-candy` | 神奇糖果 | 1000 | 500 |
-| `water-stone` | 水之石 | 800 | 400 | `master-ball` | 大师球 | 非卖品（奖励限定） | 不回收 |
-| `fire-stone` | 火之石 | 800 | 400 | | | | |
+| `water-stone` | 水之石 | 800 | 400 | `sky-key` | 天空之钥 | **5000** | **不回收** |
+| `fire-stone` | 火之石 | 800 | 400 | `ocean-key` | 海洋之钥 | **5000** | **不回收** |
+| `master-ball` | 大师球 | 非卖品（奖励限定） | 不回收 | `magma-key` | 熔岩之钥 | **5000** | **不回收** |
+| | | | | `ruins-key` | 遗迹之钥 | **5000** | **不回收** |
+| | | | | `island-key` | 岛之钥 | **5000** | **不回收** |
+| | | | | `birth-key` | 诞生岛船票 | **5000** | **不回收** |
+
+**传说区钥匙（`kind='key'`，2026-09）**：6 把钥匙各自对应一个传说区（§2「传说区」），**买断即永久通行**（进区不消耗、可反复进入）。
+定位是**月级积分 sink**（5000P ≈ 日收入 100–300P 的 2-4 周积累）与**可交易的稀缺品**（道具可经交易转手，但商店**不回收钥匙**——否则"买入→卖回"会凭空造出积分；`POST /items/:id/use` 也一律 `NOT_USABLE`，避免误点白白消耗门票）。`master-ball` 与钥匙在 `GET /shop` 里分别表现为"非卖品"与"可买不可卖"，前端据此隐藏卖出按钮。
 
 **定价口径（2026-09 重平衡，与 §10 的 faucet 配套）**：休闲玩家日收入约 **100–300P**（野怪 + 排位），
-因此 1 个精灵球 ≈ 半日收入、高级球 400 ≈ **2-3 天积累**、银色王冠 3000 / 金色王冠 15000 ≈ **月级目标**；
-回收（半价）只用于回血，不构成 faucet。旧价目（精灵球 20 / 高级球 150 / 王冠 1000）在 faucet 收紧后会让
+因此 1 个精灵球 ≈ 半日收入、高级球 400 ≈ **2-3 天积累**、银色王冠 3000 / 金色王冠 15000 ≈ **月级目标**，
+**传说区钥匙 5000 = 长线目标**（一把钥匙换一个传说区，且每人在每区只能持有一只传说）；
+回收（半价）只用于回血，不构成 faucet，**钥匙不回收**以维持稀缺性。旧价目（精灵球 20 / 高级球 150 / 王冠 1000）在 faucet 收紧后会让
 稀有道具失去稀缺感，故整体重定价——数值与文案同步在 `backend/test/shop.spec.ts` 锁定。
 
 商店的积分口径与 §10 一致：买方扣分 `reason='shop:buy'`、卖方返分 `reason='shop:sell'`，两笔都由 system 身份经 `PlayerContract.AddPoints` 提交，可审计。
@@ -452,7 +494,7 @@ helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2
 | admin 投放 | 任意 | 调用方给（如 `admin` / `smoke`） | 每次新 uuid | `POST /admin/points` |
 
 **消耗（sinks）**：训练（`train`）、付费诱饵（`lure:tier1` = 50 / `lure:tier2` = 200）、押注托管（`battle-escrow`）、交易支付（`trade`）、
-商店购买（`shop:buy`，见 §3 价目表）、**宝可梦中心治疗（`heal:center`，每次 10P，全员满血不扣费）**、
+商店购买（`shop:buy`，见 §3 价目表；**传说区钥匙 5000P/把是月级 sink 且不回收**）、**宝可梦中心治疗（`heal:center`，每次 10P，全员满血不扣费）**、
 **积分场准入（`arena:entry:<battleId>`：青铜 20 / 白银 50 / 黄金 100 / 白金 200 / 大师 400，双方接受时才扣）**。
 `AddPoints` 余额不足抛 `INSUFFICIENT_POINTS`，扣减不落链（积分场扣费失败则取消建房并让双方回队列）。
 

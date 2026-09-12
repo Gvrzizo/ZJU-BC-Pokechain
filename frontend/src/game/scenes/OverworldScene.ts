@@ -1,59 +1,282 @@
 import Phaser from 'phaser';
-import { gameBus, BUS_EVENTS } from '../bus';
-import { TILE, type Direction } from '../textures';
-import { ZONES, type ZoneDef, zoneAtY, zoneLabel, useZoneStore } from '@/stores/zone';
+import { getMyItems } from '@/api/items';
+import { healTeam } from '@/api/pokemon';
+import { usePokemonStore } from '@/stores/pokemon';
+import { useWorldStore, readStoredSpawn } from '@/stores/world';
+import { zoneHint, zoneById, zoneLabel } from '@/stores/zone';
+import { BUS_EVENTS, gameBus } from '../bus';
+import { DialogSession } from '../dialog';
+import { keyForMap, keyGateStatus, keyName, missingKeyLines, rememberPassage } from '../gates';
+import {
+  BLOCKED_TILES,
+  START_MAP_ID,
+  T,
+  doorAt,
+  facingTarget,
+  frontOf,
+  getMapDef,
+  isEncounterTile,
+  isOverlayIndex,
+  isWalkable,
+  warpAt,
+  type BiomeId,
+  type DoorDef,
+  type Facing,
+  type MapDef,
+  type MapId,
+  type TileId,
+  type WarpDef,
+} from '../maps';
+import { TILE } from '../textures';
+import { DialogBox } from '../ui/DialogBox';
+import { npcTextureKey } from '../world-textures';
+import { worldTilesetKey } from '../world-assets';
 
-const MAP_W = 40;
-const MAP_H = 30;
-const ENCOUNTER_RATE = 0.12; // 踏入深草时的遇敌概率
-/** 出生点：南部入口（y 带下沿），新玩家从初始区开始（Lv2-6 只出未进化型） */
-const SPAWN = { x: 10, y: 26 };
+/** 遇敌地形的中文名（路牌文案用） */
+const TERRAIN_LABEL: Partial<Record<TileId, string>> = {
+  tallGrass: '深草',
+  sand: '沙地',
+  ash: '火山灰',
+  gravel: '碎石地',
+  altar: '祭坛',
+};
 
-/** 区域色调（南→北依次加深，仅视觉区分，不改遇敌逻辑） */
-const ZONE_TINT: Record<string, number> = {
-  south: 0xf8e0a0,
-  mid: 0xbcd8a0,
-  north: 0x8ea8d0,
+/** 每格行走耗时（毫秒）与撞墙动画时长 */
+const STEP_MS = 150;
+const BUMP_MS = 120;
+/** 对话翻页的最小间隔，避免刚开口就被同一次按键翻过去 */
+const DIALOG_COOLDOWN_MS = 170;
+
+/** 相机边界外露出的底色（室内/岛屿/火山各有自己的基调） */
+const BIOME_BG: Record<BiomeId, string> = {
+  town: '#1c3a1e',
+  grass: '#1c3a1e',
+  forest: '#12240f',
+  mid: '#4a4232',
+  cave: '#0d1020',
+  coast: '#2a86c0',
+  north: '#2a4a52',
+  volcano: '#2a0f08',
+  tower: '#15122a',
+  seafloor: '#08203a',
+  magma: '#2a0c06',
+  ruins: '#2a1c08',
+  island: '#2a86c0',
+  birth: '#180a2c',
 };
 
 /**
- * OverworldScene：40x30 程序化草地地图（Tiled JSON 同构的二维数组），
- * 方向键 / WASD 四向网格行走，深草随机遇敌（由 Vue 层调 /capture/encounter）。
+ * OverworldScene：把 `maps/*.ts` 的世界数据渲染成可玩的俯视角地图。
  *
- * 地图按 y 分三个**区域等级带**（docs/backend-api.md §2）：南部 Lv2-6（初始区，
- * 只出未进化型）/ 中部 Lv8-16（可出一段进化型）/ 北部 Lv17-28（可出二段进化型）。
- * 区域决定野怪等级与野生池，**与队伍等级无关**；遇敌时把 zoneId 交给后端。
+ * - **多地图**：`scene.restart({ mapId, spawn })` 换图（维护成本最低的做法），
+ *   换图带淡出/淡入；地图间靠边缘行走、门口与楼梯传送，`spawn` 落在目标格上。
+ * - **行走**：方向键 / WASD 四向网格移动，阻挡瓦片与 NPC 都不可穿过。
+ * - **遇敌**：只有地图 `encounter.tiles` 列出的地形会触发（镇内没有配置），
+ *   触发前把当前区域写进 world store（CaptureOverlay 据此请求后端决定野生池与等级）。
+ * - **交互**：面向 NPC / 路牌按空格（或 Z / 回车）对话；踩到门口触发治疗、道具店跳转；
+ *   传说区门口校验钥匙道具（`gates.ts`），没钥匙弹对话拦住。
+ * - **HUD**：区域名 / 等级带 / 传说提示 / 跨图横幅都交给 Vue（`WorldHud.vue` 读 world store），
+ *   场景只负责写状态，样式与布局在 Vue 侧维护。
  */
 export class OverworldScene extends Phaser.Scene {
+  private mapDef!: MapDef;
+  private groundLayer?: Phaser.Tilemaps.TilemapLayer;
+  private overlayLayer?: Phaser.Tilemaps.TilemapLayer;
   private player!: Phaser.GameObjects.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
-  private map!: Phaser.Tilemaps.Tilemap;
-  private groundLayer!: Phaser.Tilemaps.TilemapLayer;
+  private actionKeys!: Phaser.Input.Keyboard.Key[];
+  private dialog!: DialogBox;
+  private session: DialogSession | null = null;
+  private pendingAction: (() => void) | null = null;
+  private dialogOpenedAt = 0;
+
+  private tilePos = { x: 0, y: 0 };
+  private facing: Facing = 'down';
   private moving = false;
-  private facing: Direction = 'down';
-  private tilePos = { ...SPAWN };
-  private encText!: Phaser.GameObjects.Text;
-  private zoneText!: Phaser.GameObjects.Text;
-  private bannerText!: Phaser.GameObjects.Text;
-  private bannerTween?: Phaser.Tweens.Tween;
-  private zoneId = 'south';
+  /** 传送 / 请求进行中：不接受移动输入 */
+  private busy = false;
 
   constructor() {
     super('OverworldScene');
   }
 
+  init(data: { mapId?: string; spawn?: { x: number; y: number } }) {
+    const stored = readStoredSpawn();
+    const requested = data?.mapId ?? stored?.mapId ?? START_MAP_ID;
+    this.mapDef = getMapDef(requested);
+    const spawn =
+      data?.spawn ?? (stored && stored.mapId === this.mapDef.id ? { x: stored.x, y: stored.y } : undefined);
+    const spot = spawn && isWalkable(this.mapDef, spawn.x, spawn.y) ? spawn : this.mapDef.spawn;
+    this.tilePos = { x: spot.x, y: spot.y };
+    this.facing = 'down';
+    this.moving = false;
+    this.busy = false;
+    this.session = null;
+    this.pendingAction = null;
+  }
+
   create() {
-    const data = this.generateMapData();
-    this.map = this.make.tilemap({ data, tileWidth: TILE, tileHeight: TILE });
-    const tiles = this.map.addTilesetImage('tiles', 'tiles', TILE, TILE, 0, 0);
-    if (tiles) {
-      this.groundLayer = this.map.createLayer(0, tiles, 0, 0)!;
-      this.groundLayer.setCollision([2, 3]); // 树与水不可通行
+    this.cameras.main.setBackgroundColor(BIOME_BG[this.mapDef.biome] ?? '#1c3a1e');
+    this.buildTilemap();
+    this.addAmbient();
+    this.addEncounterHints();
+    this.addFacilityBadges();
+    this.addNpcSprites();
+    this.addPlayer();
+
+    const cam = this.cameras.main;
+    const mapW = this.mapDef.width * TILE;
+    const mapH = this.mapDef.height * TILE;
+    const boundsW = Math.max(mapW, this.scale.width);
+    const boundsH = Math.max(mapH, this.scale.height);
+    // 小图（塔内/遗迹）居中显示，而不是贴左上角露出大片底色
+    cam.setBounds(-Math.max(0, (boundsW - mapW) / 2), -Math.max(0, (boundsH - mapH) / 2), boundsW, boundsH);
+    cam.startFollow(this.player, true, 1, 1);
+    cam.fadeIn(180, 0, 0, 0);
+
+    const keyboard = this.input.keyboard!;
+    this.cursors = keyboard.createCursorKeys();
+    this.wasd = keyboard.addKeys('W,A,S,D') as Record<string, Phaser.Input.Keyboard.Key>;
+    const space = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    const enter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    const zKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
+    this.actionKeys = [space, enter, zKey];
+
+    this.dialog = new DialogBox(this, this.scale.width, this.scale.height);
+    this.input.on(Phaser.Input.Events.POINTER_DOWN, () => this.advanceDialog());
+
+    this.events.on(Phaser.Scenes.Events.RESUME, () => {
+      this.moving = false;
+      this.busy = false;
+      this.syncHud(false);
+    });
+
+    this.syncHud(true);
+  }
+
+  // ─────────────────────────────────────────── 渲染
+
+  private buildTilemap() {
+    const map = this.mapDef;
+    const tilesetKey = this.tilesetKey();
+    const terrain = this.make.tilemap({ data: map.grid, tileWidth: TILE, tileHeight: TILE });
+    const tileset = terrain.addTilesetImage('world', tilesetKey, TILE, TILE, 0, 0);
+    if (!tileset) return;
+    this.groundLayer = terrain.createLayer(0, tileset, 0, 0) ?? undefined;
+    if (this.groundLayer) {
+      this.groundLayer.setCollision(BLOCKED_TILES.map((id) => T[id]));
       this.groundLayer.setDepth(1);
     }
-    this.addZoneBands();
 
+    // 屋顶单独一层画在玩家之上（玩家在建筑后面时被屋顶挡住）
+    if (map.grid.some((row) => row.some((v) => isOverlayIndex(v)))) {
+      const overlayGrid = map.grid.map((row) => row.map((v) => (isOverlayIndex(v) ? v : -1)));
+      const roofMap = this.make.tilemap({ data: overlayGrid, tileWidth: TILE, tileHeight: TILE });
+      const roofTileset = roofMap.addTilesetImage('world', tilesetKey, TILE, TILE, 0, 0);
+      if (roofTileset) {
+        this.overlayLayer = roofMap.createLayer(0, roofTileset, 0, 0) ?? undefined;
+        this.overlayLayer?.setDepth(3);
+      }
+    }
+  }
+
+  /** 该生物群系的瓦片集（vendor 叠过程序化底图；没有也一定有程序化兜底） */
+  private tilesetKey(): string {
+    const key = worldTilesetKey(this.mapDef.biome);
+    return this.textures.exists(key) ? key : worldTilesetKey('grass');
+  }
+
+  private addAmbient() {
+    const ambient = this.mapDef.ambient;
+    if (!ambient) return;
+    this.add
+      .rectangle(0, 0, this.mapDef.width * TILE, this.mapDef.height * TILE, ambient.color, ambient.alpha)
+      .setOrigin(0, 0)
+      .setDepth(4);
+  }
+
+  /** 遇敌地形提示：在会遇敌的格子上铺一层极淡的呼吸高光。
+   * 素材（vendor 或程序化）怎么画都能让玩家一眼看出"哪里能遇到宝可梦"——
+   * 洞窟的碎石地 / 塔顶的祭坛在部分瓦片集里跟普通地面很像。
+   */
+  private addEncounterHints() {
+    const config = this.mapDef.encounter;
+    if (!config) return;
+    const tiles = new Set(config.tiles.map((id) => T[id]));
+    const graphics = this.add.graphics().setDepth(1.5);
+    graphics.fillStyle(0xffffff, 0.12);
+    for (let y = 0; y < this.mapDef.height; y++) {
+      for (let x = 0; x < this.mapDef.width; x++) {
+        if (tiles.has(this.mapDef.grid[y][x])) graphics.fillRect(x * TILE, y * TILE, TILE, TILE);
+      }
+    }
+    this.tweens.add({
+      targets: graphics,
+      alpha: { from: 0.75, to: 1 },
+      duration: 950,
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  /**
+   * 建筑徽记：宝可梦中心 = 白底红十字，道具店 = 黄底「道具」招牌。
+   * 画在屋顶之上（depth 3.5+），vendor 瓦片集把屋顶画成什么样都能一眼分清两家店。
+   */
+  private addFacilityBadges() {
+    for (const obj of this.mapDef.objects) {
+      if (obj.kind !== 'door' || obj.building === 'house') continue;
+      const roofY = obj.y - 1;
+      const span = this.roofSpan(obj.x, roofY);
+      if (!span) continue;
+      const isCenter = obj.building === 'center';
+      const centerX = ((span.from + span.to + 1) / 2) * TILE;
+      const centerY = roofY * TILE + TILE / 2;
+      this.add
+        .rectangle(centerX, centerY, TILE + (isCenter ? 0 : 8), TILE - 10, isCenter ? 0xf8f0d8 : 0xf8c848)
+        .setStrokeStyle(3, 0x282828)
+        .setDepth(3.5);
+      if (isCenter) {
+        this.add.rectangle(centerX, centerY, 6, TILE - 18, 0xd84040).setDepth(3.6);
+        this.add.rectangle(centerX, centerY, TILE - 16, 6, 0xd84040).setDepth(3.6);
+      } else {
+        this.add
+          .text(centerX, centerY, '道具', {
+            fontFamily: '"Press Start 2P", "Fusion Pixel 12px", monospace',
+            fontSize: '12px',
+            color: '#282828',
+          })
+          .setOrigin(0.5)
+          .setDepth(3.6);
+      }
+    }
+  }
+
+  /** 门上方那一行屋顶的连续范围（用于把徽记摆到建筑正中） */
+  private roofSpan(doorX: number, row: number): { from: number; to: number } | null {
+    const grid = this.mapDef.grid;
+    if (row < 0 || !grid[row]) return null;
+    const anchor = [doorX, doorX - 1, doorX + 1].find((x) => x >= 0 && grid[row][x] === T.roof);
+    if (anchor === undefined) return null;
+    let from = anchor;
+    while (from - 1 >= 0 && grid[row][from - 1] === T.roof) from -= 1;
+    let to = anchor;
+    while (to + 1 < this.mapDef.width && grid[row][to + 1] === T.roof) to += 1;
+    return { from, to };
+  }
+
+  private addNpcSprites() {
+    for (const obj of this.mapDef.objects) {
+      if (obj.kind !== 'npc') continue;
+      const key = npcTextureKey(obj.sprite);
+      const texture = this.textures.exists(key) ? key : npcTextureKey('elder');
+      this.add.image(obj.x * TILE + TILE / 2, obj.y * TILE + TILE / 2, texture).setDepth(2);
+    }
+  }
+
+  private addPlayer() {
+    const anim = `hero-walk-${this.facing}`;
     this.player = this.add.sprite(
       this.tilePos.x * TILE + TILE / 2,
       this.tilePos.y * TILE + TILE / 2,
@@ -61,204 +284,283 @@ export class OverworldScene extends Phaser.Scene {
       0,
     );
     this.player.setDepth(2);
-
-    const cam = this.cameras.main;
-    cam.startFollow(this.player, true, 1, 1);
-    cam.setBounds(0, 0, MAP_W * TILE, MAP_H * TILE);
-
-    this.cursors = this.input.keyboard!.createCursorKeys();
-    this.wasd = this.input.keyboard!.addKeys('W,A,S,D') as Record<
-      string,
-      Phaser.Input.Keyboard.Key
-    >;
-
-    this.encText = this.add
-      .text(8, 8, '', {
-        fontFamily: '"Press Start 2P", "Fusion Pixel 12px", monospace',
-        fontSize: '12px',
-        color: '#f8f0d8',
-        backgroundColor: 'rgba(28,58,30,0.8)',
-        padding: { x: 6, y: 4 },
-      })
-      .setScrollFactor(0)
-      .setDepth(10);
-
-    // 区域 HUD：常驻显示当前区域名与等级带；跨带时弹一条横幅
-    this.zoneText = this.add
-      .text(8, 32, '', {
-        fontFamily: '"Press Start 2P", "Fusion Pixel 12px", monospace',
-        fontSize: '12px',
-        color: '#282828',
-        backgroundColor: 'rgba(248,240,216,0.92)',
-        padding: { x: 6, y: 4 },
-      })
-      .setScrollFactor(0)
-      .setDepth(10);
-    this.bannerText = this.add
-      .text(480, 96, '', {
-        fontFamily: '"Press Start 2P", "Fusion Pixel 12px", monospace',
-        fontSize: '12px',
-        color: '#f8f0d8',
-        backgroundColor: 'rgba(28,58,30,0.88)',
-        padding: { x: 10, y: 6 },
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(11)
-      .setAlpha(0);
-    this.syncZone(this.tilePos.y, false);
-
-    this.events.on(Phaser.Scenes.Events.RESUME, () => {
-      this.moving = false;
-      this.encText.setText('');
-      this.syncZone(this.tilePos.y, false);
-    });
+    if (this.anims.exists(anim)) this.player.anims.play(anim, true);
+    this.player.anims.stop();
   }
 
-  /** 区域色调：三条半透明横带叠在地面层之上（南浅北深），纯视觉区分 */
-  private addZoneBands() {
-    for (const zone of ZONES) {
-      const top = zone.minY * TILE;
-      const height = (zone.maxY - zone.minY + 1) * TILE;
-      this.add
-        .rectangle(0, top, MAP_W * TILE, height, ZONE_TINT[zone.id] ?? 0xffffff, 0.1)
-        .setOrigin(0, 0)
-        .setDepth(1.5);
-    }
-  }
-
-  /** 区域信息同步：HUD 常驻 + 跨带时弹横幅；遇敌前由本函数把 zoneId 写进 store */
-  private syncZone(y: number, announce: boolean) {
-    const zone = zoneAtY(y);
-    this.zoneText.setText(`${zoneLabel(zone)}　${this.zoneHint(zone)}`);
-    if (announce && zone.id !== this.zoneId) {
-      this.showBanner(zone);
-    }
-    this.zoneId = zone.id;
-    try {
-      useZoneStore().enter(zone.id);
-    } catch {
-      // Phaser 场景可能在 Pinia 之外被创建（单测/截图工具）：区域显示不受影响
-    }
-  }
-
-  private zoneHint(zone: ZoneDef): string {
-    if (zone.maxStage <= 0) return '未进化型出没';
-    if (zone.maxStage === 1) return '可见进化型';
-    return '进化型领地';
-  }
-
-  private showBanner(zone: ZoneDef) {
-    this.bannerText.setText(`—— ${zoneLabel(zone)} ——`);
-    this.bannerTween?.stop();
-    this.bannerText.setAlpha(1);
-    this.bannerTween = this.tweens.add({
-      targets: this.bannerText,
-      alpha: 0,
-      delay: 1200,
-      duration: 600,
-    });
-  }
-
-  /** 生成 40x30 地图：外圈树，内有几条小径、水池与深草斑块；深草密度随区域升高（越北越密） */
-  private generateMapData(): number[][] {
-    const grid: number[][] = [];
-    for (let y = 0; y < MAP_H; y++) {
-      const row: number[] = [];
-      // 越靠北深草越密：南部 0.055 / 中部 0.085 / 北部 0.12
-      const grassDensity = y >= 20 ? 0.055 : y >= 10 ? 0.085 : 0.12;
-      for (let x = 0; x < MAP_W; x++) {
-        if (x === 0 || y === 0 || x === MAP_W - 1 || y === MAP_H - 1) {
-          row.push(2); // 边界树
-          continue;
-        }
-        let v = 0; // 默认草地
-        // 十字小径
-        if (y === 15 || x === 20) v = 1;
-        // 左下水池
-        if (x >= 4 && x <= 9 && y >= 20 && y <= 25) v = 3;
-        // 几块深草区
-        if (
-          (x >= 25 && x <= 33 && y >= 4 && y <= 10) ||
-          (x >= 5 && x <= 12 && y >= 5 && y <= 9) ||
-          (x >= 26 && x <= 34 && y >= 19 && y <= 25) ||
-          (x >= 12 && x <= 19 && y >= 20 && y <= 26) // 南部出生点旁的小草窝
-        ) {
-          if (v === 0) v = 4;
-        }
-        // 随机树木/深草点缀（确定性伪随机）
-        const r = Math.abs(Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
-        if (v === 0 && r < 0.04) v = 2;
-        else if (v === 0 && r < 0.04 + grassDensity) v = 4;
-        row.push(v);
-      }
-      grid.push(row);
-    }
-    return grid;
-  }
-
-  private tileAt(x: number, y: number): number {
-    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return 2;
-    return this.map.getTileAt(x, y)?.index ?? 2;
-  }
+  // ─────────────────────────────────────────── 主循环
 
   update() {
-    if (this.scene.isPaused('OverworldScene')) return;
-    if (this.moving) return;
+    if (!this.player) return;
+    if (this.session) {
+      this.handleDialogKeys();
+      return;
+    }
+    if (this.busy || this.moving) return;
 
-    let dir: Direction | null = null;
+    let dir: Facing | null = null;
     if (this.cursors.left.isDown || this.wasd['A'].isDown) dir = 'left';
     else if (this.cursors.right.isDown || this.wasd['D'].isDown) dir = 'right';
     else if (this.cursors.up.isDown || this.wasd['W'].isDown) dir = 'up';
     else if (this.cursors.down.isDown || this.wasd['S'].isDown) dir = 'down';
 
-    if (!dir) {
-      this.player.anims.stop();
+    if (dir) {
+      this.tryMove(dir);
       return;
     }
 
-    this.facing = dir;
-    const delta = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[dir];
-    const nx = this.tilePos.x + delta[0];
-    const ny = this.tilePos.y + delta[1];
-    const target = this.tileAt(nx, ny);
+    if (this.actionKeys.some((key) => Phaser.Input.Keyboard.JustDown(key))) this.interact();
+    else this.player.anims.stop();
+  }
 
-    // 面向即转；撞墙原地踏步动画
+  private tryMove(dir: Facing) {
+    this.facing = dir;
     this.player.anims.play(`hero-walk-${dir}`, true);
-    if (target === 2 || target === 3) {
+    const next = frontOf(this.tilePos, dir);
+    if (!isWalkable(this.mapDef, next.x, next.y)) {
+      // 撞墙 / 撞人：原地踏步一下
       this.moving = true;
-      this.time.delayedCall(120, () => {
+      this.time.delayedCall(BUMP_MS, () => {
         this.moving = false;
         this.player.anims.stop();
       });
       return;
     }
 
-    const crossedZone = zoneAtY(ny).id !== this.zoneId;
     this.moving = true;
-    this.tilePos = { x: nx, y: ny };
-    gameBus.emit(BUS_EVENTS.PLAYER_MOVED, { x: nx, y: ny });
-    this.syncZone(ny, crossedZone);
+    this.tilePos = next;
+    gameBus.emit(BUS_EVENTS.PLAYER_MOVED, { ...next, mapId: this.mapDef.id });
     this.tweens.add({
       targets: this.player,
-      x: nx * TILE + TILE / 2,
-      y: ny * TILE + TILE / 2,
-      duration: 160,
+      x: next.x * TILE + TILE / 2,
+      y: next.y * TILE + TILE / 2,
+      duration: STEP_MS,
       onComplete: () => {
         this.moving = false;
         this.player.anims.stop();
-        if (target === 4 && Math.random() < ENCOUNTER_RATE) {
-          const zone = zoneAtY(ny);
-          this.syncZone(ny, false); // 遇敌前把当前区域交给 CaptureOverlay（后端按它决定野生池与等级带）
-          this.encText.setText(`! ${zone.name}：野生的宝可梦出现了 !`);
-          this.scene.pause();
-          gameBus.emit(BUS_EVENTS.ENCOUNTER, { zoneId: zone.id });
-        }
+        this.onArrive(next);
       },
     });
   }
 
+  /** 落到新格子：先看传送点，再看门口，最后才是遇敌 */
+  private onArrive(pos: { x: number; y: number }) {
+    const warp = warpAt(this.mapDef, pos.x, pos.y);
+    if (warp) {
+      this.handleWarp(warp);
+      return;
+    }
+    const door = doorAt(this.mapDef, pos.x, pos.y);
+    if (door) {
+      this.handleDoor(door);
+      return;
+    }
+    this.syncHud(false);
+    this.maybeEncounter(pos);
+  }
+
+  // ─────────────────────────────────────────── 传送与钥匙
+
+  private travel(mapId: MapId, x: number, y: number) {
+    this.busy = true;
+    this.cameras.main.fadeOut(180, 0, 0, 0);
+    // 用 Clock 定时而不是相机事件：换图不依赖相机特效（特效被跳过时也能照常走）
+    this.time.delayedCall(220, () => this.scene.restart({ mapId, spawn: { x, y } }));
+  }
+
+  private handleWarp(warp: WarpDef) {
+    const keyType = warp.requiresItem ?? keyForMap(warp.to.mapId)?.typeId;
+    if (!keyType) {
+      this.travel(warp.to.mapId, warp.to.x, warp.to.y);
+      return;
+    }
+    this.busy = true;
+    void this.gateCheck(warp, keyType);
+  }
+
+  /** 门口钥匙校验：已记忆通行 → 放行；背包有钥匙 → 记住并放行；否则弹对话拦住 */
+  private async gateCheck(warp: WarpDef, keyTypeId: string) {
+    const name = keyName(keyTypeId) ?? '钥匙';
+    let status = keyGateStatus(warp.to.mapId, []);
+    if (status !== 'pass') {
+      status = keyGateStatus(warp.to.mapId, await this.fetchOwnedItemTypeIds());
+    }
+    if (status === 'locked') {
+      this.busy = false;
+      this.openDialog('门', missingKeyLines(name));
+      return;
+    }
+    rememberPassage(warp.to.mapId);
+    // 取物期间玩家可能已经走开：只有还站在传送格上才传
+    if (this.tilePos.x !== warp.x || this.tilePos.y !== warp.y) {
+      this.busy = false;
+      return;
+    }
+    this.travel(warp.to.mapId, warp.to.x, warp.to.y);
+  }
+
+  /** 背包里的道具 typeId（口径：数量 > 0 且未锁定）；接口失败时退回本地缓存 */
+  private async fetchOwnedItemTypeIds(): Promise<string[]> {
+    const usable = (items: { typeId: string; quantity: number; status?: string }[]) =>
+      items
+        .filter((i) => i.quantity > 0 && (!i.status || i.status === 'IDLE'))
+        .map((i) => i.typeId);
+    try {
+      const items = await getMyItems();
+      try {
+        // 顺便刷新背包缓存（道具店买了钥匙之后不必重进页面）
+        usePokemonStore().items = items;
+      } catch {
+        /* Pinia 不在（场景被单测直接创建）时忽略 */
+      }
+      return usable(items);
+    } catch {
+      try {
+        return usable(usePokemonStore().items);
+      } catch {
+        return [];
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────── 门口与对话
+
+  private handleDoor(door: DoorDef) {
+    const lines = door.lines ?? [`${door.label}的门开着。`];
+    if (door.action === 'heal') {
+      this.openDialog(door.label, lines, () => void this.healParty(door.label));
+      return;
+    }
+    if (door.action === 'shop') {
+      this.openDialog(door.label, lines, () => gameBus.emit(BUS_EVENTS.OPEN_SHOP));
+      return;
+    }
+    this.openDialog(door.label, lines);
+  }
+
+  private interact() {
+    const target = facingTarget(this.mapDef, this.tilePos, this.facing);
+    if (target.kind === 'npc') {
+      const npc = target.npc;
+      const action =
+        npc.action === 'heal'
+          ? () => void this.healParty(npc.name)
+          : npc.action === 'shop'
+            ? () => gameBus.emit(BUS_EVENTS.OPEN_SHOP)
+            : undefined;
+      this.openDialog(npc.name, npc.lines, action);
+      return;
+    }
+    if (target.kind === 'sign') {
+      this.openDialog('路牌', target.sign.lines ?? this.areaSignLines());
+    }
+  }
+
+  /** 区域自动路牌：地图名 + 区域等级带 + 阶段门槛 + 遇敌地形 */
+  private areaSignLines(): string[] {
+    const map = this.mapDef;
+    const zone = zoneById(map.zoneId);
+    const lines = [`「${map.name}」 ${zone.safe ? '没有野生宝可梦' : zoneLabel(zone)}`];
+    const hint = zoneHint(zone);
+    if (hint && !zone.legendary) lines.push(hint);
+    if (zone.legendary) {
+      lines.push(`传说：${zone.legendary.name}（固定等级，池里只有它）`);
+    }
+    if (map.encounter) {
+      const terrain = map.encounter.tiles.map((t) => TERRAIN_LABEL[t] ?? t).join('/');
+      lines.push(`走进${terrain}会遇到野生宝可梦（遇到的概率约 ${Math.round(map.encounter.rate * 100)}%）。`);
+    }
+    return lines;
+  }
+
+  private openDialog(speaker: string, lines: string[], action?: () => void) {
+    const session = new DialogSession([{ speaker, lines }]);
+    if (!session.isOpen) {
+      action?.();
+      return;
+    }
+    this.session = session;
+    this.pendingAction = action ?? null;
+    this.dialogOpenedAt = this.time.now;
+    this.dialog.show(session.speaker, session.line, session.isLastLine);
+  }
+
+  private handleDialogKeys() {
+    if (this.time.now - this.dialogOpenedAt < DIALOG_COOLDOWN_MS) return;
+    if (this.actionKeys.some((key) => Phaser.Input.Keyboard.JustDown(key))) this.advanceDialog();
+  }
+
+  private advanceDialog() {
+    const session = this.session;
+    if (!session) return;
+    if (this.time.now - this.dialogOpenedAt < DIALOG_COOLDOWN_MS) return;
+    const finished = session.advance();
+    if (!finished) {
+      this.dialog.show(session.speaker, session.line, session.isLastLine);
+      return;
+    }
+    const action = this.pendingAction;
+    this.session = null;
+    this.pendingAction = null;
+    this.dialog.hide();
+    action?.();
+  }
+
+  /** 宝可梦中心：全队回满，每次 10P（全员满血不收费，见 docs/backend-api.md §10） */
+  private async healParty(speaker: string) {
+    this.busy = true;
+    try {
+      const result = await healTeam();
+      const lines = result.charged
+        ? [
+            `你的宝可梦恢复了活力！（花费 ${result.cost} 积分，余额 ${result.points}P）`,
+            result.healed.length > 1
+              ? `共 ${result.healed.length} 只宝可梦回到满血。`
+              : '状态很好，继续加油吧！',
+          ]
+        : ['全员都是满血状态，这次就不收费啦。'];
+      this.openDialog(speaker, lines);
+      try {
+        await usePokemonStore().refreshPokemon();
+      } catch {
+        /* HUD 不在时忽略 */
+      }
+    } catch (error: any) {
+      const message = error?.response?.data?.message ?? '连接不上宝可梦中心，请稍后再试。';
+      this.openDialog(speaker, [`治疗失败：${message}`]);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  // ─────────────────────────────────────────── 遇敌与 HUD
+
+  private maybeEncounter(pos: { x: number; y: number }) {
+    const config = this.mapDef.encounter;
+    if (!config) return;
+    if (!isEncounterTile(this.mapDef, pos.x, pos.y)) return;
+    if (Math.random() >= config.rate) return;
+    this.syncHud(false); // 遇敌前把区域交给 CaptureOverlay（后端按 zoneId 决定野生池与等级）
+    this.busy = true;
+    gameBus.emit(BUS_EVENTS.ENCOUNTER, { zoneId: this.mapDef.zoneId });
+    this.scene.pause();
+  }
+
+  /** 把地图 / 坐标 / 区域写进 world store（Vue 侧 HUD 与遇敌流程都读它） */
+  private syncHud(announce: boolean) {
+    try {
+      const store = useWorldStore();
+      store.enterMap({ mapId: this.mapDef.id, x: this.tilePos.x, y: this.tilePos.y, announce });
+      if (announce) gameBus.emit(BUS_EVENTS.MAP_CHANGED, { mapId: this.mapDef.id, name: this.mapDef.name });
+    } catch {
+      // Phaser 场景可能在 Pinia 之外被创建（单测/截图工具）：地图照常可玩，只是没有 HUD
+    }
+  }
+
+  /** 捕捉流程结束：恢复行走 */
   resumeFromEncounter() {
+    this.busy = false;
+    this.moving = false;
     this.scene.resume();
   }
 }

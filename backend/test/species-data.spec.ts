@@ -1,4 +1,4 @@
-import { EVOLUTIONS, SPECIES, WILD_TABLE } from '../src/game-data/species.data';
+import { EVOLUTIONS, LEGENDARY_WILD_TABLE, SPECIES, WILD_TABLE } from '../src/game-data/species.data';
 import { MOVES } from '../src/game-data/moves.data';
 
 /** 第三世代全国图鉴 1–386，数据来自 PokeAPI（生成口径见 backend/README.md「图鉴数据」） */
@@ -74,22 +74,32 @@ describe('图鉴 #1–386 静态数据完整性', () => {
     );
   });
 
-  it('野生池 = 全部非传说/幻之种族（手调 4 个进化型除外）', () => {
+  it('普通野生池 = 非传说/幻之种族（手调 4 个进化型除外）；传说单独成表', () => {
     const wildIds = WILD_TABLE.map((s) => s.id).sort((a, b) => a - b);
     expect(wildIds).toEqual(ALL_IDS.filter((id) => !LEGENDARY_IDS.includes(id) && !EVOLUTION_ONLY_IDS.includes(id)));
-    expect(WILD_TABLE.every((s) => s.inWild)).toBe(true);
-    expect(Object.values(SPECIES).filter((s) => s.inWild)).toHaveLength(WILD_TABLE.length);
+    expect(WILD_TABLE.every((s) => s.inWild && !s.legendary)).toBe(true);
+    // 传说表 = 第三世代里开放遭遇的 9 只（#377–384/386）；Kanto/城都传说与基拉祈仍未开放
+    expect(LEGENDARY_WILD_TABLE.map((s) => s.id).sort((a, b) => a - b)).toEqual([377, 378, 379, 380, 381, 382, 383, 384, 386]);
+    expect(LEGENDARY_WILD_TABLE.every((s) => s.inWild && s.legendary)).toBe(true);
+    expect(Object.values(SPECIES).filter((s) => s.inWild)).toHaveLength(WILD_TABLE.length + LEGENDARY_WILD_TABLE.length);
   });
 
-  it('第三世代（#252–386）全部在库，非传说/幻之都在野生池', () => {
+  it('第三世代（#252–386）全部在库；传说里只有 #377–384/386 开放野生遭遇', () => {
     const gen3 = ALL_IDS.slice(251);
     for (const id of gen3) expect([id, SPECIES[id] !== undefined]).toEqual([id, true]);
     for (const id of gen3) {
+      const open = LEGENDARY_WILD_TABLE.some((s) => s.id === id);
       const legendary = LEGENDARY_IDS.includes(id);
-      expect([id, SPECIES[id].inWild]).toEqual([id, !legendary]);
+      // 开放遭遇的传说（inWild=true）只可能是 #377–384/386（基拉祈 385 仍是 false）
+      expect([id, SPECIES[id].inWild]).toEqual([id, !legendary || open]);
+      expect([id, SPECIES[id].legendary]).toEqual([id, legendary]);
     }
     // 抽样：御三家与代表性物种
     expect(SPECIES[252]).toMatchObject({ name: 'treecko', nameZh: '木守宫', type: 'grass', catchRate: 45 });
-    expect(SPECIES[386]).toMatchObject({ name: 'deoxys', nameZh: '代欧奇希斯', catchRate: 3, inWild: false });
+    expect(SPECIES[386]).toMatchObject({ name: 'deoxys', nameZh: '代欧奇希斯', catchRate: 3, inWild: true, legendary: true });
+    expect(SPECIES[385]).toMatchObject({ name: 'jirachi', inWild: false, legendary: true });
+    // Kanto/城都传说仍是未开放（inWild=false）但标记为传说
+    expect(SPECIES[150]).toMatchObject({ name: 'mewtwo', inWild: false, legendary: true });
+    expect(SPECIES[251]).toMatchObject({ name: 'celebi', inWild: false, legendary: true });
   });
 });

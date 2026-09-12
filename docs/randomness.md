@@ -98,8 +98,8 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 
 | n | 含义 | 计算 |
 |---|---|---|
-| 0 | 野生宝可梦种类 | 区域野生池的**加权索引**：`target = rand × 总权重`，取累计权重区间覆盖 target 的种族（池 = `stage ≤ zone.maxStage`，权重按捕获率 60/30/10、种族值总量 ≥500 再 ×0.3） |
-| 1 | 野生**等级** | `zone.minLevel + floor(rand × (zone.maxLevel − zone.minLevel + 1))`，即区域内均匀；**只由区域决定，与队伍等级无关**；付费诱饵带内 +2（tier 1）/ +5（tier 2）并封顶 `zone.maxLevel` |
+| 0 | 野生宝可梦种类 | 区域野生池的**加权索引**：`target = rand × 总权重`，取累计权重区间覆盖 target 的种族。**普通区**：池 = `stage ≤ zone.maxStage` **∧ 种族属性 ∈ zone.habitats**，权重按捕获率 60/30/10、种族值总量 ≥500 再 ×0.3；**传说区**：池 = `poolSpeciesIds` 指定的传说种族（等权 1），与普通池互不相交 |
+| 1 | 野生**等级** | `zone.minLevel + floor(rand × (zone.maxLevel − zone.minLevel + 1))`，即区域内均匀；**只由区域决定，与队伍等级无关**；付费诱饵带内 +2（tier 1）/ +5（tier 2）并封顶 `zone.maxLevel`（**传说区禁用诱饵**，其等级带本身就窄：Lv40 固定 / Lv45 固定 / Lv45-50） |
 | 第 k 次投球（k=1,2,…）：base = 2 + (k−1)×10 | | |
 | base+0 | 捕捉判定 | 成功 ⟺ `rand < p`，`a = ((3×maxHP−2×curHP)×catchRate×ballBonus)/(3×maxHP)`，`p = min(1, a/255)`（大师球 ballBonus=255 → p=1 必中；快速捕捉等价于满血 curHP=maxHP） |
 | base+1 .. base+6 | 个体值 IV：hp/atk/def/spatk/spdef/speed（**快速捕捉路径**；野怪战斗用 20000 区，见下） | `floor(rand×32)` → 0..31 |
@@ -131,8 +131,9 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 - **遇敌与投掷同事件**：种类/等级在 Commit 后立即派生并展示预览，但 IV/性格/闪光只在捕捉成功后才揭晓——预览不泄露高价值信息，且全流程一次承诺即可覆盖，减少链上交易数。
 - **野怪战斗独立区段（20000 / 30000）**：战斗回合的掷点与投球判定互不干扰（否则"多打几回合"会挪动 attempt 块的位置）；两个偏移量与 attempt 块天然不重叠（块要达到 n=20000 需要 2000 次投球）。野怪个体在开场固定（而非每次投球重抽），**战斗里遇到的野怪与最终捕捉到的是同一只**，既保证 HP 显示与铸造结果自洽，也堵住"故意投失重刷个体/闪光"的刷子玩法。
 - **战斗掉落独立区段（40000）**：掉落与回合掷点、投球判定互不干扰，只在收服/击倒结算时读 +0/+1 两槽——"多打几个回合""投失几个球"都不会改变掉落结果，且掉落物与它所属的战斗在派生流上一一对应（同一 eventId 完整可复核）。
-- **区域等级带 + 付费诱饵都在同一槽位**：等级仍只读 `rand(1)`，映射函数按区域（`south` Lv2-6 / `mid` Lv8-16 / `north` Lv17-28，`docs/backend-api.md` §2 公示）取值，**与玩家队伍等级彻底脱钩**——不存在"抓高级怪→野怪更强"的滚雪球；诱饵是"在同一掷点上加常数（带内 +2/+5，封顶区域上界）/换闪光阈值"——不新增槽位、不可在看过后挑选，加成范围在购买前即已确定。
-- **区域写进 `Commit.meta`**：`meta` 恒含 `zone`（`{"zone":"north"}`，付费档追加 `lureTier`/`cost`），因此 n=0 的加权抽样与 n=1 的等级带都能被第三方从链上记录独立复算——没有 meta 里的区域，n=0 的"加权索引"就是不可复核的。
+- **区域等级带 + 付费诱饵都在同一槽位**：等级仍只读 `rand(1)`，映射函数按区域（7 个普通区 `route-grass` Lv2-6 / `forest` Lv4-10 / `route-mid` Lv8-16 / `cave` Lv12-20 / `coast` Lv15-25 / `route-north` Lv17-28 / `volcano` Lv20-30，`docs/backend-api.md` §2 公示）取值，**与玩家队伍等级彻底脱钩**——不存在"抓高级怪→野怪更强"的滚雪球；诱饵是"在同一掷点上加常数（带内 +2/+5，封顶区域上界）/换闪光阈值"——不新增槽位、不可在看过后挑选，加成范围在购买前即已确定。
+- **传说区复用同一套槽位（不新增随机）**：6 个传说区（`sky-pillar`/`seafloor`/`magma`/`ruins`/`southern-island`/`birth-island`）的派生布局与普通区**完全一致**——`rand(0)` 在固定传说池内等权抽一个种族（`ruins` 三神柱各 1/3）、`rand(1)` 落在窄等级带（Lv40/45 固定或 Lv45-50），**没有额外的"出不出传说"掷点**：进区即必出该区传说，稀缺性由**钥匙价格（5000P）+ 每人每区一只**保证，而不是靠低概率。钥匙校验（`KEY_REQUIRED`）、"已拥有"校验（`LEGENDARY_OWNED`）与诱饵拒绝（`LURE_NOT_ALLOWED`）都在 `Commit` 之前完成，被拒时链上不留痕、也没有任何掷点被消费。
+- **区域与栖息地写进 `Commit.meta`**：`meta` 恒含 `zone`（规范 id，如 `{"zone":"coast"}` 或 `{"zone":"sky-pillar"}`，付费档追加 `lureTier`/`cost`），因此 n=0 的加权抽样（普通区的"阶段门槛 ∧ 栖息地属性"池、传说区的固定池）与 n=1 的等级带都能被第三方从链上记录独立复算——没有 meta 里的区域，n=0 的"加权索引"就是不可复核的。
 - **付费留痕上链**：`Commit` 的可选 `meta`（≤256 字节）恒含区域，付费档追加 `{"lureTier":n,"cost":c}`，与扣费交易 `AddPoints(-c,'lure:tierN')` 一一对应；`GET /fairness/:eventId` 返回该字段，任何人可核对"只付了 0 的遇敌不可能享受 tier 2 的等级/闪光加成"。
 - **快速捕捉路径**（`POST /capture/attempt`，兼容/冒烟用）继续使用 attempt 块内的 IV/性格/闪光槽位；两条路径共用同一份 attempt 计数与块索引，互不冲突。
 
@@ -142,7 +143,7 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 
 | 场景 | 事件 purpose | 消费点 | 消费方式 |
 |---|---|---|---|
-| 遇敌 | capture | `POST /capture/encounter` | rand(0) 区域野生池加权索引（`stage ≤ zone.maxStage`，权重 60/30/10，种族值总量 ≥500 ×0.3）、rand(1) 带内等级（`zone.minLevel + floor(rand × 带宽)`，诱饵带内 +2/+5 封顶区域上界；`zone` 与付费档写入 Commit.meta）；展示预览 |
+| 遇敌 | capture | `POST /capture/encounter` | rand(0) 区域野生池加权索引（普通区：`stage ≤ zone.maxStage` ∧ 属性 ∈ 栖息地，权重 60/30/10，种族值总量 ≥500 ×0.3；传说区：固定传说池等权）、rand(1) 带内等级（`zone.minLevel + floor(rand × 带宽)`，诱饵带内 +2/+5 封顶区域上界、传说区禁用诱饵；`zone` 与付费档写入 Commit.meta）；展示预览 |
 | 捕捉判定 | capture（同一事件） | `POST /wild/:id/action {type:'ball'}` 与快速捕捉 `POST /capture/attempt` | 块内 +0：`rand < p`，`p = min(1, a/255)`，`a = ((3×maxHP−2×curHP)×catchRate×ballBonus)/(3×maxHP)`；球倍率 精灵球×1 / 超级球×1.5 / 高级球×2 / 大师球×255（`game-data/items.data.ts`，255 → p=1 必中）。快速捕捉等价于满血投球 |
 | 个体值 IV / 性格 / 闪光 | 同上 | 捕捉成功时铸造 | 野怪战斗取 20000 区（开场固定，战斗 HP 与铸造结果同源）；快速捕捉取块内 +1..+6 / +7 / +8。闪光阈值可被付费诱饵 tier 2 放大 4 倍（1/4096 → 1/1024），槽位不变 |
 | 特性 | — | 铸造 | **不耗随机**：取 species 表固定 ability（P0 简化） |

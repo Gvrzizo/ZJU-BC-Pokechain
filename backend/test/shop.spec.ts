@@ -7,6 +7,9 @@ import { ADMIN_IDENTITY } from '../src/fabric/chain.types';
 
 const ash = userIdentity('ash');
 
+/** 传说区钥匙 typeId（kind='key'：可购买、不可使用、不可回收） */
+const KEY_TYPE_IDS = ['sky-key', 'ocean-key', 'magma-key', 'ruins-key', 'island-key', 'birth-key'];
+
 function build() {
   const { chain, contract } = makeChain();
   const redis = makeRedis();
@@ -25,7 +28,7 @@ const stacksOf = (ctx: ReturnType<typeof build>, player = 'ash') =>
   ctx.contract.queryItemsByOwner(player);
 
 describe('道具商店：商品表与价目（docs/backend-api.md §3）', () => {
-  it('价目表：重平衡后的规格价（精灵球 50 / 高级球 400 / 进化石 800 / 技能机 1500 / 金色王冠 15000）', () => {
+  it('价目表：重平衡后的规格价（精灵球 50 / 高级球 400 / 进化石 800 / 技能机 1500 / 金色王冠 15000 / 钥匙 5000）', () => {
     expect(SHOP_PRICES).toEqual({
       'poke-ball': 50,
       'great-ball': 150,
@@ -41,15 +44,28 @@ describe('道具商店：商品表与价目（docs/backend-api.md §3）', () =>
       'bottle-cap': 3000,
       'gold-bottle-cap': 15000,
       'rare-candy': 1000,
+      'sky-key': 5000,
+      'ocean-key': 5000,
+      'magma-key': 5000,
+      'ruins-key': 5000,
+      'island-key': 5000,
+      'birth-key': 5000,
     });
-    // 回收价 = 半价向下取整，最低 1；非卖品无价
+    // 回收价 = 半价向下取整，最低 1；非卖品无价；**钥匙一律不可回收**（NOT_SELLABLE）
     expect(shopSellPrice('poke-ball')).toBe(25);
     expect(shopSellPrice('ultra-ball')).toBe(200);
     expect(shopSellPrice('gold-bottle-cap')).toBe(7500);
     expect(shopSellPrice('master-ball')).toBeUndefined();
-    // 定价口径：休闲玩家日收入约 100-300P（收服 20 / 击倒 等级×1），王冠是月级目标
+    for (const keyTypeId of KEY_TYPE_IDS) {
+      expect([keyTypeId, SHOP_PRICES[keyTypeId]]).toEqual([keyTypeId, 5000]);
+      expect([keyTypeId, shopSellPrice(keyTypeId)]).toEqual([keyTypeId, undefined]);
+    }
+    // 定价口径：休闲玩家日收入约 100-300P（收服 20 / 击倒 等级×1），王冠是月级目标、钥匙是长线目标
     expect(SHOP_PRICES['bottle-cap'] / 200).toBeGreaterThanOrEqual(14);
     expect(SHOP_PRICES['ultra-ball']).toBeLessThan(SHOP_PRICES['bottle-cap']);
+    // 钥匙是最贵的常规商品（≈ 月级积累），且比金色王冠便宜
+    expect(SHOP_PRICES['sky-key']).toBeGreaterThan(SHOP_PRICES['bottle-cap']);
+    expect(SHOP_PRICES['sky-key']).toBeLessThan(SHOP_PRICES['gold-bottle-cap']);
   });
 
   it('GET /shop：全部道具类型都在表里，master-ball 标记为非卖品（库存标记 available=false）', async () => {
@@ -131,6 +147,37 @@ describe('道具商店：购买（AddPoints + MintItem）', () => {
     await expect(ctx.shop.buy(ash, 'master-ball', 1)).rejects.toThrow(/NOT_FOR_SALE/);
     await expect(ctx.shop.buy(ash, 'unknown-item', 1)).rejects.toThrow(/NOT_FOR_SALE/);
     expect(await pointsOf(ctx)).toBe(1000);
+  });
+
+  it('传说区钥匙：5000P 上架（长线积分 sink）、不可回收、不可使用', async () => {
+    const ctx = build();
+    await registerPlayers(ctx.contract, 'ash');
+    await ctx.contract.addPoints(ADMIN_IDENTITY, 'ash', 5000, 'test-topup');
+
+    const bought = await ctx.shop.buy(ash, 'sky-key', 1);
+    expect(bought).toMatchObject({ typeId: 'sky-key', nameZh: '天空之钥', unitPrice: 5000, total: 5000, points: 1000 });
+    const stack = (await stacksOf(ctx)).find((i) => i.typeId === 'sky-key')!;
+    expect(stack).toMatchObject({ quantity: 1, status: 'IDLE' });
+
+    // 不可回收：避免误卖门票，也堵住"买了再卖回"的往返（钥匙永不消耗）
+    await expect(ctx.shop.sell(ash, stack.id, 1)).rejects.toThrow(/NOT_SELLABLE/);
+    expect(await pointsOf(ctx)).toBe(1000);
+    expect((await ctx.contract.getItem(stack.id)).quantity).toBe(1);
+
+    // 不可使用：误点不会消耗钥匙（进传说区只需持有）
+    await expect(ctx.items.use(ash, stack.id, {})).rejects.toThrow(/NOT_USABLE/);
+    expect((await ctx.contract.getItem(stack.id)).quantity).toBe(1);
+
+    // 六把钥匙都上架、都不可回收，种类标记为 key（前端据此不显示"使用/卖出"）
+    const catalog = await ctx.shop.catalog('ash');
+    for (const typeId of KEY_TYPE_IDS) {
+      expect(catalog.items.find((i) => i.typeId === typeId)).toMatchObject({
+        kind: 'key',
+        price: 5000,
+        sellPrice: null,
+        available: true,
+      });
+    }
   });
 
   it('同一 idemKey 重放：不重复扣分、不重复发货', async () => {

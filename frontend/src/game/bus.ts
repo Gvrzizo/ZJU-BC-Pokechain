@@ -4,8 +4,12 @@ import Phaser from 'phaser';
 export const gameBus = new Phaser.Events.EventEmitter();
 
 export const BUS_EVENTS = {
-  /** OverworldScene → GameView：草丛触发随机遇敌 */
+  /** OverworldScene → GameView：踏上遇敌地形触发野怪遭遇（CaptureOverlay 读 zone store） */
   ENCOUNTER: 'encounter',
-  /** OverworldScene → GameView：玩家位置变化（调试显示用） */
+  /** OverworldScene → GameView：玩家位置变化（HUD 坐标显示） */
   PLAYER_MOVED: 'player-moved',
+  /** OverworldScene → GameView：跨地图（HUD 横幅，payload: { mapId, name, tone }） */
+  MAP_CHANGED: 'map-changed',
+  /** OverworldScene → GameView：商店店员/道具店门口 → 跳转 /shop */
+  OPEN_SHOP: 'open-shop',
 } as const;

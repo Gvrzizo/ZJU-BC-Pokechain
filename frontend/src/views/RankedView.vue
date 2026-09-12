@@ -287,6 +287,7 @@ onBeforeUnmount(() => {
             <td>
               <span class="tier-dot" :style="{ background: row.color }" />
               {{ t(`ranked.tier.${row.key}`) }}
+              <span class="text-dim mono">{{ row.nameEn }}</span>
             </td>
             <td>{{ row.min }} – {{ row.max >= 100000 ? '∞' : row.max - 1 }}</td>
             <td>{{ ARENA_ENTRY_FEES[row.key] }}</td>

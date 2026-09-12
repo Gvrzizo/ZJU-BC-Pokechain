@@ -66,8 +66,8 @@ describe('CaptureService (mock chain)', () => {
     const committed = await contract.getRandom(enc.eventId);
     expect(committed.status).toBe('COMMITTED');
     expect(committed.purpose).toBe('capture');
-    // 缺省区域 = 南部（初始区）：Lv2-6、只出未进化型（docs/backend-api.md §2 区域等级带）
-    expect(enc.zone.id).toBe('south');
+    // 缺省区域 = 101 号道路·草丛（初始区）：Lv2-6、只出未进化型（docs/backend-api.md §2 区域与栖息地野生池）
+    expect(enc.zone.id).toBe('route-grass');
     expect(enc.zone.minLevel).toBe(2);
     expect(enc.zone.maxLevel).toBe(6);
     expect(enc.wild.level).toBeGreaterThanOrEqual(2);
@@ -76,7 +76,7 @@ describe('CaptureService (mock chain)', () => {
     // 派生可复算：响应与会话里的 serverSeed 重建派生流，n=0/n=1 对得上
     const session = await redis.getJson<{ serverSeed: string }>(`capture:${enc.eventId}`);
     const stream0 = new DeriveStream(session!.serverSeed, enc.clientSeed!, enc.eventId);
-    const south = getZone('south')!;
+    const south = getZone('route-grass')!;
     const derived0 = deriveWild(stream0, south, 0);
     expect(enc.wild.speciesId).toBe(derived0.species.id);
     expect(enc.wild.level).toBe(derived0.level);
@@ -159,7 +159,7 @@ describe('CaptureService (mock chain)', () => {
 describe('CaptureService: 区域等级带 + 付费诱饵（docs/backend-api.md §2）', () => {
   const ash = userIdentity('ash');
 
-  it('区域等级带：south 恒 Lv2-6，队伍等级不参与（与队伍最高等级彻底脱钩）', async () => {
+  it('区域等级带：route-grass 恒 Lv2-6，队伍等级不参与（与队伍最高等级彻底脱钩）', async () => {
     const { chain, contract } = makeChain();
     const redis = makeRedis();
     const capture = new CaptureService(chain, contract, redis);
@@ -169,30 +169,35 @@ describe('CaptureService: 区域等级带 + 付费诱饵（docs/backend-api.md �
     await seedPokemon(chain, 'ash', { id: 'p_locked', level: 99, status: 'LOCKED_BATTLE' });
 
     const enc = await capture.encounter(ash, CLIENT_SEED);
-    expect(enc.zone.id).toBe('south');
+    expect(enc.zone.id).toBe('route-grass');
     expect(enc.wild.level).toBeGreaterThanOrEqual(2);
     expect(enc.wild.level).toBeLessThanOrEqual(6);
     expect(evolutionStage(enc.wild.speciesId)).toBe(0);
     expect(enc.lure).toEqual({ tier: 0, cost: 0, levelBonus: 0, shinyMultiplier: 1 });
-    // 免费档同样把区域写进 Commit.meta（审计据此复算 n=0/n=1）
-    expect(JSON.parse((await contract.getRandom(enc.eventId)).meta)).toEqual({ zone: 'south' });
+    // 免费档同样把区域写进 Commit.meta（审计据此复算 n=0/n=1），且写的是规范 id
+    expect(JSON.parse((await contract.getRandom(enc.eventId)).meta)).toEqual({ zone: 'route-grass' });
 
-    // 指定中部：等级带整体抬到 Lv8-16，仍然与 Lv50 队伍无关
-    const mid = await capture.encounter(ash, CLIENT_SEED, 0, 'mid');
-    expect(mid.zone).toMatchObject({ id: 'mid', name: '101 号道路·中', minLevel: 8, maxLevel: 16, maxStage: 1 });
+    // 指定 route-mid：等级带整体抬到 Lv8-16，仍然与 Lv50 队伍无关
+    const mid = await capture.encounter(ash, CLIENT_SEED, 0, 'route-mid');
+    expect(mid.zone).toMatchObject({ id: 'route-mid', name: '104 号道路·丘陵', minLevel: 8, maxLevel: 16, maxStage: 1 });
     expect(mid.wild.level).toBeGreaterThanOrEqual(8);
     expect(mid.wild.level).toBeLessThanOrEqual(16);
     expect(evolutionStage(mid.wild.speciesId)).toBeLessThanOrEqual(1);
 
-    // 北部可出二阶段进化型，等级带 Lv17-28
-    const north = await capture.encounter(ash, CLIENT_SEED, 0, 'north');
-    expect(north.zone).toMatchObject({ id: 'north', minLevel: 17, maxLevel: 28, maxStage: 2 });
+    // 旧别名 mid 归一为规范 id（响应与会话都记规范 id）
+    const alias = await capture.encounter(ash, CLIENT_SEED, 0, 'mid');
+    expect(alias.zone.id).toBe('route-mid');
+    expect(JSON.parse((await contract.getRandom(alias.eventId)).meta)).toEqual({ zone: 'route-mid' });
+
+    // route-north 可出二阶段进化型，等级带 Lv17-28
+    const north = await capture.encounter(ash, CLIENT_SEED, 0, 'route-north');
+    expect(north.zone).toMatchObject({ id: 'route-north', minLevel: 17, maxLevel: 28, maxStage: 2 });
     expect(north.wild.level).toBeGreaterThanOrEqual(17);
     expect(north.wild.level).toBeLessThanOrEqual(28);
     // 可复算：会话里的 serverSeed 重建派生流
     const session = await redis.getJson<{ serverSeed: string; zoneId: string }>(`capture:${north.eventId}`);
-    expect(session!.zoneId).toBe('north');
-    const derived = deriveWild(new DeriveStream(session!.serverSeed, north.clientSeed!, north.eventId), getZone('north')!);
+    expect(session!.zoneId).toBe('route-north');
+    const derived = deriveWild(new DeriveStream(session!.serverSeed, north.clientSeed!, north.eventId), getZone('route-north')!);
     expect(north.wild.speciesId).toBe(derived.species.id);
     expect(north.wild.level).toBe(derived.level);
   });
@@ -213,26 +218,26 @@ describe('CaptureService: 区域等级带 + 付费诱饵（docs/backend-api.md �
     await registerPlayers(contract, 'ash');
     await seedPokemon(chain, 'ash', { id: 'p_top', level: 50 });
 
-    // 南部（Lv2-6）：+2 仍在带内，+5 必然被封到上界 6
-    const t1 = await capture.encounter(ash, CLIENT_SEED, 1, 'south');
+    // 草丛（Lv2-6）：+2 仍在带内，+5 必然被封到上界 6
+    const t1 = await capture.encounter(ash, CLIENT_SEED, 1, 'route-grass');
     expect(t1.wild.level).toBeGreaterThanOrEqual(4);
     expect(t1.wild.level).toBeLessThanOrEqual(6);
     expect(t1.lure).toEqual({ tier: 1, cost: 50, levelBonus: 2, shinyMultiplier: 1 });
     expect((await contract.getPlayer('ash')).points).toBe(950);
     expect(JSON.parse((await contract.getRandom(t1.eventId)).meta)).toEqual({
-      zone: 'south',
+      zone: 'route-grass',
       lureTier: 1,
       cost: 50,
     });
 
-    // 北部（Lv17-28）：+5 抬到 22-28，封顶 28
-    const t2 = await capture.encounter(ash, CLIENT_SEED, 2, 'north');
+    // 冠军之路（Lv17-28）：+5 抬到 22-28，封顶 28
+    const t2 = await capture.encounter(ash, CLIENT_SEED, 2, 'route-north');
     expect(t2.wild.level).toBeGreaterThanOrEqual(22);
     expect(t2.wild.level).toBeLessThanOrEqual(28);
     expect(t2.lure).toEqual({ tier: 2, cost: 200, levelBonus: 5, shinyMultiplier: 4 });
     expect((await contract.getPlayer('ash')).points).toBe(750);
     expect(JSON.parse((await contract.getRandom(t2.eventId)).meta)).toEqual({
-      zone: 'north',
+      zone: 'route-north',
       lureTier: 2,
       cost: 200,
     });

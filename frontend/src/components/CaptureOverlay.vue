@@ -18,7 +18,7 @@ import {
 } from '@/game/wild-battle';
 import { useI18n } from '@/composables/useI18n';
 import { usePokemonStore } from '@/stores/pokemon';
-import { useZoneStore } from '@/stores/zone';
+import { lureAllowed as zoneAllowsLure, useZoneStore } from '@/stores/zone';
 import type { WildBallOption } from '@/types';
 import BondHearts from '@/ui/BondHearts.vue';
 import HpBar from '@/ui/HpBar.vue';
@@ -95,16 +95,29 @@ const healthyParty = computed(() => party.value.filter((m) => !m.fainted));
 /** 有队伍但全员濒死：不能进入草丛，先去宝可梦中心 */
 const allFainted = computed(() => party.value.length > 0 && healthyParty.value.length === 0);
 
-/** 当前所在区域（OverworldScene 按地图 y 带写入）：决定野怪等级带与野生池 */
+/** 当前所在区域（OverworldScene 按地图写入）：决定野怪等级带与野生池 */
 const zone = computed(() => zoneStore.zone);
+/** 区域等级带文案（安全区没有等级带） */
+const hasBand = computed(() => zone.value.minLevel !== undefined && zone.value.maxLevel !== undefined);
+/** 传说区禁止诱饵（后端 LURE_NOT_ALLOWED）：付费档位直接不给选 */
+const canUseLure = computed(() => zoneAllowsLure(zone.value));
+const stageHint = computed(() => {
+  const stage = zone.value.maxStage;
+  if (stage === 0) return '只出未进化型';
+  if (stage === 1) return '可见一段进化型';
+  if (stage === 2) return '可见二段进化型';
+  return '';
+});
 
 const selectedLure = computed(() => LURE_TIERS.find((l) => l.tier === lureTier.value) ?? LURE_TIERS[0]);
 /** 诱饵只在区域带内加成并封顶区域上界（docs/backend-api.md §2「区域等级带」） */
 const expectedLevels = computed(() => {
-  const bonus = selectedLure.value.levelBonus;
+  const current = zone.value;
+  if (current.minLevel === undefined || current.maxLevel === undefined) return null;
+  const bonus = canUseLure.value ? selectedLure.value.levelBonus : 0;
   return {
-    min: Math.min(zone.value.maxLevel, zone.value.minLevel + bonus),
-    max: zone.value.maxLevel,
+    min: Math.min(current.maxLevel, current.minLevel + bonus),
+    max: current.maxLevel,
   };
 });
 
@@ -174,7 +187,8 @@ async function start() {
   try {
     // 已经付过诱饵的遇敌会保留：重试不再重复扣费
     if (!enc.value) {
-      enc.value = await encounter(clientSeed, lureTier.value, zone.value.id);
+      // 传说区后端禁止诱饵（LURE_NOT_ALLOWED）：这里强制按免费档请求
+      enc.value = await encounter(clientSeed, canUseLure.value ? lureTier.value : 0, zone.value.id);
       playCry(enc.value.wild.speciesId);
     }
     const found = enc.value;
@@ -282,12 +296,17 @@ if (store.items.length === 0) {
         <p class="wild-zone">
           {{ zone.name }}
           <span class="text-dim">
-            野怪 Lv{{ zone.minLevel }}–{{ zone.maxLevel }} ·
-            {{ zone.maxStage === 0 ? '只出未进化型' : zone.maxStage === 1 ? '可见一段进化型' : '可见二段进化型' }}
+            <template v-if="zone.legendary">
+              传说 Lv{{ zone.minLevel }}–{{ zone.maxLevel }} · 池里只有它（{{ zone.legendary.name }}）
+            </template>
+            <template v-else-if="hasBand">
+              野怪 Lv{{ zone.minLevel }}–{{ zone.maxLevel }} · {{ stageHint }}
+            </template>
+            <template v-else>安全区 · 没有野生宝可梦</template>
           </span>
         </p>
 
-        <div class="wild-group" style="margin-top: 12px">
+        <div v-if="canUseLure" class="wild-group" style="margin-top: 12px">
           <div class="wild-group__title">
             诱饵 <span class="text-dim">（付费档位：带内等级加成 / 更高闪光率；费用在确认遇敌时链上扣除）</span>
           </div>
@@ -310,9 +329,17 @@ if (store.items.length === 0) {
             </PixelButton>
           </div>
           <p class="wild-hint">
-            预计野怪等级：Lv{{ expectedLevels.min }} ~ Lv{{ expectedLevels.max }}（{{ zone.name }} 的等级带
+            预计野怪等级：Lv{{ expectedLevels?.min }} ~ Lv{{ expectedLevels?.max }}（{{ zone.name }} 的等级带
             Lv{{ zone.minLevel }}–{{ zone.maxLevel }}，诱饵只在带内加成且不超过 Lv{{ zone.maxLevel }}；
             野怪等级与队伍等级无关）。付费档位会写入链上随机承诺的 meta，可在公平性页面复核。
+          </p>
+        </div>
+        <div v-else class="wild-group" style="margin-top: 12px">
+          <div class="wild-group__title">传说区</div>
+          <p class="wild-hint">
+            这里不允许投放诱饵（后端会直接拒绝）：等级固定 Lv{{ zone.minLevel }}–{{ zone.maxLevel }}，
+            池里只有 {{ zone.legendary?.name }}。每位训练家在同一个传说区只能保有一只，
+            放生或交易走后才能再来。
           </p>
         </div>
 
