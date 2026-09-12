@@ -1,0 +1,20 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.DS_Store
+
+# Fabric 网络运行产物
+network/organizations/
+network/channel-artifacts/
+network/bin/
+network/config/
+network/fabric-samples/
+network/install-fabric.sh
+backend/wallet/
+backend/.env.local
+
+# 演示资产（由使用者自行放入）
+frontend/public/assets/vendor/
+minio-data/

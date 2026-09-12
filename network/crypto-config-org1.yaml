@@ -1,0 +1,16 @@
+# PokeChain —— cryptogen 配置：Org1（游戏运营商）
+# 输出目录：organizations/peerOrganizations/org1.pokechain.com
+# 1 个 peer（peer0.org1.pokechain.com）+ 1 个 Admin + 1 个普通 User。
+# SANS 中加入 localhost / 127.0.0.1，使宿主机工具可通过 localhost:7051 直连。
+
+PeerOrgs:
+  - Name: Org1
+    Domain: org1.pokechain.com
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 1

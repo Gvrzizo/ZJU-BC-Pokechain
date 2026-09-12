@@ -1,0 +1,6 @@
+{
+  "index": { "fields": ["docType", "fromId", "toId"] },
+  "ddoc": "indexTradeDoc",
+  "name": "indexTrade",
+  "type": "json"
+}

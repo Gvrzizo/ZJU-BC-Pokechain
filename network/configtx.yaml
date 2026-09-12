@@ -1,0 +1,184 @@
+# PokeChain —— configtx.yaml（Fabric 2.5）
+# Profile：
+#   - TwoOrgsOrdererGenesis：orderer 系统通道创世块（单节点 etcdraft）
+#   - TwoOrgsChannel：应用通道 gamechannel（Application capabilities V2_5）
+# MSPDir / Consenter 证书路径均相对于执行 configtxgen 时的 network/ 目录。
+
+Organizations:
+  - &OrdererOrg
+      Name: OrdererOrg
+      ID: OrdererMSP
+      MSPDir: organizations/ordererOrganizations/pokechain.com/msp
+      Policies:
+        Readers:
+          Type: Signature
+          Rule: "OR('OrdererMSP.member')"
+        Writers:
+          Type: Signature
+          Rule: "OR('OrdererMSP.member')"
+        Admins:
+          Type: Signature
+          Rule: "OR('OrdererMSP.admin')"
+      OrdererEndpoints:
+        - orderer.pokechain.com:7050
+
+  - &Org1
+      Name: Org1MSP
+      ID: Org1MSP
+      MSPDir: organizations/peerOrganizations/org1.pokechain.com/msp
+      Policies:
+        Readers:
+          Type: Signature
+          Rule: "OR('Org1MSP.admin', 'Org1MSP.peer', 'Org1MSP.client')"
+        Writers:
+          Type: Signature
+          Rule: "OR('Org1MSP.admin', 'Org1MSP.client')"
+        Admins:
+          Type: Signature
+          Rule: "OR('Org1MSP.admin')"
+        Endorsement:
+          Type: Signature
+          Rule: "OR('Org1MSP.peer')"
+      AnchorPeers:
+        - Host: peer0.org1.pokechain.com
+          Port: 7051
+
+  - &Org2
+      Name: Org2MSP
+      ID: Org2MSP
+      MSPDir: organizations/peerOrganizations/org2.pokechain.com/msp
+      Policies:
+        Readers:
+          Type: Signature
+          Rule: "OR('Org2MSP.admin', 'Org2MSP.peer', 'Org2MSP.client')"
+        Writers:
+          Type: Signature
+          Rule: "OR('Org2MSP.admin', 'Org2MSP.client')"
+        Admins:
+          Type: Signature
+          Rule: "OR('Org2MSP.admin')"
+        Endorsement:
+          Type: Signature
+          Rule: "OR('Org2MSP.peer')"
+      AnchorPeers:
+        - Host: peer0.org2.pokechain.com
+          Port: 9051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+  ACLs: &ACLsDefault
+    _lifecycle/CheckCommitReadiness: /Channel/Application/Writers
+    _lifecycle/CommitChaincodeDefinition: /Channel/Application/Writers
+    _lifecycle/QueryChaincodeDefinition: /Channel/Application/Readers
+    _lifecycle/QueryChaincodeDefinitions: /Channel/Application/Readers
+    lscc/ChaincodeExists: /Channel/Application/Readers
+    lscc/GetDeploymentSpec: /Channel/Application/Readers
+    lscc/GetChaincodeData: /Channel/Application/Readers
+    lscc/GetInstantiatedChaincodes: /Channel/Application/Readers
+    qscc/GetChainInfo: /Channel/Application/Readers
+    qscc/GetBlockByNumber: /Channel/Application/Readers
+    qscc/GetBlockByHash: /Channel/Application/Readers
+    qscc/GetTransactionByID: /Channel/Application/Readers
+    qscc/GetBlockByTxID: /Channel/Application/Readers
+    cscc/GetConfigBlock: /Channel/Application/Readers
+    cscc/GetChannelConfig: /Channel/Application/Readers
+    peer/Propose: /Channel/Application/Writers
+    peer/ChaincodeToChaincode: /Channel/Application/Readers
+    event/Block: /Channel/Application/Readers
+    event/FilteredBlock: /Channel/Application/Readers
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  Addresses:
+    - orderer.pokechain.com:7050
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 500
+    AbsoluteMaxBytes: 10 MB
+    PreferredMaxBytes: 2 MB
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    ConsensusType:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Writers"
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.pokechain.com
+        Port: 7050
+        ClientTLSCert: organizations/ordererOrganizations/pokechain.com/orderers/orderer.pokechain.com/tls/server.crt
+        ServerTLSCert: organizations/ordererOrganizations/pokechain.com/orderers/orderer.pokechain.com/tls/server.crt
+  Capabilities:
+    <<: *OrdererCapabilities
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  TwoOrgsOrdererGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+    Consortiums:
+      SampleConsortium:
+        Organizations:
+          - *Org1
+          - *Org2
+
+  TwoOrgsChannel:
+    Consortium: SampleConsortium
+    <<: *ChannelDefaults
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *Org1
+        - *Org2

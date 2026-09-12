@@ -1,0 +1,209 @@
+# PokeChain —— Fabric 2.5 双组织测试网络
+# 1 个单节点 Raft orderer + Org1/Org2 各 1 peer + 2 个 CouchDB + 2 个 Fabric CA。
+# 前置条件：先运行 scripts/up.sh 生成 organizations/ 与 channel-artifacts/。
+# CouchDB 不映射宿主机端口，仅在容器网络 pokechain_net 内可达。
+
+name: pokechain
+
+networks:
+  pokechain_net:
+    name: pokechain_net
+
+volumes:
+  orderer.pokechain.com:
+  peer0.org1.pokechain.com:
+  peer0.org2.pokechain.com:
+  couchdb0:
+  couchdb1:
+
+services:
+
+  orderer.pokechain.com:
+    container_name: orderer.pokechain.com
+    image: hyperledger/fabric-orderer:2.5.9
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_CLUSTER_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=file
+      - ORDERER_GENERAL_BOOTSTRAPFILE=/var/hyperledger/orderer/orderer.genesis.block
+      - ORDERER_METRICS_PROVIDER=prometheus
+      - ORDERER_OPERATIONS_LISTENADDRESS=0.0.0.0:8443
+    working_dir: /root
+    command: orderer
+    volumes:
+      - ./channel-artifacts/genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+      - ./organizations/ordererOrganizations/pokechain.com/orderers/orderer.pokechain.com/msp:/var/hyperledger/orderer/msp
+      - ./organizations/ordererOrganizations/pokechain.com/orderers/orderer.pokechain.com/tls:/var/hyperledger/orderer/tls
+      - orderer.pokechain.com:/var/hyperledger/production/orderer
+    ports:
+      - "7050:7050"
+    networks:
+      - pokechain_net
+
+  ca.org1.pokechain.com:
+    container_name: ca.org1.pokechain.com
+    image: hyperledger/fabric-ca:1.5.12
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca.org1.pokechain.com
+      # 签名身份复用 cryptogen 生成的组织 CA（priv_sk 由 up.sh 从 *_sk 复制）
+      - FABRIC_CA_SERVER_CA_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org1.pokechain.com-cert.pem
+      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/priv_sk
+      # TLS 证书由 CA 自签生成（含 localhost SAN），持久化到 organizations/fabric-ca/org1
+      - FABRIC_CA_SERVER_TLS_ENABLED=true
+      - FABRIC_CA_SERVER_PORT=7054
+      - FABRIC_CA_SERVER_CSR_HOSTS=0.0.0.0,localhost,ca.org1.pokechain.com
+    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+    volumes:
+      - ./organizations/fabric-ca/org1:/etc/hyperledger/fabric-ca-server
+      - ./organizations/peerOrganizations/org1.pokechain.com/ca:/etc/hyperledger/fabric-ca-server-config:ro
+    ports:
+      - "7054:7054"
+    networks:
+      - pokechain_net
+
+  ca.org2.pokechain.com:
+    container_name: ca.org2.pokechain.com
+    image: hyperledger/fabric-ca:1.5.12
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca.org2.pokechain.com
+      - FABRIC_CA_SERVER_CA_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org2.pokechain.com-cert.pem
+      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/priv_sk
+      - FABRIC_CA_SERVER_TLS_ENABLED=true
+      - FABRIC_CA_SERVER_PORT=8054
+      - FABRIC_CA_SERVER_CSR_HOSTS=0.0.0.0,localhost,ca.org2.pokechain.com
+    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+    volumes:
+      - ./organizations/fabric-ca/org2:/etc/hyperledger/fabric-ca-server
+      - ./organizations/peerOrganizations/org2.pokechain.com/ca:/etc/hyperledger/fabric-ca-server-config:ro
+    ports:
+      - "8054:8054"
+    networks:
+      - pokechain_net
+
+  couchdb0:
+    container_name: couchdb0
+    image: hyperledger/fabric-couchdb:0.4.22
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    # 无 ports 映射：仅在 pokechain_net 内容器间可达（couchdb0:5984）
+    volumes:
+      - couchdb0:/opt/couchdb/data
+    networks:
+      - pokechain_net
+
+  couchdb1:
+    container_name: couchdb1
+    image: hyperledger/fabric-couchdb:0.4.22
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    volumes:
+      - couchdb1:/opt/couchdb/data
+    networks:
+      - pokechain_net
+
+  peer0.org1.pokechain.com:
+    container_name: peer0.org1.pokechain.com
+    image: hyperledger/fabric-peer:2.5.9
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.org1.pokechain.com
+      - CORE_PEER_ADDRESS=peer0.org1.pokechain.com:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.org1.pokechain.com:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.pokechain.com:7051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.pokechain.com:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=0.0.0.0:9443
+      - CORE_METRICS_PROVIDER=prometheus
+      # CouchDB 作为状态数据库（支撑富查询与 META-INF 索引）
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+    working_dir: /root
+    command: peer node start
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/msp:/etc/hyperledger/fabric/msp
+      - ./organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/tls:/etc/hyperledger/fabric/tls
+      - peer0.org1.pokechain.com:/var/hyperledger/production
+    depends_on:
+      - orderer.pokechain.com
+      - couchdb0
+    ports:
+      - "7051:7051"
+    networks:
+      - pokechain_net
+
+  peer0.org2.pokechain.com:
+    container_name: peer0.org2.pokechain.com
+    image: hyperledger/fabric-peer:2.5.9
+    labels:
+      service: hyperledger-fabric
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.org2.pokechain.com
+      - CORE_PEER_ADDRESS=peer0.org2.pokechain.com:9051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:9051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.org2.pokechain.com:9052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:9052
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org2.pokechain.com:9051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org2.pokechain.com:9051
+      - CORE_PEER_LOCALMSPID=Org2MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=0.0.0.0:9444
+      - CORE_METRICS_PROVIDER=prometheus
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb1:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+    working_dir: /root
+    command: peer node start
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./organizations/peerOrganizations/org2.pokechain.com/peers/peer0.org2.pokechain.com/msp:/etc/hyperledger/fabric/msp
+      - ./organizations/peerOrganizations/org2.pokechain.com/peers/peer0.org2.pokechain.com/tls:/etc/hyperledger/fabric/tls
+      - peer0.org2.pokechain.com:/var/hyperledger/production
+    depends_on:
+      - orderer.pokechain.com
+      - couchdb1
+    ports:
+      - "9051:9051"
+    networks:
+      - pokechain_net

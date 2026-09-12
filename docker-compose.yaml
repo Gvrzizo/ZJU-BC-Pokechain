@@ -1,0 +1,184 @@
+name: pokechain-app
+
+# PokeChain 应用层编排：postgres + redis + minio(+init) + backend(NestJS) + frontend(nginx)。
+# 与 network/docker-compose.yaml（Fabric 网络，compose 项目 pokechain / 网络 pokechain_net）相互独立：
+# 本文件自建桥接网络 pokechain_app_net，默认 FABRIC_MOCK=true（mock 链世界状态存 Redis，无需 Fabric 网络）。
+#
+# 用法：
+#   docker compose up -d --build                 # 一键启动（mock 链模式）
+#   ./scripts/seed-demo.sh                       # 灌入演示数据（ash/gary/arbiter/admin，密码 demo1234）
+#   ./scripts/e2e-smoke.sh                       # 端到端冒烟（默认打 http://localhost:8080）
+#   docker compose down -v                       # 停止并清空数据卷
+#
+# 连接真实 Fabric 网络（先用 ./scripts/up.sh 把 network/ 起起来）：
+#   1) 取消 backend 服务下方标注 [real-fabric] 的 volumes / networks 注释，
+#      并取消本文件底部 networks.fabric 的注释（外部网络 pokechain_net）；
+#   2) FABRIC_MOCK=false docker compose up -d --build
+#   说明：容器内通过 peer0.org1.pokechain.com / ca.org1.pokechain.com 等主机名直连
+#   Fabric 网络（同一 docker 网络 pokechain_net 内可解析）；证书以只读卷挂载到 /network。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pokechain-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pokechain
+      POSTGRES_PASSWORD: pokechain
+      POSTGRES_DB: pokechain
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pokechain -d pokechain"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - app
+
+  redis:
+    image: redis:7-alpine
+    container_name: pokechain-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - app
+
+  minio:
+    image: minio/minio:latest
+    container_name: pokechain-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - app
+
+  # 一次性初始化：创建 bucket 并开放匿名只读下载（前端 <img>/fetch 直链可用）
+  minio-init:
+    image: minio/mc:latest
+    container_name: pokechain-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/pokechain-assets &&
+      mc anonymous set download local/pokechain-assets &&
+      echo '[minio-init] bucket pokechain-assets ready (anonymous read-only download)'
+      "
+    networks:
+      - app
+
+  backend:
+    build: ./backend
+    container_name: pokechain-backend
+    restart: unless-stopped
+    # backend/.env 存在时加载（本文件 environment 段的默认值优先级更高，会覆盖同名变量）
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      DATABASE_URL: postgres://pokechain:pokechain@postgres:5432/pokechain
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-pokechain-dev-secret-change-me-in-prod}
+      # ---- 链模式：默认 mock 链（世界状态在 Redis mockchain:*）；连真网络见文件头说明 ----
+      FABRIC_MOCK: ${FABRIC_MOCK:-true}
+      FABRIC_CHANNEL: ${FABRIC_CHANNEL:-gamechannel}
+      FABRIC_CHAINCODE: ${FABRIC_CHAINCODE:-pokemoncc}
+      FABRIC_PEER_ENDPOINT: ${FABRIC_PEER_ENDPOINT:-peer0.org1.pokechain.com:7051}
+      FABRIC_PEER_HOST_ALIAS: ${FABRIC_PEER_HOST_ALIAS:-peer0.org1.pokechain.com}
+      FABRIC_PEER_TLS_CERT_PATH: /network/organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/tls/ca.crt
+      FABRIC_CA_URL: ${FABRIC_CA_URL:-https://ca.org1.pokechain.com:7054}
+      FABRIC_CA_NAME: ${FABRIC_CA_NAME:-ca.org1.pokechain.com}
+      FABRIC_CA_TLS_CERT_PATH: /network/organizations/fabric-ca/org1/tls-cert.pem
+      CERT_ENC_KEY: ${CERT_ENC_KEY:-}
+      # ---- minio（真实对象存储；bucket 由 minio-init 建好）----
+      MINIO_MOCK: "false"
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: pokechain-assets
+      # manifest 中资源直链的浏览器可达基址
+      MINIO_PUBLIC_BASE_URL: ${MINIO_PUBLIC_BASE_URL:-http://localhost:9000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # node:20-alpine 无 curl，用 busybox wget
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # [real-fabric] 连接真实 Fabric 网络时取消以下两行注释（证书/连接配置只读挂载）：
+    # volumes:
+    #   - ./network/organizations:/network/organizations:ro
+    networks:
+      - app
+      # [real-fabric] 取消下一行注释加入 Fabric 网络（同时取消文件底部 networks.fabric 注释）：
+      # - fabric
+
+  frontend:
+    build: ./frontend
+    container_name: pokechain-frontend
+    restart: unless-stopped
+    # nginx 反代 /api 与 /socket.io 到 backend:3000（见 frontend/nginx.conf）
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/ || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app
+
+volumes:
+  pgdata:
+  miniodata:
+
+networks:
+  app:
+    name: pokechain_app_net
+    driver: bridge
+  # [real-fabric] 连接真实 Fabric 网络时取消注释（外部网络由 network/docker-compose.yaml 创建）：
+  # fabric:
+  #   external: true
+  #   name: pokechain_net

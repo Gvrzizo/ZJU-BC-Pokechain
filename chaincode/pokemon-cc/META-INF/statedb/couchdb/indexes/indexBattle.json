@@ -1,0 +1,6 @@
+{
+  "index": { "fields": ["docType", "playerA", "playerB"] },
+  "ddoc": "indexBattleDoc",
+  "name": "indexBattle",
+  "type": "json"
+}

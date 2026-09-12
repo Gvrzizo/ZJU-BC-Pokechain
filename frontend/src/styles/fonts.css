@@ -1,0 +1,57 @@
+/*
+ * 自托管像素字体（不依赖 Google Fonts 等外网 CDN）
+ *  - Press Start 2P：拉丁/数字，8×8 点阵网格，em = 8 格
+ *  - 缝合像素字体 Fusion Pixel 12px Proportional：中日韩，12×12 点阵网格，em = 12 格
+ * 许可证均为 SIL OFL 1.1，原文见 public/fonts/OFL-*.txt。
+ *
+ * 两套字体的原生度量互不相同，直接混排会出现「汉字比字母低一截、中英同行行高跳动」：
+ *  - 字形位置：中文字形在文件层面已上移 2 格（见 public/fonts/…-aligned.woff2 与
+ *    tools/align-cjk-font.py），字面框与 Press Start 2P 的大写字母带对齐。CSS 的
+ *    size-adjust / ascent-override 只改字号与行盒，改不了字形相对基线的位置，故这一步
+ *    必须落在字体文件上；
+ *  - 行盒：两个字体都钉成 ascent 1em / descent 0 / line-gap 0（Press Start 2P 原本就是
+ *    ascender 撑满 em），这样同一行里无论出现哪种字体、换行时行盒高度都不变，也不会因
+ *    平台（Windows 用 usWin* 度量、macOS/Linux 用 hhea）产生差异；
+ *  - size-adjust 保持 100%：12px 字号下中文 1 个点阵格 = 1 个 CSS 像素，点阵不糊。
+ */
+
+@font-face {
+  font-family: 'Press Start 2P';
+  src: url('/fonts/press-start-2p-latin-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+  ascent-override: 100%;
+  descent-override: 0%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Press Start 2P';
+  src: url('/fonts/press-start-2p-latin-ext-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+  ascent-override: 100%;
+  descent-override: 0%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Fusion Pixel 12px';
+  src: url('/fonts/fusion-pixel-12px-proportional-zh_hans-aligned.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  /* 100%：12px 字号下 1 个点阵格 = 1 个 CSS 像素，点阵最清晰 */
+  size-adjust: 100%;
+  ascent-override: 100%;
+  descent-override: 0%;
+  line-gap-override: 0%;
+}

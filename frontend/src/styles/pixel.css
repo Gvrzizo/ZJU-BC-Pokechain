@@ -1,0 +1,371 @@
+/* PokeChain 全局像素风样式 —— GBA 红宝石/蓝宝石 配色 */
+@import './fonts.css';
+
+:root {
+  --gba-green-dark: #1c3a1e;
+  --gba-green: #2f5d34;
+  --gba-green-light: #58a860;
+  --gba-grass: #70c878;
+  --gba-cream: #f8f0d8;
+  --gba-cream-dark: #e8d8a8;
+  --gba-brown: #6b4a2f;
+  --gba-brown-dark: #4a3220;
+  --gba-red: #d84040;
+  --gba-blue: #3878c8;
+  --gba-yellow: #f8c848;
+  --gba-ink: #282828;
+  --gba-hp-good: #48c048;
+  --gba-hp-mid: #f8c848;
+  --gba-hp-low: #e04840;
+
+  /* 拉丁/数字走 Press Start 2P，中文按字形回退到自托管的中文像素字体（见 fonts.css） */
+  --px-font: 'Press Start 2P', 'Fusion Pixel 12px', monospace;
+  /*
+   * 字号阶梯（点阵字体在整数倍网格下才清晰）
+   *   Press Start 2P：8px 网格 → 8 / 16 / 24px 清晰
+   *   Fusion Pixel  ：12px 网格 → 12 / 24px 清晰
+   * 两套网格的最小公倍数是 24px，对正文太大，故正文取 12px（中文 1:1 最清晰，
+   * 拉丁 1.5× 网格）；标题取 16px（拉丁 2× 网格）与 24px（双方都是整数倍）。
+   * 12px 是中文的下限，更小的字号只留给纯拉丁串（如 .mono 的哈希，8px = 拉丁 1:1）。
+   */
+  --px-fs-sm: 12px;
+  --px-fs-md: 12px;
+  --px-fs-lg: 16px;
+  --px-fs-xl: 24px;
+  /* 中文正文行高：1em 内容区 + 0.75em 行距，中文密排段落不挤也不散 */
+  --px-lh-body: 1.75;
+  --px-lh-tight: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--gba-green-dark);
+  color: var(--gba-ink);
+  font-family: var(--px-font);
+  font-size: var(--px-fs-md);
+  line-height: var(--px-lh-body);
+  image-rendering: pixelated;
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+canvas,
+img.pixel {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+a {
+  color: var(--gba-blue);
+  text-decoration: none;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--px-font);
+  margin: 0 0 12px;
+}
+
+h1 {
+  font-size: var(--px-fs-xl);
+}
+h2 {
+  font-size: var(--px-fs-lg);
+}
+
+/* ---- 像素边框面板（9-slice 风格，用多重 box-shadow 模拟） ---- */
+.px-panel {
+  position: relative;
+  background: var(--gba-cream);
+  border: 4px solid var(--gba-ink);
+  box-shadow:
+    inset -4px -4px 0 0 var(--gba-cream-dark),
+    inset 4px 4px 0 0 #fffef0,
+    0 4px 0 0 rgba(0, 0, 0, 0.35);
+  padding: 16px;
+}
+
+.px-panel--dark {
+  background: var(--gba-green);
+  color: var(--gba-cream);
+  box-shadow:
+    inset -4px -4px 0 0 var(--gba-green-dark),
+    inset 4px 4px 0 0 var(--gba-green-light),
+    0 4px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+/* ---- 像素按钮 ---- */
+.px-btn {
+  font-family: var(--px-font);
+  font-size: var(--px-fs-md);
+  padding: 10px 14px;
+  background: var(--gba-cream);
+  color: var(--gba-ink);
+  border: 3px solid var(--gba-ink);
+  box-shadow:
+    inset -3px -3px 0 0 var(--gba-cream-dark),
+    inset 3px 3px 0 0 #fffef0,
+    0 3px 0 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  image-rendering: pixelated;
+  user-select: none;
+}
+
+.px-btn:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow:
+    inset -3px -3px 0 0 var(--gba-cream-dark),
+    inset 3px 3px 0 0 #fffef0;
+}
+
+.px-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.px-btn--primary {
+  background: var(--gba-green-light);
+  color: #fff;
+  box-shadow:
+    inset -3px -3px 0 0 var(--gba-green),
+    inset 3px 3px 0 0 #98d8a0,
+    0 3px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+.px-btn--danger {
+  background: var(--gba-red);
+  color: #fff;
+  box-shadow:
+    inset -3px -3px 0 0 #a02828,
+    inset 3px 3px 0 0 #f07878,
+    0 3px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+.px-btn--blue {
+  background: var(--gba-blue);
+  color: #fff;
+  box-shadow:
+    inset -3px -3px 0 0 #205090,
+    inset 3px 3px 0 0 #78b0f0,
+    0 3px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+/* ---- 表单 ---- */
+.px-input,
+.px-select,
+.px-textarea {
+  font-family: var(--px-font);
+  font-size: var(--px-fs-md);
+  width: 100%;
+  padding: 10px;
+  background: #fffef0;
+  color: var(--gba-ink);
+  border: 3px solid var(--gba-ink);
+  box-shadow: inset 3px 3px 0 0 rgba(0, 0, 0, 0.12);
+  outline: none;
+}
+
+.px-input:focus,
+.px-select:focus,
+.px-textarea:focus {
+  border-color: var(--gba-blue);
+}
+
+.px-field {
+  margin-bottom: 14px;
+}
+
+.px-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--px-fs-sm);
+}
+
+/* ---- HP 条 ---- */
+.px-hpbar {
+  height: 12px;
+  background: #484848;
+  border: 2px solid var(--gba-ink);
+  overflow: hidden;
+}
+
+.px-hpbar__fill {
+  height: 100%;
+  background: var(--gba-hp-good);
+  transition: width 0.4s steps(12);
+}
+
+.px-hpbar__fill--mid {
+  background: var(--gba-hp-mid);
+}
+
+.px-hpbar__fill--low {
+  background: var(--gba-hp-low);
+}
+
+/* ---- 布局 ---- */
+.page {
+  flex: 1;
+  width: 100%;
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: var(--px-fs-sm);
+  padding: 4px 6px;
+  border: 2px solid var(--gba-ink);
+  background: var(--gba-cream-dark);
+}
+
+.badge--green {
+  background: var(--gba-hp-good);
+  color: #fff;
+}
+
+.badge--red {
+  background: var(--gba-red);
+  color: #fff;
+}
+
+.badge--blue {
+  background: var(--gba-blue);
+  color: #fff;
+}
+
+.badge--yellow {
+  background: var(--gba-yellow);
+}
+
+/* 链上哈希 / id 等纯拉丁串：8px = Press Start 2P 的 1:1 网格，点阵最清晰 */
+.mono {
+  word-break: break-all;
+  font-size: 8px;
+}
+
+.text-dim {
+  opacity: 0.7;
+}
+
+/* 性格修正：有利项红字 ↑、不利项蓝字 ↓（沿用原作图鉴的红/蓝标记，另带箭头不依赖颜色） */
+.stat-up {
+  color: var(--gba-red);
+}
+.stat-down {
+  color: var(--gba-blue);
+}
+
+.mt-8 {
+  margin-top: 8px;
+}
+.mt-16 {
+  margin-top: 16px;
+}
+.mb-8 {
+  margin-bottom: 8px;
+}
+.mb-16 {
+  margin-bottom: 16px;
+}
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ---- 动画 ---- */
+@keyframes px-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.blink {
+  animation: px-blink 1s steps(1) infinite;
+}
+
+@keyframes px-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-8px);
+  }
+  75% {
+    transform: translateX(8px);
+  }
+}
+
+.shake-anim {
+  animation: px-shake 0.25s steps(3) 3;
+}
+
+@keyframes px-check-pop {
+  0% {
+    transform: scale(0);
+  }
+  70% {
+    transform: scale(1.4);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.check-pop {
+  display: inline-block;
+  animation: px-check-pop 0.4s steps(4) forwards;
+  color: var(--gba-hp-good);
+}
+
+/* 顶部导航 */
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--gba-green-dark);
+  border-bottom: 4px solid var(--gba-ink);
+  padding: 8px 16px;
+}
+
+.topnav a {
+  color: var(--gba-cream);
+  font-size: var(--px-fs-sm);
+  padding: 6px 8px;
+  border: 2px solid transparent;
+}
+
+.topnav a.router-link-active {
+  border-color: var(--gba-cream);
+  background: var(--gba-green);
+}
+
+.topnav .spacer {
+  flex: 1;
+}

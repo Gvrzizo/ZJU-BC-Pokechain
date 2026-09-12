@@ -1,0 +1,92 @@
+{
+  "name": "pokechain-network-org1",
+  "version": "1.0.0",
+  "description": "PokeChain 连接 profile（Org1 视角）。路径均相对于仓库根目录；TLS 证书由 scripts/up.sh 生成后才存在。",
+  "client": {
+    "organization": "Org1",
+    "connection": {
+      "timeout": {
+        "peer": {
+          "endorser": "300"
+        },
+        "orderer": "300"
+      }
+    }
+  },
+  "channels": {
+    "gamechannel": {
+      "orderers": [
+        "orderer.pokechain.com"
+      ],
+      "peers": {
+        "peer0.org1.pokechain.com": {
+          "endorsingPeer": true,
+          "chaincodeQuery": true,
+          "ledgerQuery": true,
+          "eventSource": true
+        }
+      }
+    }
+  },
+  "organizations": {
+    "Org1": {
+      "mspid": "Org1MSP",
+      "peers": [
+        "peer0.org1.pokechain.com"
+      ],
+      "certificateAuthorities": [
+        "ca.org1.pokechain.com"
+      ],
+      "adminPrivateKey": {
+        "path": "network/organizations/peerOrganizations/org1.pokechain.com/users/Admin@org1.pokechain.com/msp/keystore"
+      },
+      "signedCert": {
+        "path": "network/organizations/peerOrganizations/org1.pokechain.com/users/Admin@org1.pokechain.com/msp/signcerts"
+      }
+    }
+  },
+  "peers": {
+    "peer0.org1.pokechain.com": {
+      "url": "grpcs://localhost:7051",
+      "tlsCACerts": {
+        "path": "network/organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/tls/ca.crt"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "peer0.org1.pokechain.com",
+        "hostnameOverride": "peer0.org1.pokechain.com",
+        "grpc.keepalive_time_ms": 120000
+      }
+    }
+  },
+  "orderers": {
+    "orderer.pokechain.com": {
+      "url": "grpcs://localhost:7050",
+      "tlsCACerts": {
+        "path": "network/organizations/ordererOrganizations/pokechain.com/orderers/orderer.pokechain.com/msp/tlscacerts/tlsca.pokechain.com-cert.pem"
+      },
+      "grpcOptions": {
+        "ssl-target-name-override": "orderer.pokechain.com",
+        "hostnameOverride": "orderer.pokechain.com",
+        "grpc.keepalive_time_ms": 120000
+      }
+    }
+  },
+  "certificateAuthorities": {
+    "ca.org1.pokechain.com": {
+      "url": "https://localhost:7054",
+      "caName": "ca.org1.pokechain.com",
+      "tlsCACerts": {
+        "path": "network/organizations/fabric-ca/org1/tls-cert.pem"
+      },
+      "httpOptions": {
+        "verify": false
+      },
+      "registrar": [
+        {
+          "enrollId": "admin",
+          "enrollSecret": "adminpw"
+        }
+      ]
+    }
+  }
+}

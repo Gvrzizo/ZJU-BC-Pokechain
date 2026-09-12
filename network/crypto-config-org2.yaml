@@ -1,0 +1,15 @@
+# PokeChain —— cryptogen 配置：Org2（仲裁方）
+# 输出目录：organizations/peerOrganizations/org2.pokechain.com
+# 1 个 peer（peer0.org2.pokechain.com）+ 1 个 Admin + 1 个普通 User。
+
+PeerOrgs:
+  - Name: Org2
+    Domain: org2.pokechain.com
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 1

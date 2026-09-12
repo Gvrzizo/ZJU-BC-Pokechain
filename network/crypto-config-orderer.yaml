@@ -1,0 +1,14 @@
+# PokeChain —— cryptogen 配置：排序组织（单节点 Raft，课程简化）
+# 输出目录：organizations/ordererOrganizations/pokechain.com
+# SANS 中加入 localhost / 127.0.0.1，使宿主机上的 peer CLI 与后端可以
+# 通过 localhost:7050 直连 orderer 而不受 TLS 主机名校验影响。
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: pokechain.com
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer
+        SANS:
+          - localhost
+          - 127.0.0.1
