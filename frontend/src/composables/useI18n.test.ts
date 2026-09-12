@@ -81,6 +81,24 @@ describe('名称查询与回退', () => {
     expect(natureName('unknown-nature')).toBe('unknown-nature');
   });
 
+  it('昵称优先（改名 docs/backend-api.md §2）：fallback 是昵称时直接显示，是种族名时仍按当前语言显示', () => {
+    // 未改名：链上 name 是铸造时的种族 slug / 英文名 / 中文名 → 一律显示当前语言的种族名
+    expect(monName(25, 'pikachu')).toBe('皮卡丘');
+    expect(monName(25, 'Pikachu')).toBe('皮卡丘');
+    expect(monName(25, '皮卡丘')).toBe('皮卡丘');
+    expect(monName(29, 'nidoran-f')).toBe('尼多兰♀');
+    expect(monName(83, 'farfetchd')).toBe('大葱鸭');
+    // 改过名：昵称优先，不会被种族名覆盖（含中文昵称与英文昵称）
+    expect(monName(25, '闪电鼠')).toBe('闪电鼠');
+    expect(monName(25, '小皮')).toBe('小皮');
+    expect(monName(25, 'Charmander')).toBe('Charmander');
+    // 战斗/捕捉界面把 nameZh 当 fallback（CaptureOverlay 的调用方式）：仍解析成当前语言的种族名
+    setLocale('en');
+    expect(monName(25, 'pikachu')).toBe('Pikachu');
+    expect(monName(25, '皮卡丘')).toBe('Pikachu');
+    expect(monName(25, '闪电鼠')).toBe('闪电鼠');
+  });
+
   it('技能名容错：后端英文显示名（空格/大小写）也能查到', () => {
     expect(moveName('Thunder Shock')).toBe('电击');
     expect(moveName('Dark Pulse')).toBe('恶之波动');

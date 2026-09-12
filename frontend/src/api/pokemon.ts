@@ -40,6 +40,28 @@ export async function releasePokemon(id: string): Promise<void> {
   await http.post(`/pokemon/${encodeURIComponent(id)}/release`);
 }
 
+/** `POST /pokemon/:id/rename` 响应（第一次免费，之后每次 50P，见 docs/backend-api.md §2「改名」）。 */
+export interface RenameResult {
+  /** 改名后的链上 name（昵称） */
+  name: string;
+  /** 改名后的累计次数（第一次改名后为 1） */
+  renameCount: number;
+  /** 本次是否扣费（第一次免费为 false） */
+  charged: boolean;
+}
+
+/**
+ * 改名：第一次免费，之后每次 50P。
+ * 昵称 1-12 个字符，不能包含控制字符与 `<>&"'`；锁定/已放生的宝可梦会被后端拒绝。
+ */
+export async function renamePokemon(id: string, name: string): Promise<RenameResult> {
+  const { data } = await http.post<RenameResult>(
+    `/pokemon/${encodeURIComponent(id)}/rename`,
+    { name },
+  );
+  return data;
+}
+
 /** 宝可梦中心治疗结果：`charged=false` 表示全员满血、本次未扣费（docs/backend-api.md §10）。 */
 export interface CenterHealResult {
   cost: number;

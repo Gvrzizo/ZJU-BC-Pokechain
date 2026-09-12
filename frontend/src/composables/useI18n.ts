@@ -71,11 +71,29 @@ export function t(key: string, params?: LocaleParams): string {
   return interpolate(raw, params);
 }
 
-/** 宝可梦名：收图鉴编号（25 / '25'）或英文名 / slug（'pikachu'），未收录回退 fallback → 原值 */
+/**
+ * 链上 `name` 是不是"种族名"（而不是玩家改的昵称）：与中/英词典的种族名等值，
+ * 或能被 slug 索引（'pikachu' / 'nidoran-f' / 'Mr. Mime'）解析回同一个图鉴编号。
+ * 未改名的链上 name 就是铸造时的种族 slug（`species.data.ts` 的 name 字段），改名后是玩家昵称。
+ */
+function isSpeciesLabel(dexId: number, value: string): boolean {
+  return (
+    pokemonIdBySlug(value) === dexId ||
+    MESSAGES.zh.pokemon[dexId] === value ||
+    MESSAGES.en.pokemon[dexId] === value
+  );
+}
+
+/**
+ * 宝可梦名：收图鉴编号（25 / '25'）或英文名 / slug（'pikachu'），未收录回退 fallback → 原值。
+ * **昵称优先**：fallback（链上 name）与种族名不同即视为昵称，直接显示（docs/backend-api.md §2「改名」）；
+ * 图鉴页只传 speciesId 不传 fallback，因此始终显示种族名。种族详情里仍能看到种族名（各视图自行展示）。
+ */
 export function monName(id: number | string, fallback?: string): string {
   const numeric = typeof id === 'number' ? id : /^\d+$/.test(id.trim()) ? Number(id) : Number.NaN;
   const dexId = Number.isFinite(numeric) ? numeric : pokemonIdBySlug(String(id));
   if (dexId !== undefined) {
+    if (fallback && !isSpeciesLabel(dexId, fallback)) return fallback;
     const name = dictionary.value.pokemon[dexId];
     if (name) return name;
   }

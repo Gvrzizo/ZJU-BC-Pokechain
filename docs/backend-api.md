@@ -26,16 +26,17 @@ Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + r
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/pokemon?owner=me` | 我的宝可梦（链上 QueryByOwner，Redis 缓存 5s；每只附带 `evs`、`stats` 六项能力值、**当前 HP `currentHp`/`fainted`**（链下伤势，见下）与进化链 `evolution`/`evolutions`） |
-| GET | `/pokemon/:id` | 详情（同上附带 `evs`、`stats`、`currentHp`/`fainted` 与进化链） |
+| GET | `/pokemon?owner=me` | 我的宝可梦（链上 QueryByOwner，Redis 缓存 5s；每只附带 `evs`、`stats` 六项能力值、**羁绊战斗加成百分比 `bondBonus`**（见下「能力值计算」）、**当前 HP `currentHp`/`fainted`**（链下伤势，见下）、**改名次数 `renameCount`**（链下 PG，见下「改名」）与进化链 `evolution`/`evolutions`） |
+| GET | `/pokemon/:id` | 详情（同上附带 `evs`、`stats`、`bondBonus`、`currentHp`/`fainted`、`renameCount` 与进化链） |
 | GET | `/pokedex` | 图鉴（species 静态表 + 我拥有数） |
-| POST | `/capture/encounter` | `{clientSeed?, lureTier?}` 随机遇敌：服务端生成 serverSeed+eventId，**先提交链码 `RandomContract.Commit`**，再从已验证派生流决定 species/等级（种类 `n=0`、等级 `n=1`）。**基础等级动态化**：`L` = 队伍最高等级（链上 IDLE，无队伍按 5），`基础等级 = clamp(L − 2 + floor(rand(1)×5), 2, 100)`。**付费诱饵 `lureTier`**：0 免费 / 1 = 50 积分（+5 级）/ 2 = 200 积分（+10 级、闪光概率 ×4 → 1/1024）；付费经链码 `AddPoints(-cost, reason='lure:tierN')` 原子扣减（余额不足抛 `INSUFFICIENT_POINTS`），并把 `{lureTier,cost}` 写入 `RandomCommit.meta` 上链留痕（`GET /fairness/:eventId` 的 `event.meta` 可见，防篡改可审计）。返回 `{eventId, wild:{speciesId,name,nameZh,level,previewSpriteUri,catchRate}, lure:{tier,cost,levelBonus,shinyMultiplier}, teamTopLevel, commitHash, clientSeed}`；`eventId` 是后续**野怪战斗**（主流程）或**快速捕捉**（兼容路径）的唯一凭据 |
+| POST | `/capture/encounter` | `{clientSeed?, lureTier?, zoneId?}` 随机遇敌：服务端生成 serverSeed+eventId，**先提交链码 `RandomContract.Commit`**，再从已验证派生流决定 species/等级（种类 `n=0`、等级 `n=1`）。**区域等级带**：`zoneId` ∈ `south`/`mid`/`north`（缺省 `south`，非法抛 `INVALID_ZONE`），区域固定**等级带**与**野生池门槛**——`south` Lv2-6 只出未进化型 / `mid` Lv8-16 可出一段进化型 / `north` Lv17-28 可出二段进化型；`等级 = zone.minLevel + floor(rand(1) × 带宽)`，**与玩家队伍等级彻底脱钩**（抓高级怪不再抬高野怪等级）；野生池按 `stage ≤ maxStage` 过滤 + 稀有度加权（见下「区域等级带与野生池」）。**付费诱饵 `lureTier`**：0 免费 / 1 = 50 积分（带内 +2 级）/ 2 = 200 积分（带内 +5 级、闪光概率 ×4 → 1/1024），加成**封顶 `zone.maxLevel`**；付费经链码 `AddPoints(-cost, reason='lure:tierN')` 原子扣减（余额不足抛 `INSUFFICIENT_POINTS`），并把 `{zone,lureTier?,cost?}` 写入 `RandomCommit.meta` 上链留痕（`GET /fairness/:eventId` 的 `event.meta` 可见，审计可据此复算 `n=0/n=1`）。返回 `{eventId, zone:{id,name,minLevel,maxLevel,maxStage}, wild:{speciesId,name,nameZh,level,previewSpriteUri,catchRate}, lure:{tier,cost,levelBonus,shinyMultiplier}, commitHash, clientSeed}`；`eventId` 是后续**野怪战斗**（主流程）或**快速捕捉**（兼容路径）的唯一凭据 |
 | POST | `/wild/start` | `{eventId, partyPokemonId?}` 开启服务端权威的**野怪战斗（PvE 捕捉主流程）**：队伍取链上 owner 名下 `status=IDLE` **且非濒死（0 HP）**的宝可梦（等级降序，并列取最早获得），首发默认等级最高者，可用 `partyPokemonId` 指定（非法/非 IDLE 抛 `INVALID_PARTY_POKEMON`，**指定濒死成员抛 `FAINTED`，全队濒死同样 `FAINTED`**）。**以链下当前 HP 出战**（伤势持久化，见下）。野怪个体由派生流野怪区域固定。返回会话 id 与初始状态（含队伍列表、各球当前捕捉成功率）。同一 `eventId` 幂等（重复 start 返回同一会话） |
 | POST | `/wild/:id/action` | `{action:{type:'move',moveId}\|{type:'ball',ballItemId}\|{type:'switch',targetPokemonId}\|{type:'run'}}` → 推进一个回合并返回新状态。规则见下文「野怪战斗」。已结束/超时的会话只返回终态（幂等，不再消耗球） |
 | GET | `/wild/:id` | 当前会话状态（重进战斗界面用；仅会话所有者可读） |
 | POST | `/capture/attempt` | **快速捕捉（兼容路径，e2e-smoke.sh 依赖）**：`{eventId, ballItemId}` → ① 校验球归属并 `ConsumeItem` ② 提交 `RevealAndVerify` ③ 按捕捉公式判定 ④ 成功则 `MintFromCapture`，失败返回 `{success:false, shakes:n}`。成功额外返回 `catchReward`（+20 积分，见 §10）。全程幂等（idemKey=eventId+'-attempt-'+n）。**等价于满血投球**：`p = captureProbability(1,1,catchRate,ballBonus)`；同一 eventId 的野怪战斗已结束时拒绝（`WILD_BATTLE_FINISHED`） |
 | POST | `/pokemon/:id/train` | **特训（只加努力值）**：链码 `AddPoints(-cost)` + `ApplyGrowth(evs += cost×4)`；**不改 exp/level**（等级只靠战斗经验与神奇糖果、个体值只靠王冠类道具，见下「集中升级路径」）。已满 510 EV 抛 `EV_MAXED`（不扣积分） |
-| POST | `/pokemon/:id/evolve` | 进化：**不带 `stoneItemId` = 等级进化**（EVOLUTIONS 里纯等级分支且等级达标，不消耗道具）；**带 = 进化石进化**（消耗 1 个对应石头）。两种路径都 `ApplyGrowth(speciesId 变更)` 并按新种族学习表补学技能。返回更新后的详情（含新进化链） |
+| POST | `/pokemon/:id/evolve` | 进化：**不带 `stoneItemId` = 等级进化**（EVOLUTIONS 里纯等级分支且等级达标，不消耗道具）；**带 = 进化石进化**（消耗 1 个对应石头）。两种路径都 `ApplyGrowth(speciesId 变更)` 并按新种族学习表补学技能。返回更新后的详情（含新进化链）。改过名的宝可梦进化后保留昵称 |
+| POST | `/pokemon/:id/rename` | `{name}` **改名（昵称）**：第一次免费，之后每次 **50 积分**（`AddPoints(-50, reason='rename:<pokemonId>:<ordinal>')`）+ 链上 `ApplyGrowth({name})`。昵称 1-12 个字符（trim + 折叠空白后按码点计，中英文均可），拒绝控制字符与 `<>&"'`；非本人（含已放生）`NOT_OWNER`(403)、交易/对战锁定中 `ASSET_LOCKED`(409)、格式非法 `INVALID_NAME`(400)、余额不足 `INSUFFICIENT_POINTS`(400)。返回 `{name, renameCount, charged}`，见下「改名」 |
 | POST | `/pokemon/:id/release` | `Release`（前端二次确认）；成功后 +等级×1 积分（reason=`reward:release:<pokemonId>`，见 §10），并清掉该宝可梦的伤势键 |
 | POST | `/pokemon/center/heal` | **宝可梦中心**：全队回满，每次 **10 积分**（`AddPoints(-10, reason='heal:center')`）。只治疗本人 `IDLE` 的宝可梦；全员满血时**不扣费**（`charged=false`）。返回 `{cost, charged, points, healed:[{pokemonId,speciesId,name,before,after,maxHp}]}`（见下「伤势持久化」） |
 | POST | `/pokemon/:id/moves/learn` | `{moveId, forgetMoveId?}` → `ApplyGrowth(moves)` |
@@ -67,10 +68,15 @@ HP        = floor((2×种族值 + IV + floor(EV/4)) × 等级 / 100) + 等级 + 
   顺序逐项填到 255 再溢出，总和封顶 510（链码 `ApplyGrowth` 二次校验，非法抛 `INVALID_PARAM`；服务端满额抛 `EV_MAXED`）。
   **积分不再换等级**：训练不改 `exp`/`level`（回归断言见 `backend/test/pokemon-stats.spec.ts`）。
 - **旧数据兼容**：`evs` 字段上线前铸造的链上记录缺失该字段，读写时一律按全 0 处理，无需迁移。
-- 战斗引擎（`backend/src/battles/engine/battle-engine.ts`）的 HP 上限、速度先手判定、伤害公式中的 A/D **全部使用上述最终能力值**（含性格修正与 EV）；
+- **羁绊加成（2026-09 新增，仅战斗内生效）**：最终能力值的**非 HP 五项**再乘 `1 + bond/255 × 5%`（向下取整），
+  即满羁绊（255）+5%、羁绊 128 约 +2.5%、刚铸造的 50 约 +1%；**HP 不吃羁绊**（避免血/双攻/双防全面膨胀）。
+  `computeStats(base, ivs, evs, level, nature, bond?)` 的第 6 参是羁绊值，缺省 0（无加成）；
+  详情/列表接口另外附带 `bondBonus`（加成百分比，两位小数，如 `2.51`），`stats` 本身仍是**不含羁绊**的基础最终值。
+  前端队伍页把它显示为「羁绊加成 +x.x%」（`team.bondBonus`），战斗引擎在出战时才把加成算进六项数值（见 §11.2）。
+- 战斗引擎（`backend/src/battles/engine/battle-engine.ts`）的 HP 上限、速度先手判定、伤害公式中的 A/D **全部使用上述最终能力值**（含性格修正、EV 与羁绊加成）；
   伤害公式本身不变：`floor( floor(((2×等级/5+2)×威力×A/D)/50) + 2 × 克制 × 暴击 × 随机(0.85–1) )`。
 
-**伤势持久化（HP 跨战斗保留，链下 Redis，2026-09 新增）**
+**伤势持久化（HP 跨战斗保留，链下 Redis，2026-09 新增；仅 PvE）**
 
 `POST /pokemon/center/heal`：**全队回满，每次 10 积分**（`AddPoints(-10, reason='heal:center')`；全员满血不扣费，`charged=false`）。
 
@@ -78,15 +84,38 @@ HP        = floor((2×种族值 + IV + floor(EV/4)) × 等级 / 100) + 等级 + 
   当前 HP 存链下 Redis `poke:hp:<pokemonId>`（`backend/src/pokemon/pokemon-hp.service.ts`），
   **缺键 = 满血**（上限由 `computeStats` 的 `stats.hp` 算出），因此首次读取无需数据迁移；
   越界/脏数据一律夹到 `[0, maxHp]`。Redis 丢失只损失"伤势"（全员满血），不损失任何资产。
-- **读写时机**：野怪战斗每次会话落盘时写回参战队伍 HP；PvP 在引擎终局（`end` 钩子）写回双方参战队伍 HP；
-  开局注入 `EngineMonInput.currentHp`（野怪 `wild.service::toCombatant`、PvP `battles.service::loadTeam` 与
-  `ranked/battle-launcher::loadTeam`）。
+- **适用范围（2026-09 调整）**：伤势**只影响野怪战斗（PvE）**——野怪战斗每次会话落盘时写回参战队伍 HP，
+  开局由 `wild.service::toCombatant` 注入当前 HP。**PvP 一律满血满状态出战**（普通押注房、排位、机器人场）：
+  `battles.service::loadTeam` 不带伤势，`BattleManagerService.startBattle` 统一剥掉任何 `EngineMonInput.currentHp`
+  （竞技只比养成与策略）；**对局结束不回写** `poke:hp`——PvP 的胜负不改变任何链下伤势。
 - **出战限制**：濒死（0 HP）不能出战——野怪队伍里直接剔除（全队濒死抛 409 `FAINTED`，指定濒死首发同样 `FAINTED`）；
-  PvP/排位队伍提交（`assertTeamOwnership`）与押注双确认前的二次校验都抛 409 `FAINTED`（链上资产此时尚未锁定）。
+  PvP/排位队伍提交（`assertTeamOwnership`）与押注双确认前的二次校验都抛 409 `FAINTED`（链上资产此时尚未锁定，
+  校验的仍是链下当前 HP：伤药/宝可梦中心治好之前不能报名 PvP）。
 - **恢复途径**：①伤药 `potion` +20 / 好伤药 `super-potion` +50（`POST /items/:id/use {targetPokemonId}`，不超上限、
   满血抛 409 `HP_FULL` 且不消耗道具）；②宝可梦中心（每次 10P，全员回满，全员满血不扣费）。
 - **展示口径**：`GET /pokemon` / `GET /pokemon/:id` 每只附带 `currentHp`（缺键=满血）与 `fainted`；
   前端队伍页/交换面板用 `HpBar` 展示当前/最大值，濒死标红并禁用出战。
+
+**改名（昵称，链下 PG 计数 + 链上 `name`，2026-09 新增）**
+
+- 链上 `name` 就是显示名（铸造时写入种族 slug，如 `pikachu`）；改名只更新它（`ApplyGrowth({name})`），
+  **"第一次免费、之后每次 50P" 的次数**存链下 PG 表 `pokemon_rename(pokemon_id PK, count)`
+  （`backend/src/pokemon/entities/pokemon-rename.entity.ts`，`count` = 已完成改名次数，0 = 从未改名）。
+- **昵称规则**（`backend/src/pokemon/pokemon-name.ts`）：trim + 折叠内部空白后 **1-12 个字符**（按 Unicode 码点计，
+  中英文均可）；**拒绝控制字符**（含换行/制表/零宽）与 **HTML 特殊字符 `<>&"'`**——与 battles 的 `sanitizeRoomText`
+  同为"先清洗后落链"，区别是昵称**拒绝而非转义**（转义后的 `&amp;` 会与玩家输入不一致）。
+- **计费与幂等**：第 `ordinal` 次改名（`ordinal = 已改名次数 + 1`，`ordinal = 1` 免费）的
+  `AddPoints(-50, reason='rename:<pokemonId>:<ordinal>')` 与 `ApplyGrowth({name})` 分别使用确定性幂等键
+  `<id>-rename-<ordinal>-charge` / `<id>-rename-<ordinal>`（**链上幂等记录是全局命名空间，两笔必须用不同的键**）；
+  中途失败后重试不会重复扣分。链上 `name` 已等于目标昵称时视为空操作（不扣费、不计数、不发交易）。
+- **校验顺序与错误码**：昵称格式 `INVALID_NAME`(400) → 归属 `NOT_OWNER`(403) → `status=IDLE` `ASSET_LOCKED`(409)
+  → 余额不足 `INSUFFICIENT_POINTS`(400，`AddPoints` 前预检，此时链上 `name` 与计数都不变)。
+- **响应**：`POST /pokemon/:id/rename` 返回 `{name, renameCount, charged}`（`renameCount` = 改名后的累计次数、
+  `charged` = 本次是否为付费改名（`ordinal > 1`；命中幂等键的重放不会重复扣费）；`GET /pokemon` / `GET /pokemon/:id` 每只附带 `renameCount` 供前端显示"首次免费 / 本次 50P"；
+  改名成功后列表缓存 `cache:pokemon:<owner>` 立即失效。
+- **展示口径**：队伍/战斗/捕捉界面**昵称优先**——前端 `useI18n.monName(speciesId, name)` 在链上 `name` 与种族名不同时
+  直接显示昵称（`frontend/src/composables/useI18n.ts`）；图鉴页只按 speciesId 显示种族名，队伍详情同时给出种族名。
+  改过名的宝可梦**进化后保留昵称**（未改名的仍按旧口径更新为新种族名）。
 
 **升级学习表（`backend/src/game-data/learnsets.data.ts`，自动生成）**
 
@@ -153,9 +182,26 @@ p = min(1, a / 255)                                                   // 大师�
   4. 纯伤害技能 `effect: null`（`hyper-beam`/`solar-beam` 等高威力招只标注"简化引擎不模拟充能回合"）。
   掷点顺序（PvP 顺序消费 / 野怪固定槽位，见下）：麻痹检查（仅麻痹者）→ 命中 → 暴击 → 伤害浮动 → 追加效果（仅 `stat`/`status`）。
 - **无队伍降级路径**：账号名下没有任何 `IDLE` 宝可梦时 `/wild/start` 抛 `NO_TEAM_POKEMON`，前端自动降级为"直接投球"（`POST /capture/attempt`，满血判定）并在界面上说明原因——保证新账号仍能抓到第一只宝可梦；`POST /capture/encounter` 额外返回 `wild.catchRate` 供该降级界面显示成功率。
-- 错误码：`WILD_SESSION_NOT_FOUND`(404)、`WILD_BATTLE_FINISHED`(409，快速捕捉路径对已结束会话)、`MUST_SWITCH`(409，濒死必须先换宠)、`FAINTED`(409，队伍提交/野怪出战遇到 0 HP 宝可梦)、`EVENT_CONSUMED`(409)、`NOT_OWNER`(403)、`INVALID_ACTION`/`UNKNOWN_MOVE`/`NO_TEAM_POKEMON`/`NOT_A_BALL`/`INSUFFICIENT_QUANTITY`/`INVALID_PARTY_POKEMON`/`INVALID_SWITCH`/`SWITCH_TO_ACTIVE`/`SWITCH_TO_FAINTED`/`INVALID_LURE_TIER`/`INSUFFICIENT_POINTS`(400)。
+- 错误码：`WILD_SESSION_NOT_FOUND`(404)、`WILD_BATTLE_FINISHED`(409，快速捕捉路径对已结束会话)、`MUST_SWITCH`(409，濒死必须先换宠)、`FAINTED`(409，队伍提交/野怪出战遇到 0 HP 宝可梦)、`EVENT_CONSUMED`(409)、`NOT_OWNER`(403)、`INVALID_ACTION`/`UNKNOWN_MOVE`/`NO_TEAM_POKEMON`/`NOT_A_BALL`/`INSUFFICIENT_QUANTITY`/`INVALID_PARTY_POKEMON`/`INVALID_SWITCH`/`SWITCH_TO_ACTIVE`/`SWITCH_TO_FAINTED`/`INVALID_LURE_TIER`/`INVALID_ZONE`/`INSUFFICIENT_POINTS`(400)。
 
-**分块派生布局（实现口径，`backend/src/pokemon/capture-derive.ts`）**：一个 eventId 覆盖一次 encounter **加其后的野怪战斗与全部 attempt**；`n=0` 野生种类（`WILD_TABLE` 8 种索引）、`n=1` 野生**基础等级** `clamp(L−2+floor(rand×5), 2, 100)`（L = 队伍最高等级、无队伍 5；诱饵 +5/+10 级，上限 100）；第 k 次投球（k=1,2,…）使用块 `base = 2+(k-1)*10`：`+0` 捕捉判定（`rand < p`，p 见上式）、`+1..+6` IV 六维 `floor(rand*32)`、`+7` 性格（25 种索引）、`+8` 闪光（`rand < shinyChance`，基准 1/4096、诱饵 tier 2 → 1/1024）、`+9` 失败摇晃 `1+floor(rand*3)`（1..3）；野怪战斗区域 `base = 20000`（`+0..+5` IV、`+6` 性格、`+7` 闪光，整场会话固定并用于铸造）与回合块 `base = 30000+(t-1)*16`（`+0` 野怪 AI 选招、`+1..+5` 我方 麻痹/命中/暴击/浮动/追加效果、`+6..+10` 野怪同五项、`+11` 平速裁决、`+12..+15` 预留）。该布局经 `GET /fairness/:eventId` 对外公示，完整论证见 `docs/randomness.md` §3。
+**区域等级带与野生池（`backend/src/game-data/encounter.data.ts`，2026-09 重做遇敌模型）**
+
+野怪不再"任何等级都能遇到任何怪"，也不再跟随队伍等级浮动。地图（前端 `frontend/src/game/scenes/OverworldScene.ts` 的 40×30 程序化地图）按 y 坐标分三个区域，遇敌时前端把 `zoneId` 随 `POST /capture/encounter` 传给后端（缺省 `south`，非法抛 `INVALID_ZONE`）：
+
+| 区域 | id | 地图 y 带（前端） | 等级带 | 野生池门槛 | 说明 |
+|---|---|---|---|---|---|
+| 101 号道路·南 | `south` | 20–29（出生区） | **Lv2-6** | `stage ≤ 0` | 只出未进化型，御三家 Lv5 足够打 |
+| 101 号道路·中 | `mid` | 10–19 | **Lv8-16** | `stage ≤ 1` | 可出一段进化型 |
+| 101 号道路·北 | `north` | 0–9 | **Lv17-28** | `stage ≤ 2` | 可出二段进化型（妙蛙花/喷火龙/准神等） |
+
+- **进化阶段 `stage`**：沿 `species.data.ts` 的 `EVOLUTIONS` 回溯（与 `tools/gen-learnsets.mjs` 同口径）——0 = 基础形态、1 = 一段进化、2 = 二段进化（皮丘→皮卡丘→雷丘 ⇒ 皮卡丘 1、雷丘 2；伊布 0、水伊布 1）。
+- **稀有度权重**（加权抽样的权重，`rarityWeight()`）：官方捕获率 `≥200` 常见 **60** / `80–199` 少见 **30** / `<80` 稀有 **10**；**种族值总量 ≥500**（`baseStatTotal ≥ RARE_BST`，准神/高种族值）在上述档位上再 **×0.3**（即 18/9/3）。例：波波（255）60 权重，妙蛙花（45、BST 525）3 权重——**出率差 20 倍**。
+- **等级**：`level = zone.minLevel + floor(rand(1) × (zone.maxLevel − zone.minLevel + 1))`，**只由区域决定**；付费诱饵在带内 `+2`（tier 1）/ `+5`（tier 2）并**封顶 `zone.maxLevel`**；闪光阈值口径不变（基准 1/4096，tier 2 → 1/1024）。
+- **池规模**：`south` 181 种（全部 stage 0）/ `mid` 317 种 / `north` 361 种（= 野生池全量）；门槛单调 `south ⊂ mid ⊂ north`。
+- **上链留痕**：`Commit.meta` 恒含 `zone`（免费档也写，`{"zone":"south"}`），付费档追加 `{"lureTier":n,"cost":c}`——审计者据此在 `/fairness` 复算 `n=0` 的加权抽样与 `n=1` 的等级。
+- **为什么与队伍等级脱钩**：旧口径 `clamp(队伍最高等级 − 2 + floor(rand×5), 2, 100)` 会让"抓高等级野怪 → 队伍等级上涨 → 野怪等级继续上涨"滚雪球，养成失去意义；现在南部永远 Lv2-6，高等级队伍也不会改变遇敌强度，成长的意义回到**选择去更北的区域**与培育本身。
+
+**分块派生布局（实现口径，`backend/src/pokemon/capture-derive.ts`）**：一个 eventId 覆盖一次 encounter **加其后的野怪战斗与全部 attempt**；`n=0` 野生种类（**区域野生池的加权索引**：权重区间累计和落入 `rand(0)×总权重`，池与权重见上「区域等级带与野生池」）、`n=1` 野生**等级** `zone.minLevel + floor(rand × 带宽)`（诱饵带内 +2/+5，封顶 `zone.maxLevel`）；第 k 次投球（k=1,2,…）使用块 `base = 2+(k-1)*10`：`+0` 捕捉判定（`rand < p`，p 见上式）、`+1..+6` IV 六维 `floor(rand*32)`、`+7` 性格（25 种索引）、`+8` 闪光（`rand < shinyChance`，基准 1/4096、诱饵 tier 2 → 1/1024）、`+9` 失败摇晃 `1+floor(rand*3)`（1..3）；野怪战斗区域 `base = 20000`（`+0..+5` IV、`+6` 性格、`+7` 闪光，整场会话固定并用于铸造）与回合块 `base = 30000+(t-1)*16`（`+0` 野怪 AI 选招、`+1..+5` 我方 麻痹/命中/暴击/浮动/追加效果、`+6..+10` 野怪同五项、`+11` 平速裁决、`+12..+15` 预留）。该布局经 `GET /fairness/:eventId` 对外公示，完整论证见 `docs/randomness.md` §3。
 
 ## 3. 道具
 
@@ -225,11 +271,12 @@ p = min(1, a / 255)                                                   // 大师�
 ### REST
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/battles/rooms` | `{mode:'1v1', name?, note?, wager, teamPokemonIds}` 创建房间（房主=A；房名/备注见下） |
+| POST | `/battles/rooms` | `{mode:'1v1', name?, note?, wager, teamPokemonIds}` 创建房间（房主=A；房名/备注见下；`teamPokemonIds` **1-6 只**） |
 | GET | `/battles/rooms` | 大厅列表（Redis 缓存，5s；`wagerA/wagerB` 为归一后的押注包，`name/note/joinMessage` 为房名/备注/加入者留言，见下） |
-| POST | `/battles/rooms/:id/join` | `{wager, teamPokemonIds, message?}` 加入（=B；`message` 为给房主的留言 ≤100 字） |
-| GET | `/battles/rooms/:id` | 房间详情：房间本体 + **双方押注富化明细** `wagerDetailA/wagerDetailB`（"查看押注"弹窗） |
+| POST | `/battles/rooms/:id/join` | `{wager, teamPokemonIds, message?}` 加入（=B；队伍 **1-6 只**；`message` 为给房主的留言 ≤100 字） |
+| GET | `/battles/rooms/:id` | 房间详情：房间本体 + **双方押注富化明细** `wagerDetailA/wagerDetailB` + **双方出战队伍富化明细** `teamDetailA/teamDetailB`（"查看押注"/"查看队伍"弹窗，任何人可看） |
 | PATCH | `/battles/rooms/:id` | 房主改 `{name?, note?}`（仅房主、押注双确认前） |
+| DELETE | `/battles/rooms/:id` | 房主删除房间（**仅 WAITING**：还没人加入；有人加入 → 409 `ROOM_NOT_EMPTY`，先 `kick`；`ACTIVE`/`FINISHED` → 409 `ROOM_NOT_OPEN`）。房间记录、大厅索引与大厅缓存一并清理 |
 | POST | `/battles/rooms/:id/kick` | 房主请离加入者 `{playerId}`：房间回 WAITING（仅双方确认押注前） |
 | POST | `/battles/rooms/block` | 屏蔽玩家 `{playerId}`（默认 30 分钟）：其加入我创建的房间 → 403 `BLOCKED_BY_HOST` |
 | DELETE | `/battles/rooms/block/:playerId` | 解除屏蔽（幂等） |
@@ -265,7 +312,7 @@ p = min(1, a / 255)                                                   // 大师�
     "items": [{ "id": "i_xxx", "qty": 3 }],      // 道具按数量押注：qty ≥ 1，整堆 = qty = 堆叠总量
     "points": 50                                 // 押注积分（默认 0）
   },
-  "teamPokemonIds": ["p_xxx"]                    // 出战队伍（非空，须本人 IDLE 且非濒死宝可梦）
+  "teamPokemonIds": ["p_xxx"]                    // 出战队伍（1-6 只，须本人 IDLE 且非濒死宝可梦）
 }
 ```
 
@@ -279,30 +326,35 @@ p = min(1, a / 255)                                                   // 大师�
 | code | HTTP | 场景 |
 |---|---|---|
 | `INVALID_PARAM` | 400 | wager 结构非法（`items`/`itemIds` 混用、资产重复、`qty` 非正整数等）；`PATCH /battles/rooms/:id` 未给任何字段 |
+| `INVALID_TEAM_SIZE` | 400 | 出战队伍不是 **1-6 只**（创建/加入房间、排位入队同一口径） |
 | `ITEM_NOT_FOUND` | 404 | 押注道具不存在 |
 | `NOT_OWNER` | 403 | 押注道具 / 出战宝可梦不属于本人 |
 | `ASSET_LOCKED` | 409 | 押注道具 / 宝可梦已被锁定（交易或对战） |
 | `FAINTED` | 409 | 出战队伍里有 0 HP 的宝可梦（伤势持久化：队伍提交与押注双确认前各校验一次，链上资产此时尚未锁定） |
 | `INSUFFICIENT_QUANTITY` | 409 | `qty` 超过该堆叠当前持有量 |
 | `ROOM_NOT_OPEN` / `ROOM_NOT_READY` / `SAME_PLAYER` | 409 | 非 WAITING 房间加入 / 房间未就绪 / 加入自己的房间；房名备注与请离在 `ACTIVE`/`FINISHED` 后同样返回 `ROOM_NOT_OPEN` |
-| `NOT_HOST` | 403 | 非房主调用 `PATCH /battles/rooms/:id` 或 `POST /battles/rooms/:id/kick` |
+| `NOT_HOST` | 403 | 非房主调用 `PATCH`/`DELETE /battles/rooms/:id` 或 `POST /battles/rooms/:id/kick` |
+| `ROOM_NOT_EMPTY` | 409 | `DELETE /battles/rooms/:id` 时房间里已有挑战者（`JOINED`）——先 `kick` 再删 |
 | `PLAYER_NOT_IN_ROOM` | 409 | 请离的目标不是当前加入者（`playerB`） |
 | `BLOCKED_BY_HOST` | 403 | 被房主屏蔽（30 分钟有效期内）后 `join` 该房主的房间 |
 | `TEMPLATE_LIMIT` | 409 | 押注模板超过 10 个 |
 | `TEMPLATE_NOT_FOUND` | 404 | 删除不存在 / 不属于自己的模板 |
 
-#### 房间体验扩展（房名 / 备注 / 留言 / 请离 / 屏蔽 / 押注模板）
+#### 房间体验扩展（队伍规模 / 删房间 / 看队伍 / 房名备注 / 请离 / 屏蔽 / 押注模板）
 
+- **出战队伍规模 1-6 只**：`POST /battles/rooms`、`POST /battles/rooms/:id/join` 的 `teamPokemonIds` 与排位 `POST /ranked/queue` 同一口径，超出/为空 → 400 `INVALID_TEAM_SIZE`（服务层校验，先于资产归属校验；`CreateBattle` 前的 `confirmWager` 会再跑一次同一个断言）。前端 `WagerPicker` 与 `RankedView` 在第 7 只时拒选并提示（`components/team-picker.ts::TEAM_SIZE_MAX`）。
+- **房主删除房间**（`DELETE /battles/rooms/:id`）：仅房主、**仅 `WAITING`**（没有任何挑战者）时可删——房间记录、`battle:rooms` 索引与大厅缓存一并清理，响应 `{deleted:true, roomId}`。有挑战者（`JOINED`）→ 409 `ROOM_NOT_EMPTY`（提示先 `kick`，避免把对手的报名直接抹掉）；`ACTIVE`/`FINISHED` → 409 `ROOM_NOT_OPEN`（资产已链上锁定/已结算，只能走对局流程）。非房主 403 `NOT_HOST`，重复删除 404 `ROOM_NOT_FOUND`。前端大厅自己房间卡片上的"删除房间"按钮带二次确认。
+- **互看出战队伍**：房间详情返回 `teamDetailA/teamDetailB`（队伍富化明细，**任何登录用户都能看，含旁观者**——不要求是房间当事人，也不要求押注已确认），前端大厅卡片 / 加入 / 确认面板的"查看队伍"弹窗（`TeamInspectDialog`）直接展示。字段口径与押注富化完全一致（见下），因此 IV/EV/性格不在响应里，`bond` 是公开的展示值。
 - **房名与备注**（`name` ≤30 字、`note` ≤100 字）：创建房间可带，房主可用 `PATCH /battles/rooms/:id {name?, note?}` 修改（仅房主、押注双确认前；空串 = 清空）。服务端统一 **trim + HTML 转义**（`& < > " '` 转义、控制字符折叠），落库/落 Redis 的即转义后的文本；大厅列表与房间详情原样返回，前端用文本插值渲染（不再有二次注入面）。超长由 DTO 直接 400。
 - **加入者留言**（`join.message` ≤100 字，可选）：随房间返回（`joinMessage`，房主与加入者都能在确认面板看到），房间回 `WAITING`（被请离/重开）时清空；同样 trim + 转义。
 - **房主拒绝权**（`POST /battles/rooms/:id/kick {playerId}`）：仅房主、且仅在**双方确认押注前**（房间 `WAITING`/`JOINED`；双确认即链上 `CreateBattle` 锁定资产，此后只能 forfeit/结算）。成功后房间回 `WAITING` 并清空 `playerB/wagerB/teamB/joinMessage`，**双方确认状态一并重置**（押注清单变了，房主需重新确认）。被请离者通过其房间列表轮询（5s，发现"我不再是 B 且房间回 WAITING"）或 `battle:room-kicked {roomId, hostId, playerId}` 推送（服务端推给 `user:<playerId>` 房间）收到提示。
 - **屏蔽名单**（`POST /battles/rooms/block {playerId}` / `DELETE /battles/rooms/block/:playerId` / `GET /battles/rooms/blocks`）：按**屏蔽者维度**存 PG `player_blocks`，默认 TTL 30 分钟（`BATTLE_BLOCK_TTL_MS` 覆盖，过期记录读取时惰性清理）。有效期内被屏蔽者 `join` **该房主创建的任何房间**都返回 403 `BLOCKED_BY_HOST`；屏蔽不改变已在房间内玩家的状态（要走人用"请离"），也不能屏蔽自己（`INVALID_PARAM`）。
 - **押注模板**（`GET/POST/DELETE /battles/templates`）：存 PG `wager_templates`，每用户最多 10 个（超出 409 `TEMPLATE_LIMIT`），内容 = 名称（≤30）+ 备注（≤100）+ 归一后的押注清单（与链上 `Battle.wager` 同形态）。模板只保存"当时的清单"，资产会随易主/消耗过期——载入时前端按当前背包裁剪（剔除不在背包/非 IDLE 的项、数量夹到持有量），创建/加入房间仍以链上校验为准。
-- **房间详情**（`GET /battles/rooms/:id`）：房间本体 + **双方押注富化**，供大厅卡片 / 加入 / 确认面板的"查看押注"弹窗一键展示：
+- **房间详情**（`GET /battles/rooms/:id`）：房间本体 + **双方押注富化** `wagerDetailA/B` + **双方出战队伍富化** `teamDetailA/B`，供大厅卡片 / 加入 / 确认面板的"查看押注"、"查看队伍"弹窗一键展示：
 
 ```jsonc
 {
-  // ...BattleRoom 全字段（含 name / note / joinMessage / wagerA / wagerB / confirmations / status）
+  // ...BattleRoom 全字段（含 name / note / joinMessage / wagerA / wagerB / teamA / teamB / confirmations / status）
   "wagerDetailA": {
     "points": 25,
     "pokemon": [{
@@ -314,17 +366,36 @@ p = min(1, a / 255)                                                   // 大师�
     "items": [{ "id": "i_xxx", "typeId": "poke-ball", "name": "Poké Ball", "nameZh": "精灵球", "qty": 3, "held": 5, "unavailable": false }],
     "totals": { "pokemon": 1, "itemQty": 3, "points": 25 }
   },
-  "wagerDetailB": null               // 未加入时为 null
+  "wagerDetailB": null,              // 未加入时为 null
+  "teamDetailA": [{                  // 房主出战队伍（id 顺序 = teamA 顺序）
+    "id": "p_xxx", "name": "pikachu", "speciesId": 25, "nameZh": "皮卡丘",
+    "level": 20, "shiny": false, "bond": 55,
+    "stats": { "hp": 44, "atk": 35, "def": 28, "spatk": 30, "spdef": 30, "speed": 41 },
+    "unavailable": false
+  }],
+  "teamDetailB": null                // 未加入时为 null（字段口径与 teamDetailA 相同）
 }
 ```
 
-- `stats` 用与 `GET /pokemon/:id` 相同的口径（种族值 + IV + EV + 等级 + 性格，见 §2「能力值计算」）；`qty` 是押注数量、`held` 是该堆叠当前持有量（`0` = 已不在链上）。
+- `stats` 用与 `GET /pokemon/:id` 相同的口径（种族值 + IV + EV + 等级 + 性格，见 §2「能力值计算」）；`qty` 是押注数量、`held` 是该堆叠当前持有量（`0` = 已不在链上）。`wagerDetail*` / `teamDetail*` 的宝可梦一项**只有公开字段**（`id/name/speciesId/nameZh/level/shiny/bond/stats/unavailable`）——`name` 是链上名字（改名后即玩家昵称），`stats` 是最终六项能力值，**IV/EV/性格不出现在任何房间响应里**。
 
 ### WebSocket（Socket.IO，命名空间 `/battle`，JWT 鉴权）
 - 客户端→服务端：`battle:join {battleId}`、`battle:action {battleId, seq, action}`
 - `action` 用**资产 id** 而非引擎槽位：`{type:'move', moveId:'thunderbolt'}`、`{type:'switch', targetPokemonId:'p_xxx'}`、`{type:'run'}`；服务端按对局 state 解析成引擎槽位（引擎原生 `moveIndex`/`toIndex` 仍接受，内部/测试用，与 id 形式二选一）。`item` 类型暂不支持：服务端直接拒绝 `ITEM_NOT_SUPPORTED`，**不消耗回合**（避免旧行为里道具动作吞掉一次行动）。
 - `battle:error` 常见 code：`BAD_ACTION`（action.type 缺失/未知）、`UNKNOWN_MOVE`（技能不属于出战宝可梦）、`UNKNOWN_POKEMON`（换宠目标不在队伍）、`INVALID_MOVE_INDEX` / `INVALID_SWITCH_INDEX`、`SWITCH_TO_ACTIVE` / `SWITCH_TO_FAINTED` / `MUST_SWITCH`、`ACTION_ALREADY_SUBMITTED`、`ITEM_NOT_SUPPORTED`、`BATTLE_FINISHED`、`BATTLE_NOT_LIVE`、`NOT_PARTY`、`UNAUTHORIZED`；前端 `BATTLE_ERROR_TEXT` 映射为中文提示，未收录的 code 原样展示。
 - 服务端→客户端：`battle:state {fullState}`（每回合广播，服务端权威）、`battle:turn {awaitingPlayerId, deadline}`、`battle:entry {awaitingPlayerIds, deadline, graceMs}`（入场宽限期内的等待方）、`battle:end {winnerId, resultHash, txId}`、`battle:error {code}`、`battle:activated {roomId, battleId}`（押注双确认、战斗激活后向双方 `user:<playerId>` 房间推送——**先确认方没有携带 battleId 的 REST 响应，靠该推送自动进入 `/battle/:id`**；大厅视图需长连 `/battle` 监听）、`battle:room-kicked {roomId, hostId, playerId}`（房主请离后推给被请离者 `user:<playerId>` 房间；大厅视图同时用 5s 轮询兜底发现被请离，见 §5 房间体验扩展）
+- **实时战斗日志（2026-09 新增）**：`battle:state.state.log` 是**每个已结算回合**的完整事件数组
+  `[{turn, actions:{A,B}, events:[{kind, side?, detail}]}]`，随每次 `battle:state` 全量推送（含单方已出手、
+  回合未结算时的推送——那时新回合尚未入 log）；`battle:join` 的快照同样带全量 log，重连后日志不丢。
+  `kind` ∈ `switch|move|miss|damage|faint|run|win|paralyzed|status|status-damage|stat|drain|recoil`，
+  `detail` 除各自字段（move/damage/eff/crit/roll/healed…）外，**攻击/受击/异常/能力阶级事件都带
+  `pokemonId`（受影响单位）与 `attacker`/`defender`（出手方/目标方 id）**——服务端只下发 id，
+  前端 `frontend/src/game/battle-log.ts` 用 `useI18n` 的 `monName`/`moveName` 换成当前语言的名字后，
+  在 `BattleView` 的「战斗日志」面板逐行滚动展示（"喷火龙 使用了 喷射火焰！/ 效果绝佳！对 皮卡丘 造成 87 点伤害 /
+  皮卡丘 陷入了灼伤！/ 皮卡丘 倒下了！"）。`log` 同时是 `resultHash` 的哈希对象（`canonical(回合日志)`），
+  与 `GET /battles/:id/replay` 的落库内容一致，可事后复核。
+- **PvP 满血出战**：实时对局（房间/排位/机器人）双方都以**满血满状态**开局并**不回写**链下 HP
+  （`poke:hp` 只被野怪战斗读写，见 §2「伤势持久化」）；濒死校验仍在**报名/提交队伍**时生效。
 - 规则：**服务端权威**计算（简化回合制：速度决定先手、属性克制表、命中/暴击用该 battle 的 RandomCommit 派生流、**能力阶级/异常状态已落地**（见 §2「技能特效」，burn/psn/par 三种，掷点顺序 麻痹→命中→暴击→浮动→追加效果））；每回合 30s 超时 → 超时方判负走 `Forfeit`；掉线 60s 未重连判负；结束后服务端 `SubmitResult(resultHash=sha256(canonical(回合日志)), serverSig=secp256k1 签名)` → **前端双方客户端收到 `battle:end` 后自动** `ConfirmResult`（结算面板显示"已确认 x/2，等待对方确认"；自动确认失败时给手动"确认结算"按钮；SETTLED 后提示"押注已交付"并刷新背包/积分）→ 二次确认即链上 SETTLED；2 分钟（`BATTLE_SETTLE_FALLBACK_MS`）无人确认时服务端 `SettleBattle` 兜底。
 - **入场宽限（`BATTLE_ENTRY_GRACE_MS`，默认 90s）**：战斗激活后双方各自 `battle:join` 视为到场，**双方都到齐才启动 30s 回合计时**（宽限期内不发 `battle:turn`）；宽限结束时仍有一方未到场 → 该方 `Forfeit` 判负（押注归对方，非 DRAW），双方都没到场才判 DRAW。战斗开始后掉线仍按 60s 判负。
 - **房间生命周期**：房间在其 battle 进入终态（SETTLED/REFUNDED）后立即置为 FINISHED 并从 `GET /battles/rooms` 列表剔除（含引擎自行结束的路径与重启/结算兜底后的对账）；`ACTIVE` 房间仅对当事双方显示"回到战斗"重连入口，重连失败（`BATTLE_NOT_LIVE`）时前端提示"该对局已结束或已清理"并自动退回大厅、刷新列表。
@@ -410,8 +481,8 @@ helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/ranked/queue` | `{teamPokemonIds, mode?}`（`mode:'casual'` 默认 / `'arena'` 积分场）→ 进 Redis 匹配队列（ZSET `ranked:queue`，score=rating）并立即尝试配对。**入队即校验队伍：非本人/非 IDLE/濒死（0 HP）分别抛 403 `NOT_OWNER`、409 `ASSET_LOCKED`、409 `FAINTED`（指明是哪只）**——带濒死者不能排队（arena 同样，未扣准入）。返回排队状态（见下） |
-| GET | `/ranked/queue/status` | 排队状态轮询，**每轮都会再尝试一次配对**（轮询即匹配）。`QUEUED` 带 `waitedMs/waitedSec/window/queueSize/botOffer/entryFee`；`MATCH_PENDING` 带对手与 15s 接受期；`MATCHED` 带 `battleId/roomId/opponent`（机器人场 `roomId=null, bot=true`）；条目过期（300s）→ `TIMEOUT`；配对失败 → `ERROR`（带原因） |
+| POST | `/ranked/queue` | `{teamPokemonIds, mode?}`（`mode:'casual'` 默认 / `'arena'` 积分场）→ 进 Redis 匹配队列（ZSET `ranked:queue`，score=rating）并立即尝试配对。**入队即校验队伍：规模 1-6（否则 400 `INVALID_TEAM_SIZE`）、非本人/非 IDLE/濒死（0 HP）分别抛 403 `NOT_OWNER`、409 `ASSET_LOCKED`、409 `FAINTED`（指明是哪只）**——带濒死者不能排队（arena 同样，未扣准入）。返回排队状态（见下） |
+| GET | `/ranked/queue/status` | 排队状态轮询，**每轮都会再尝试一次配对**（轮询即匹配）。`QUEUED` 带 `waitedMs/waitedSec/window/queueSize/botOffer/entryFee`；`MATCH_PENDING` 带对手、15s 接受期与**对手出战队伍预览**（见下「接受期看对手阵容」）；`MATCHED` 带 `battleId/roomId/opponent`（机器人场 `roomId=null, bot=true`，`MATCH_PENDING` 不会出现）；条目过期（300s）→ `TIMEOUT`；配对失败 → `ERROR`（带原因） |
 | POST | `/ranked/queue/accept` | 接受匹配（15 秒接受期内；**双方都接受才建房**，第二个 accept 返回 `MATCHED`） |
 | POST | `/ranked/queue/decline` | 拒绝匹配：双方回队列，自己 30 秒内窗口重置为 ±200（且 30 秒内不再与该对手配对）；返回 `QUEUED` + 提示文案 |
 | POST | `/ranked/queue/accept-bot` | 接受机器人对手（排队满 60 秒才可用；casual 专属，arena → 409 `ARENA_BOT_UNAVAILABLE`；超每日 5 场 → 429 `BOT_DAILY_LIMIT`） |
@@ -437,13 +508,34 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 - 配对条件：分差 ≤ `min(窗口A, 窗口B)`（双方都要能接受这个分差）；**先入队者为 playerA**（同毫秒按 playerId 字典序）。
 - 两侧窗口由 ZSET 全量读取后在内存里筛（队列规模是演示级）；配对临界区由 Redis 锁 `ranked:matchlock` 串行化，每次只配一对。
 - 队列条目 `ranked:queue:<playerId>`（TTL **300 秒**）：队伍 / 入队时 rating / 入队时间 / `mode` / `windowResetUntil` / `avoid`（刚拒绝的对手）/ `matchId`；过期条目在下次匹配时惰性清理，前端收到 `TIMEOUT`。
-- 待确认对局 `ranked:pending:<matchId>`（TTL 60s）+ 双方索引 `ranked:pending:of:<playerId>`：`{mode, playerA/B, ratingA/B, acceptA/B, deadline(15s)}`；接受期结束（超时）由轮询惰性回收，未接受方按"拒绝方"处理。
+- 待确认对局 `ranked:pending:<matchId>`（TTL 60s）+ 双方索引 `ranked:pending:of:<playerId>`：`{mode, playerA/B, ratingA/B, teamA/B(配对时的队伍快照), acceptA/B, deadline(15s)}`；接受期结束（超时）由轮询惰性回收，未接受方按"拒绝方"处理。
+
+**接受期看对手阵容（`MATCH_PENDING`）**
+
+`GET /ranked/queue/status`（以及 accept/decline 的响应）在 `MATCH_PENDING` 时把对手的出战队伍一并返回，供双方在接受/拒绝前评估对局：
+
+```jsonc
+{
+  "state": "MATCH_PENDING",
+  "opponent": {
+    "playerId": "gary", "nickname": "小茂", "rating": 1010,
+    "team": [{                       // 裁剪视图：只有对局中人人可见的信息
+      "id": "p_xxx", "name": "pikachu", "speciesId": 25, "nameZh": "皮卡丘",
+      "level": 20, "shiny": false,
+      "stats": { "hp": 44, "atk": 35, "def": 28, "spatk": 30, "spdef": 30, "speed": 41 }
+    }]
+  }
+}
+```
+
+- **隐私裁剪**：`team[]` 里只有 `id/name/speciesId/nameZh/level/shiny/stats`——**没有 IV、EV、性格**（这些在原作里对对手不可见，`stats` 是已经算好的最终值），也不含 `bond`（羁绊只在我方视角与房间详情里出现）。实现：`wager-detail.ts::toOpponentTeam`（`enrichTeam` 后按白名单取字段），队伍 id 来自配对时写入的 `teamA/teamB` 快照，旧记录回退读该玩家的排队条目。
+- 队伍规模/归属/濒死校验与入队一致（1-6、本人、IDLE、非濒死）；`MATCHED` 之后不再返回 `team`（对局已开始，阵容在战斗界面里看）。
 
 **建房（双方接受之后）**
 
 - `casual`：**沿用既有房间流程**——`wager={pokemonIds:[],items:[],points:0}`、双方自动加入 + 自动确认押注 → `CreateBattle` → `ActivateBattle` → 引擎开局，并推送 `battle:activated`。排位房与普通房在同一大厅列表/对局列表里（`FINISHED` 后同样出列）。
 - `arena`：**先扣双方准入积分（扣失败即取消建房），再建房**，因此 battleId 由排位侧生成（reason 要带 battleId）；房间仍是同一套记录（`createRoom`/`joinRoom` + 激活记账），机器人场没有房间（`roomId=null`）。
-- 队伍校验与普通房一致：每只宝可梦必须属于本人、`status=IDLE` **且非濒死（0 HP，`assertTeam` 在入队时就拦下并指明是哪只）**（锁定中/已释放/濒死不能参赛）；配对时二次校验，队伍失效则**双方出队**并在下次轮询返回 `ERROR`。
+- 队伍校验与普通房一致：**规模 1-6 只**（否则 400 `INVALID_TEAM_SIZE`），每只宝可梦必须属于本人、`status=IDLE` **且非濒死（0 HP，`assertTeam` 在入队时就拦下并指明是哪只）**（锁定中/已释放/濒死不能参赛）；配对时二次校验（含 1-6），队伍失效则**双方出队**并在下次轮询返回 `ERROR`。
 
 **ELO 结算（K=32）**
 
@@ -496,6 +588,16 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 ### 11.2 羁绊（`backend/src/ranked/bond.service.ts`）
 
 `Pokemon.bond` 0-255：**陪你成长的记录，换手即清零；涨幅按"月"设计（2026-09 长线化重平衡）**。
+2026-09 起羁绊同样是**战斗养成**：非 HP 五项 × `1 + bond/255 × 5%`（满羁绊 +5%、128 约 +2.5%，向下取整，HP 不变）。
+
+**战斗加成（`game-data/stats.ts` 的 `bondMultiplier`，仅战斗内）**
+
+| 项 | 规则 |
+|---|---|
+| 生效范围 | 最终能力值的**非 HP 五项**（攻击/防御/特攻/特防/速度）；HP 不涨 |
+| 公式 | `floor(最终能力值 × (1 + bond/255 × 5%))`，乘在性格修正之后 |
+| 生效战斗 | PvP（房间/排位/机器人：`battles.service::loadTeam` 把链上 `bond` 传给 `EngineMonInput`，`BattleManagerService.startBattle` 满血起引擎）与**野怪战斗**（`wild.service::toCombatant` 把 `p.bond` 作为 `computeStats` 的第 6 参传入）|
+| 展示 | `GET /pokemon` / `GET /pokemon/:id` 附带 `bondBonus` 百分比；队伍页显示「羁绊加成 +x.x%」 |
 
 | 事件 | 变化 | 实现 |
 |---|---|---|
@@ -538,11 +640,12 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 
 ### 11.4 前端展示
 
-- `frontend/src/views/RankedView.vue`（`/ranked`，导航"排位赛"）：段位卡（徽章 + rating + 名次 + 段位进度条 + 战绩）、匹配面板（出战队伍勾选、**休闲/积分场模式切换 + 准入额提示**、排队动画/取消 + 当前窗口与等待秒数、**15 秒接受期接受/拒绝**、**60 秒后的机器人选项**、匹配成功自动进战斗）、排行榜（前 50，自己高亮）、规则说明（ELO/匹配/接受期/排位房/羁绊/链上留痕）、**"帮助"按钮弹出规则面板**（段位表 + 准入额、ELO 简述、扩圈与接受期、机器人减半与每日 5 场、补贴与防刷；文案键 `ranked.help.*`，中英双语）。**队伍勾选处濒死者灰显禁选**（徽章"濒死" + 提示去宝可梦中心），入队返回 409 `FAINTED` 时显示同一条中文提示并剔除濒死成员。
-- `frontend/src/components/WagerPicker.vue`（大厅创建/加入房间的押注与队伍选择，LobbyView 复用）：濒死宝可梦整行灰显、出战/押注勾选框禁用并标注"濒死"，列表下方提示"先去宝可梦中心恢复（每次 10P）或使用伤药"；模板载入时濒死成员按"不在背包"剔除（`clampWagerToInventory`）。
-- `frontend/src/views/BattleView.vue` 结算面板：SETTLED 后拉取 `GET /ranked/battles/:id/outcome` 显示 **排位分 before→after（±N）** 与 **每只宝可梦羁绊 before→after + 爱心（±N）**；有押注宝可梦时提示"本局押注的宝可梦易主后，羁绊将重置为 30"。机器人场/积分场的 `bot` / `arena` 字段已随 outcome 返回（面板展示待后续迭代）。对战界面的我方/对方/换宠按钮都带 `HpBar`（当前 HP 由伤势持久化决定）。
+- `frontend/src/views/RankedView.vue`（`/ranked`，导航"排位赛"）：段位卡（徽章 + rating + 名次 + 段位进度条 + 战绩）、匹配面板（出战队伍勾选、**休闲/积分场模式切换 + 准入额提示**、排队动画/取消 + 当前窗口与等待秒数、**15 秒接受期接受/拒绝**、**60 秒后的机器人选项**、匹配成功自动进战斗）、排行榜（前 50，自己高亮）、规则说明（ELO/匹配/接受期/排位房/羁绊/链上留痕）、**"帮助"按钮弹出规则面板**（段位表 + 准入额、ELO 简述、扩圈与接受期、机器人减半与每日 5 场、补贴与防刷；文案键 `ranked.help.*`，中英双语）。**队伍勾选处濒死者灰显禁选**（徽章"濒死" + 提示去宝可梦中心），入队返回 409 `FAINTED` 时显示同一条中文提示并剔除濒死成员；**勾选上限 6 只**（`components/team-picker.ts`，第 7 只提示 `ranked.teamMax`）。**15 秒接受/拒绝卡片里展示对手出战队伍**（`components/OpponentTeamList.vue`：昵称/等级/闪光/最终能力值 + 一行"个体值/努力值/性格不可见"的裁剪说明），拒绝前就能看到阵容。
+- `frontend/src/components/WagerPicker.vue`（大厅创建/加入房间的押注与队伍选择，LobbyView 复用）：濒死宝可梦整行灰显、出战/押注勾选框禁用并标注"濒死"，列表下方提示"先去宝可梦中心恢复（每次 10P）或使用伤药"；模板载入时濒死成员按"不在背包"剔除（`clampWagerToInventory`）；**出战队伍上限 6 只**（显示"出战 n/6"，满员后未勾选项禁用，第 7 只给出红字提示）。
+- `frontend/src/views/LobbyView.vue`：房间卡片 / 加入面板 / 确认押注面板都有 **"查看押注"** 与 **"查看队伍"** 两个弹窗入口（`WagerInspectDialog` / `TeamInspectDialog`——旁观者也能看双方出战阵容）；房主自己的空房间卡片上有 **"删除房间"**（二次确认，调 `DELETE /battles/rooms/:id`；409 `ROOM_NOT_EMPTY` 时提示先"请离"）。
+- `frontend/src/views/BattleView.vue` 结算面板：SETTLED 后拉取 `GET /ranked/battles/:id/outcome` 显示 **排位分 before→after（±N）** 与 **每只宝可梦羁绊 before→after + 爱心（±N）**；有押注宝可梦时提示"本局押注的宝可梦易主后，羁绊将重置为 30"。机器人场/积分场的 `bot` / `arena` 字段已随 outcome 返回（面板展示待后续迭代）。对战界面下方是**实时战斗日志面板**：消费 `battle:state.state.log`（`frontend/src/game/battle-log.ts` 渲染中文行，名称走 `useI18n`），每个已结算回合一组「— 第 N 回合 —」+ 事件行，新回合到达自动滚到底部；我方/对方/换宠按钮都带 `HpBar`（PvP 满血出战，链下伤势只影响野怪战斗）。
 - `frontend/src/ui/BondHearts.vue`（共用组件）：`{bond, max=255, hearts=5, size, showValue, delta}` → 5 颗爱心按比例点亮 + 数值/变化量；**羁绊 ≥200 自动显示"灵魂搭档"金色徽章**（`SOULMATE_BOND`，纯前端），队伍页与图鉴之外的所有羁绊展示位复用同一组件。
-- `frontend/src/views/TeamView.vue`：每只宝可梦卡片与详情都有 **HP 条（当前/最大）+ 濒死标红**，顶部有**宝可梦中心按钮**（显示受伤数量与 10P 单价，调用 `POST /pokemon/center/heal`）；放生对话框提示"可得 等级×1 积分"。
+- `frontend/src/views/TeamView.vue`：每只宝可梦卡片与详情都有 **HP 条（当前/最大）+ 濒死标红**，顶部有**宝可梦中心按钮**（显示受伤数量与 10P 单价，调用 `POST /pokemon/center/heal`）；详情里羁绊一行显示 **「羁绊加成 +x.x%」**（`bondBonus`，非 HP 五项，满羁绊 +5%）；放生对话框提示"可得 等级×1 积分"。
 - `frontend/src/components/CaptureOverlay.vue`：准备阶段的首发列表带 HP 与（濒死）标记、**濒死成员禁选**；全队濒死时禁用"进入草丛"并提示去宝可梦中心；背包伤药可在战斗中/队伍页使用（`POST /items/:id/use {targetPokemonId}`）。
 - 交易所（TradeView）建议提示同一条"易主后羁绊重置为 30"（本次未改该文件）。
 

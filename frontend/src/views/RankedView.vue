@@ -19,6 +19,8 @@ import {
 } from '@/api/ranked';
 import { useI18n } from '@/composables/useI18n';
 import { usePokemonStore } from '@/stores/pokemon';
+import { toggleTeamMember } from '@/components/team-picker';
+import OpponentTeamList from '@/components/OpponentTeamList.vue';
 import { isFainted } from '@/utils/pokemon-hp';
 import type { Pokemon, RankedEntry, RankedLeaderboard, RankedQueueMode, RankedQueueStatus } from '@/types';
 import PixelButton from '@/ui/PixelButton.vue';
@@ -81,10 +83,14 @@ function toggle(id: string) {
     error.value = t('ranked.faintedHint');
     return;
   }
-  const idx = teamIds.value.indexOf(id);
-  if (idx >= 0) teamIds.value.splice(idx, 1);
-  else if (teamIds.value.length < 6) teamIds.value.push(id);
-  else error.value = t('ranked.teamMax');
+  // 出战队伍最多 6 只（与服务端 1-6 校验同一口径，见 components/team-picker.ts）
+  const { team, rejected } = toggleTeamMember(teamIds.value, id);
+  if (rejected) {
+    error.value = t('ranked.teamMax');
+    return;
+  }
+  error.value = '';
+  teamIds.value = team;
 }
 
 function setMode(next: RankedQueueMode) {
@@ -456,6 +462,14 @@ onBeforeUnmount(() => {
               · {{ t('ranked.pending.entry', { fee: pending.entryFee ?? 0 }) }}
             </template>
           </p>
+          <!-- 接受前先看对手阵容（服务端只给公开信息：昵称/等级/闪光/最终能力值） -->
+          <div v-if="pending.opponent?.team?.length" class="mt-8">
+            <OpponentTeamList
+              :team="pending.opponent.team"
+              :title="t('ranked.pending.teamTitle', { n: pending.opponent.team.length })"
+              :hint="t('ranked.pending.teamHint')"
+            />
+          </div>
           <div class="row mt-8">
             <PixelButton
               v-if="!pending.accepted"

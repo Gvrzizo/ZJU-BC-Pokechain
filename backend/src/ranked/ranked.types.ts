@@ -36,6 +36,9 @@ export interface RankedPendingMatch {
   ratingA: number;
   playerB: string;
   ratingB: number;
+  /** 配对时的出战队伍快照：接受期 `GET /ranked/queue/status` 展示对手阵容用（旧记录可缺） */
+  teamA?: string[];
+  teamB?: string[];
   acceptA: boolean;
   acceptB: boolean;
   /** 接受期截止（epoch ms，15s） */

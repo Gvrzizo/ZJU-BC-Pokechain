@@ -1,5 +1,9 @@
 import {
   applyTrainingEvs,
+  bondBonusPercent,
+  BOND_MAX,
+  BOND_STAT_BONUS,
+  bondMultiplier,
   computeStats,
   emptyEvs,
   EV_MAX_PER_STAT,
@@ -160,6 +164,56 @@ describe('computeStats（官方能力值公式）', () => {
         expect([species.name, key, stats[key] > 0]).toEqual([species.name, key, true]);
       }
     }
+  });
+});
+
+describe('羁绊加成（非 HP 五项 × (1 + bond/255 × 5%)，docs/backend-api.md §11）', () => {
+  it('黄金值：满羁绊（255）×1.05 向下取整，HP 不变', () => {
+    // 基准 = 50 级皮卡丘 31IV/0EV/hardy：hp 110 / atk 75 / def 60 / spatk 70 / spdef 70 / speed 110
+    const base = computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', 0);
+    const bonded = computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', BOND_MAX);
+    expect(base).toEqual({ hp: 110, atk: 75, def: 60, spatk: 70, spdef: 70, speed: 110 });
+    expect(bonded).toEqual({
+      hp: 110, // HP 不吃羁绊
+      atk: Math.floor(75 * 1.05), // 78
+      def: Math.floor(60 * 1.05), // 63
+      spatk: Math.floor(70 * 1.05), // 73
+      spdef: 73,
+      speed: Math.floor(110 * 1.05), // 115
+    });
+    expect(bonded).toEqual({ hp: 110, atk: 78, def: 63, spatk: 73, spdef: 73, speed: 115 });
+  });
+
+  it('中间值：羁绊 128 ≈ +2.5%、50 ≈ +1%，都为 floor（精确到个位）', () => {
+    const half = computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', 128);
+    // 128/255 × 5% = 2.5098…%：75→76、60→61、70→71、110→112
+    expect(half).toEqual({ hp: 110, atk: 76, def: 61, spatk: 71, spdef: 71, speed: 112 });
+    const minted = computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', 50);
+    // 铸造默认 50：+0.98%，75/70 取整后不变，速度 110→111
+    expect(minted).toEqual({ hp: 110, atk: 75, def: 60, spatk: 70, spdef: 70, speed: 111 });
+  });
+
+  it('乘在性格修正之后：100 级 Adamant 喷火龙攻击 293 → 满羁绊 307', () => {
+    const evs = { ...NO_EVS, atk: 252, spatk: 252 };
+    const bare = computeStats(CHARIZARD_BASE, IV31, evs, 100, 'adamant').atk;
+    expect(bare).toBe(293);
+    expect(computeStats(CHARIZARD_BASE, IV31, evs, 100, 'adamant', 255).atk).toBe(Math.floor(293 * 1.05));
+    expect(computeStats(CHARIZARD_BASE, IV31, evs, 100, 'adamant', 255).atk).toBe(307);
+  });
+
+  it('缺省/0 = 无加成；越界夹到 [0, 255]；百分比文案 0/2.51/5', () => {
+    const zero = computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy');
+    expect(zero).toEqual(computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', 0));
+    expect(computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', 999)).toEqual(
+      computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', 255),
+    );
+    expect(computeStats(PIKACHU_BASE, IV31, NO_EVS, 50, 'hardy', -20)).toEqual(zero);
+    expect(bondMultiplier(undefined)).toBe(1);
+    expect(bondMultiplier(255)).toBeCloseTo(1 + BOND_STAT_BONUS, 10);
+    expect(bondBonusPercent(0)).toBe(0);
+    expect(bondBonusPercent(50)).toBe(0.98);
+    expect(bondBonusPercent(128)).toBe(2.51);
+    expect(bondBonusPercent(255)).toBe(5);
   });
 });
 

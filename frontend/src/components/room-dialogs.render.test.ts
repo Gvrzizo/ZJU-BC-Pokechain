@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createSSRApp, h } from 'vue';
 import { renderToString } from '@vue/server-renderer';
 import BlockedPlayersPanel from './BlockedPlayersPanel.vue';
+import TeamInspectDialog from './TeamInspectDialog.vue';
 import WagerInspectDialog from './WagerInspectDialog.vue';
 
 /**
@@ -27,6 +28,13 @@ describe('房间弹窗渲染冒烟', () => {
     const { body } = await render(WagerInspectDialog, { roomId: 'r_1' });
     expect(body).toContain('查看押注');
     expect(body).toContain('加载押注明细');
+    expect(body).toContain('关闭');
+  });
+
+  it('查看队伍弹窗：标题 + 加载态 + 关闭按钮', async () => {
+    const { body } = await render(TeamInspectDialog, { roomId: 'r_1' });
+    expect(body).toContain('查看队伍');
+    expect(body).toContain('加载出战队伍');
     expect(body).toContain('关闭');
   });
 

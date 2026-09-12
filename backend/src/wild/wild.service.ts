@@ -643,7 +643,7 @@ export class WildService {
     if (moves.length === 0) {
       throw new AppException('NO_MOVES', `${p.name} has no usable moves`, HttpStatus.CONFLICT);
     }
-    const stats = computeStats(species.base, p.ivs, normalizeEvs(p.evs), p.level, p.nature);
+    const stats = computeStats(species.base, p.ivs, normalizeEvs(p.evs), p.level, p.nature, p.bond ?? 0);
     return {
       pokemonId: p.id,
       speciesId: species.id,

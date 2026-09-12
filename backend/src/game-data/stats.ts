@@ -8,6 +8,7 @@ import { BaseStats } from './species.data';
  *
  * 性格修正：有利 1.1 / 不利 0.9 / 无修正 1.0。EV 单项 0–255、六项总和 ≤ 510，
  * 故 510/4 = 127 点加成封顶（等级 100 时约 +63 单项）。
+ * 羁绊加成（可选第 6 参）：非 HP 五项 × (1 + bond/255 × 5%)，向下取整；HP 不变。
  */
 
 export type StatKey = 'hp' | 'atk' | 'def' | 'spatk' | 'spdef' | 'speed';
@@ -20,6 +21,25 @@ export const EV_MAX_TOTAL = 510;
 
 export const NATURE_BOOST = 1.1;
 export const NATURE_HINDER = 0.9;
+
+/** 羁绊值上限（链上 `BondUp` 同样按 255 截断）。 */
+export const BOND_MAX = 255;
+/** 羁绊战斗加成的满值系数增量：满羁绊非 HP 五项 ×1.05（docs/backend-api.md §2/§11）。 */
+export const BOND_STAT_BONUS = 0.05;
+
+/**
+ * 羁绊加成系数（仅非 HP 五项）：`1 + bond/255 × 5%`，bond 夹到 `[0, 255]`、缺省 0。
+ * HP 不吃羁绊（满羁绊 5% 血会让双攻双防血全面膨胀）。
+ */
+export function bondMultiplier(bond: number | null | undefined): number {
+  const value = Number.isFinite(bond) ? Math.min(BOND_MAX, Math.max(0, Math.floor(bond as number))) : 0;
+  return 1 + (value / BOND_MAX) * BOND_STAT_BONUS;
+}
+
+/** 羁绊加成百分比（展示用，两位小数）：255 → 5、128 → 2.51、50 → 0.98。 */
+export function bondBonusPercent(bond: number | null | undefined): number {
+  return Math.round((bondMultiplier(bond) - 1) * 1e4) / 100;
+}
 
 /** 非 HP 五项（性格不影响 HP）。 */
 export type NatureStat = Exclude<StatKey, 'hp'>;
@@ -110,13 +130,16 @@ export function computeStats(
   evs: Partial<StatBlock> | null | undefined,
   level: number,
   nature: string,
+  /** 羁绊值 0–255：非 HP 五项 × (1 + bond/255 × 5%)；缺省 0 = 无加成 */
+  bond: number | null | undefined = 0,
 ): StatBlock {
   const safeLevel = Number.isFinite(level) ? Math.min(100, Math.max(1, Math.floor(level))) : 1;
   const poke = (key: StatKey) => 2 * base[key] + (ivs?.[key] ?? 0) + Math.floor((evs?.[key] ?? 0) / 4);
 
   const hp = Math.floor((poke('hp') * safeLevel) / 100) + safeLevel + 10;
+  const bondMult = bondMultiplier(bond);
   const other = (key: NatureStat) =>
-    Math.floor((Math.floor((poke(key) * safeLevel) / 100) + 5) * natureMultiplier(nature, key));
+    Math.floor(Math.floor((Math.floor((poke(key) * safeLevel) / 100) + 5) * natureMultiplier(nature, key)) * bondMult);
 
   return {
     hp,

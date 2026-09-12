@@ -326,8 +326,8 @@ async function waitFor(cond: () => boolean, ms = 3000): Promise<boolean> {
 
 describe('battle:action over the socket: the client sends asset ids (docs/backend-api.md §5)', () => {
   /**
-   * ash lv60 hyper-beam vs gary lv6 tackle, plus an unused second mon on ash's
-   * side so switching has a legal target.
+   * ash lv60 (hyper-beam / body-slam) vs gary lv6 tackle, plus an unused second
+   * mon on ash's side so switching has a legal target.
    */
   async function activate(stack: ReturnType<typeof makeStack>) {
     await registerPlayers(stack.contract, 'ash', 'gary');
@@ -337,7 +337,8 @@ describe('battle:action over the socket: the client sends asset ids (docs/backen
       id: 'p_act_strong',
       speciesId: 149,
       level: 60,
-      moves: ['hyper-beam'],
+      // body-slam（命中 100）用于"必定击倒 lv6"的用例；hyper-beam 命中 90，随机流可能落空导致用例不稳
+      moves: ['hyper-beam', 'body-slam'],
     });
     const bench = await seedPokemon(stack.chain, 'ash', {
       id: 'p_act_bench',
@@ -379,19 +380,57 @@ describe('battle:action over the socket: the client sends asset ids (docs/backen
       | { turn: number; A: { acted: boolean; active: number }; B: { acted: boolean; active: number } }
       | undefined;
 
+  /** battle:state 推送里的回合日志（docs/backend-api.md §5「实时战斗日志」）。 */
+  const stateLog = (stack: ReturnType<typeof makeStack>) =>
+    pushed(stack.pushes, 'battle:state').at(-1)?.payload.state as
+      | {
+          log: Array<{
+            turn: number;
+            events: Array<{ kind: string; side?: string; detail: Record<string, unknown> }>;
+          }>;
+        }
+      | undefined;
+
+  it('每次 battle:state 都带完整回合日志：逐回合推送、事件含攻击/受击 id', async () => {
+    const stack = makeStack();
+    const { battleId } = await activate(stack);
+    const { ash, gary } = await bothIn(stack, battleId);
+
+    stack.gateway.onAction(ash as never, { battleId, seq: 1, action: { type: 'move', moveId: 'body-slam' } });
+    expect(stateLog(stack)?.log).toEqual([]); // 回合未结算：不出日志条目
+
+    stack.gateway.onAction(gary as never, { battleId, seq: 1, action: { type: 'move', moveId: 'tackle' } });
+    // body-slam（命中 100）必定击倒 lv6 伊布：回合结算即结束，日志必须随推送到达
+    expect(await waitFor(() => pushed(stack.pushes, 'battle:end').length === 1)).toBe(true);
+
+    const log = stateLog(stack)?.log ?? [];
+    expect(log).toHaveLength(1);
+    expect(log[0].turn).toBe(1);
+    const kinds = log[0].events.map((e) => e.kind);
+    expect(kinds).toContain('move');
+    expect(kinds).toContain('damage');
+    expect(kinds).toContain('faint');
+    expect(kinds).toContain('win');
+    // 事件带宝可梦 id：前端才能把 id 换成 i18n 名称渲染成中文日志
+    const damage = log[0].events.find((e) => e.kind === 'damage')!;
+    expect(damage.detail).toMatchObject({ move: 'body-slam', attacker: 'p_act_strong', defender: 'p_act_weak' });
+    const faint = log[0].events.find((e) => e.kind === 'faint')!;
+    expect(faint.detail.pokemonId).toBe('p_act_weak');
+  });
+
   it('the moveId form the frontend sends resolves the turn instead of failing', async () => {
     const stack = makeStack();
     const { battleId } = await activate(stack);
     const { ash, gary } = await bothIn(stack, battleId);
 
-    stack.gateway.onAction(ash as never, { battleId, seq: 1, action: { type: 'move', moveId: 'hyper-beam' } });
+    stack.gateway.onAction(ash as never, { battleId, seq: 1, action: { type: 'move', moveId: 'body-slam' } });
     expect(of(ash, 'battle:error')).toHaveLength(0);
     expect(lastState(stack)?.A.acted).toBe(true); // one side in: turn still open
     expect(lastState(stack)?.turn).toBe(1);
 
     stack.gateway.onAction(gary as never, { battleId, seq: 1, action: { type: 'move', moveId: 'tackle' } });
     expect(of(gary, 'battle:error')).toHaveLength(0);
-    // hyper beam 150 on a lv6 eevee: the turn resolves and ends the battle
+    // body-slam（命中 100）on a lv6 eevee: the turn resolves and ends the battle
     expect(await waitFor(() => pushed(stack.pushes, 'battle:end').length === 1)).toBe(true);
     expect(pushed(stack.pushes, 'battle:end')[0].payload).toMatchObject({ winnerId: 'ash', reason: 'knockout' });
     expect(lastState(stack)?.turn).toBe(2);

@@ -86,6 +86,16 @@ export interface Pokemon {
   currentHp?: number;
   /** 是否濒死（currentHp = 0）：不能出战/进队伍，需治疗 */
   fainted?: boolean;
+  /**
+   * 改名次数（0/缺省 = 从未改名）：第一次免费，之后每次 50P（docs/backend-api.md §2「改名」）。
+   * 详情/列表接口附带，改名对话框据此显示「首次免费 / 本次 50P」。
+   */
+  renameCount?: number;
+  /**
+   * 羁绊战斗加成百分比（详情/列表附带，两位小数）：非 HP 五项在战斗中 × (1 + bond/255 × 5%)，
+   * 满羁绊 5%、128 约 2.51%（docs/backend-api.md §2「羁绊加成」/§11）；`stats` 仍是不含羁绊的基础值。
+   */
+  bondBonus?: number;
   /** 默认展示的进化分支（无进化为 null） */
   evolution?: EvolutionStep | null;
   /** 全部进化分支（伊布 5 条线都在内，"可以进化"的排在最前） */
@@ -282,6 +292,38 @@ export interface BattleSideState {
 
 export type BattleOutcome = { winnerSide: 'A' | 'B' } | { draw: true } | null;
 
+/**
+ * 一次已结算回合的事件（服务端引擎 EngineEvent）：`kind` + 出手方 `side` + `detail`。
+ * 攻击/受击/异常/能力阶级事件的 `detail` 带 `pokemonId`（受影响单位）与
+ * `attacker`/`defender`（出手方/目标方 id），前端据此换成 i18n 名称渲染中文日志。
+ */
+export interface BattleLogEvent {
+  kind:
+    | 'switch'
+    | 'move'
+    | 'miss'
+    | 'damage'
+    | 'faint'
+    | 'run'
+    | 'win'
+    | 'paralyzed'
+    | 'status'
+    | 'status-damage'
+    | 'stat'
+    | 'drain'
+    | 'recoil';
+  side?: 'A' | 'B';
+  detail: Record<string, unknown>;
+}
+
+/** 已结算回合的日志条目（publicState().log，随每次 battle:state 推送） */
+export interface BattleTurnLog {
+  turn: number;
+  /** 双方本回合提交的动作（槽位/换宠目标等，展示用可忽略） */
+  actions?: { A?: Record<string, unknown>; B?: Record<string, unknown> };
+  events: BattleLogEvent[];
+}
+
 /** 服务端引擎 publicState() —— battle:state 推送包里的 state 字段 */
 export interface BattleState {
   turn: number;
@@ -289,6 +331,8 @@ export interface BattleState {
   B: BattleSideState;
   finished: boolean;
   outcome: BattleOutcome;
+  /** 每个已结算回合的完整事件日志（BattleView 实时滚动日志面板的数据源） */
+  log?: BattleTurnLog[];
 }
 
 /** GET /battles/moves 的技能元数据（战斗界面展示 威力/命中/属性/说明） */
@@ -417,10 +461,14 @@ export interface WagerDetail {
   totals: { pokemon: number; itemQty: number; points: number };
 }
 
-/** GET /battles/rooms/:id：房间本体 + 双方押注富化明细（"查看押注"弹窗） */
+/** GET /battles/rooms/:id：房间本体 + 双方押注/出战队伍富化明细（"查看押注"/"查看队伍"弹窗） */
 export interface BattleRoomDetail extends BattleRoom {
   wagerDetailA: WagerDetail;
   wagerDetailB: WagerDetail | null;
+  /** 房主出战队伍（所有人可见，含旁观者） */
+  teamDetailA: WagerPokemonDetail[];
+  /** 加入者出战队伍（未加入时为 null） */
+  teamDetailB: WagerPokemonDetail[] | null;
 }
 
 /** 常用押注模板（GET /battles/templates，每用户最多 10 个） */
@@ -556,8 +604,22 @@ export interface RankedQueueStatus {
   bot?: boolean;
   roomId?: string | null;
   battleId?: string;
-  opponent?: { playerId: string; nickname: string; rating: number };
+  opponent?: { playerId: string; nickname: string; rating: number; team?: RankedOpponentPokemon[] };
   message?: string;
+}
+
+/**
+ * 排位接受期的对手阵容一项（docs/backend-api.md §11.1）：只有对局里可见的信息——
+ * 昵称（链上 name）、种族、等级、闪光与最终能力值；**不含 IV/EV/性格/羁绊**（对手视角不可见）。
+ */
+export interface RankedOpponentPokemon {
+  id: string;
+  name: string | null;
+  speciesId: number | null;
+  nameZh: string | null;
+  level: number | null;
+  shiny: boolean;
+  stats: Stats | null;
 }
 
 export interface RankedEntry {

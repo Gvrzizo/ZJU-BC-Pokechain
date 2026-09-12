@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { evolvePokemon, getPokemon, healTeam, releasePokemon, trainPokemon } from '@/api/pokemon';
+import {
+  evolvePokemon,
+  getPokemon,
+  healTeam,
+  releasePokemon,
+  renamePokemon,
+  trainPokemon,
+} from '@/api/pokemon';
+import { getMe } from '@/api/auth';
 import { useItem, type PokemonStatKey } from '@/api/items';
+import { useAuthStore } from '@/stores/auth';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useI18n } from '@/composables/useI18n';
 import type { EvolutionStep, Item, Pokemon, Stats } from '@/types';
@@ -13,6 +22,7 @@ import PixelDialog from '@/ui/PixelDialog.vue';
 import SpriteIcon from '@/ui/SpriteIcon.vue';
 
 const store = usePokemonStore();
+const auth = useAuthStore();
 const { t, monName, moveName, itemName, natureName } = useI18n();
 const selected = ref<Pokemon | null>(null);
 const releasing = ref<Pokemon | null>(null);
@@ -24,6 +34,9 @@ const RELEASE_POINTS_PER_LEVEL = 1;
 
 /** 宝可梦中心治疗单价（backend/src/pokemon/pokemon-hp.service.ts 的 CENTER_HEAL_COST 对齐）。 */
 const CENTER_HEAL_COST = 10;
+
+/** 改名单价：第一次免费，之后每次 50P（与 backend/src/pokemon/points-economy.ts 的 RENAME_COST 对齐）。 */
+const RENAME_COST = 50;
 
 /** 当前 HP：后端 GET /pokemon 的 currentHp（链下持久伤势），缺省按满血展示（见 utils/pokemon-hp）。 */
 function isFainted(p: Pokemon): boolean {
@@ -248,6 +261,64 @@ async function doCenterHeal() {
   }
 }
 
+// ---- 改名对话框（第一次免费，之后每次 RENAME_COST，docs/backend-api.md §2「改名」）----
+const renaming = ref(false);
+const renameName = ref('');
+const renameBusy = ref(false);
+/** 对话框里展示的积分（打开对话框 / 改名成功后从 `GET /users/me` 刷新） */
+const points = ref<number | null>(null);
+const displayPoints = computed(() => points.value ?? auth.user?.points ?? 0);
+
+/** 是否首次改名（列表/详情带回 `renameCount`；缺省按 0 = 免费处理）。 */
+function isFirstRename(p: Pokemon): boolean {
+  return (p.renameCount ?? 0) === 0;
+}
+
+async function refreshPoints(): Promise<void> {
+  try {
+    const me = await getMe();
+    auth.setUser(me);
+    points.value = me.points ?? null;
+  } catch {
+    points.value = auth.user?.points ?? null;
+  }
+}
+
+async function openRename() {
+  if (!selected.value) return;
+  renaming.value = true;
+  renameBusy.value = false;
+  // 已改过名 → 名字框回填当前昵称；没改过 → 留空让玩家输入新昵称
+  renameName.value = isFirstRename(selected.value) ? '' : selected.value.name;
+  await refreshPoints();
+}
+
+/** 改名：校验与扣费都在后端（链码 ApplyGrowth(name) + AddPoints），成功后刷新列表/详情/积分。 */
+async function doRename() {
+  const target = selected.value;
+  if (!target) return;
+  const name = renameName.value.trim();
+  if (!name) {
+    message.value = t('team.renameHint');
+    return;
+  }
+  renameBusy.value = true;
+  try {
+    const result = await renamePokemon(target.id, name);
+    message.value = result.charged
+      ? t('team.renamedPaid', { name: result.name, cost: RENAME_COST })
+      : t('team.renamedFree', { name: result.name });
+    renaming.value = false;
+    await refreshPoints();
+    await store.refreshPokemon();
+    await refreshSelected();
+  } catch (e: any) {
+    message.value = e?.response?.data?.message ?? t('team.renameFail');
+  } finally {
+    renameBusy.value = false;
+  }
+}
+
 // ---- 培养道具对话框（银色王冠要选一项个体值）----
 const usingItem = ref<Item | null>(null);
 const useStat = ref<PokemonStatKey | null>(null);
@@ -344,7 +415,8 @@ async function confirmUseItem() {
         <div class="row">
           <SpriteIcon :species-id="selected.speciesId" :size="96" />
           <div style="font-size: var(--px-fs-sm); flex: 1">
-            <p>No.{{ selected.speciesId }}　Lv{{ selected.level }}　EXP {{ selected.exp }}</p>
+            <p>{{ t('team.species') }}：{{ monName(selected.speciesId) }}（No.{{ selected.speciesId }}）</p>
+            <p>Lv{{ selected.level }}　EXP {{ selected.exp }}</p>
             <p>
               {{ t('team.hp') }}：{{ curHp(selected) }} / {{ maxHp(selected) }}
               <span v-if="isFainted(selected)" class="badge badge--red">{{ t('team.fainted') }}</span>
@@ -358,6 +430,10 @@ async function confirmUseItem() {
             <p>
               {{ t('team.bond') }}：<BondHearts :bond="selected.bond ?? 0" size="sm" show-value />
               <span class="text-dim">{{ t('team.bondHint') }}</span>
+            </p>
+            <!-- 羁绊战斗加成：非 HP 五项 × (1 + bond/255 × 5%)，战斗引擎出战时的实际增益 -->
+            <p style="color: var(--gba-blue)">
+              {{ t('team.bondBonus', { n: (selected.bondBonus ?? 0).toFixed(1) }) }}
             </p>
             <p>{{ t('common.status') }}：<span class="badge" :class="statusBadge(selected.status)">{{ selected.status }}</span></p>
           </div>
@@ -437,6 +513,9 @@ async function confirmUseItem() {
           </div>
           <p class="text-dim" style="font-size: var(--px-fs-sm)">{{ t('team.trainHint') }}</p>
           <div class="row">
+            <PixelButton variant="blue" :disabled="notIdle()" @click="openRename">
+              {{ t('team.rename') }}
+            </PixelButton>
             <PixelButton variant="danger" :disabled="notIdle()" @click="releasing = selected">
               {{ t('team.release') }}
             </PixelButton>
@@ -471,6 +550,33 @@ async function confirmUseItem() {
           </PixelButton>
         </div>
       </div>
+    </PixelDialog>
+
+    <PixelDialog
+      v-if="renaming && selected"
+      :title="t('team.renameTitle', { name: monName(selected.speciesId, selected.name) })"
+      :confirm-text="t('team.renameAction')"
+      @confirm="doRename"
+      @cancel="renaming = false"
+    >
+      <!-- 第一次免费 / 之后每次 50P，价格依据链下 renameCount（列表接口带回） -->
+      <p :style="{ color: isFirstRename(selected) ? 'var(--gba-green-light)' : 'var(--gba-yellow)' }">
+        {{ isFirstRename(selected) ? t('team.renameFree') : t('team.renameCost', { cost: RENAME_COST }) }}
+      </p>
+      <p class="mt-8">{{ t('team.renamePoints', { points: displayPoints }) }}</p>
+      <div class="px-field mt-8">
+        <input
+          v-model="renameName"
+          class="px-input"
+          type="text"
+          maxlength="12"
+          style="width: 100%"
+          :disabled="renameBusy"
+          :placeholder="t('team.rename')"
+          @keyup.enter="doRename"
+        />
+      </div>
+      <p class="text-dim mt-8" style="font-size: var(--px-fs-sm)">{{ t('team.renameHint') }}</p>
     </PixelDialog>
 
     <PixelDialog

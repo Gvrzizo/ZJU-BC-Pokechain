@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type Phaser from 'phaser';
 import { createGame, destroyGame } from '@/game/createGame';
 import { BattleSocket } from '@/game/net/BattleSocket';
+import { pvpTurnLines, type PvpLogContext } from '@/game/battle-log';
 import { disputeBattle, forfeitBattle, getBattle } from '@/api/battles';
 import { getBattleRewardOutcome } from '@/api/ranked';
 import { getMe } from '@/api/auth';
@@ -184,6 +185,47 @@ const shownMoveDetail = computed(() => (hoveredMove.value ? moveDetail(hoveredMo
 function monLabel(mon: { speciesId: number; name: string } | null | undefined): string {
   return mon ? monName(mon.speciesId, mon.name) : '—';
 }
+
+// ---- 实时战斗日志（服务端每结算一个回合就随 battle:state 推送事件，这里渲染成中文行）----
+const logBox = ref<HTMLElement | null>(null);
+
+/** 全场宝可梦 id → 显示名：换下场的成员在历史日志里同样能解析（名称走 i18n） */
+const monNames = computed<Record<string, string>>(() => {
+  const names: Record<string, string> = {};
+  for (const side of ['A', 'B'] as const) {
+    for (const mon of battleStore.state?.[side].team ?? []) names[mon.pokemonId] = monLabel(mon);
+  }
+  return names;
+});
+
+/** 技能 id → 显示名（GET /battles/moves 的静态全表；未加载时 pvpEventText 回退技能 id） */
+const moveNames = computed<Record<string, string>>(() => {
+  const names: Record<string, string> = {};
+  for (const id of Object.keys(battleStore.moveCatalog)) names[id] = moveLabel(id);
+  return names;
+});
+
+const logCtx = computed<PvpLogContext>(() => ({
+  monNames: monNames.value,
+  moveNames: moveNames.value,
+  playerNames: { A: detail.value?.playerA, B: detail.value?.playerB },
+}));
+
+/** 每个已结算回合 → 日志面板的行（回合标题 + 中文事件行） */
+const logTurns = computed(() =>
+  (battleStore.state?.log ?? []).map((turn) => ({ turn: turn.turn, lines: pvpTurnLines(turn, logCtx.value) })),
+);
+
+// 新回合到达后滚到底部（与野怪战斗 CaptureOverlay 的日志行为一致）
+watch(
+  () => battleStore.state?.log?.length ?? 0,
+  () => {
+    void nextTick(() => {
+      if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight;
+    });
+  },
+  { immediate: true },
+);
 
 /** 押注道具数量求和：items 形态按 qty 累加（qty=0 为旧格式整堆标记，按堆叠数计） */
 function wagerItemCount(wager: { items?: { qty?: number }[]; itemIds?: string[] } | null | undefined): number {
@@ -532,7 +574,6 @@ async function doDispute() {
               :hp="foeSide.team[foeSide.active].hp ?? 0"
               :max-hp="foeSide.team[foeSide.active].maxHp ?? 0"
             />
-            <p class="mt-8 text-dim">> 详细回合日志：GET /battles/{{ battleId }}/replay</p>
           </template>
           <p v-else class="text-dim mt-8">
             {{ battleStore.entry ? '等待双方入场…' : '等待战斗开始…' }}
@@ -540,6 +581,21 @@ async function doDispute() {
         </div>
         <p v-if="battleStore.lastError" style="font-size: var(--px-fs-sm); color: var(--gba-red)">
           {{ errorText }}
+        </p>
+      </div>
+    </div>
+
+    <!-- 实时战斗日志：服务端每结算一个回合就随 battle:state 推送，逐行滚动到底部；
+         结算面板出现后仍然保留（回看最后几个回合的击倒/胜负） -->
+    <div class="px-panel mt-8">
+      <h3 style="font-size: var(--px-fs-sm)">战斗日志</h3>
+      <div ref="logBox" class="battle-log">
+        <template v-for="turn in logTurns" :key="turn.turn">
+          <p class="battle-log__turn">— 第 {{ turn.turn }} 回合 —</p>
+          <p v-for="(line, i) in turn.lines" :key="`${turn.turn}-${i}`" class="battle-log__line">{{ line }}</p>
+        </template>
+        <p v-if="logTurns.length === 0" class="text-dim battle-log__line">
+          {{ battleStore.entry ? '等待双方入场…' : '等待第一回合结算…' }}
         </p>
       </div>
     </div>
@@ -624,5 +680,26 @@ async function doDispute() {
   line-height: var(--px-lh-tight);
   white-space: pre-line;
   color: var(--gba-ink);
+}
+
+/* 实时战斗日志：固定高度 + 自动滚到底部（新回合到达时） */
+.battle-log {
+  height: 132px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  overflow-y: auto;
+  background: #fffef0;
+  border: 3px solid var(--gba-ink);
+  font-size: var(--px-fs-sm);
+  line-height: var(--px-lh-body);
+}
+
+.battle-log__turn {
+  margin: 0;
+  color: var(--gba-blue);
+}
+
+.battle-log__line {
+  margin: 0;
 }
 </style>

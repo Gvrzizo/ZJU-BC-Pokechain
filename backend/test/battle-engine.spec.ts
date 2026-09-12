@@ -133,6 +133,79 @@ describe('BattleEngine', () => {
     expect(switchEvent!.detail.pokemonId).toBe('a2');
   });
 
+  it('publicState().log 每个已结算回合都带事件与攻击/受击 id（前端中文日志的数据源）', () => {
+    const engine = new BattleEngine(
+      [mon('a1', 6, 50, ['flamethrower'])],
+      [mon('b1', 3, 50, ['tackle'])],
+      scripted([0, 0.5, 0]),
+    );
+    expect(engine.publicState().log).toEqual([]);
+
+    engine.submitAction('A', { type: 'move', moveIndex: 0 });
+    expect(engine.publicState().log).toEqual([]); // 单方出手：回合未结算，日志不出条目
+
+    const { entry } = engine.submitAction('B', { type: 'move', moveIndex: 0 });
+    const log = engine.publicState().log;
+    expect(log).toHaveLength(1);
+    expect(log[0].turn).toBe(1);
+    expect(log[0].actions).toEqual({ A: { type: 'move', moveIndex: 0 }, B: { type: 'move', moveIndex: 0 } });
+    expect(log[0].events).toEqual(entry!.events);
+
+    const move = log[0].events.find((e) => e.kind === 'move' && e.side === 'A')!;
+    expect(move.detail).toMatchObject({ move: 'flamethrower', attacker: 'a1', defender: 'b1' });
+    const damage = log[0].events.find((e) => e.kind === 'damage')!;
+    expect(damage.detail).toMatchObject({ move: 'flamethrower', attacker: 'a1', defender: 'b1' });
+    expect(damage.detail.damage).toBeGreaterThan(0);
+    // 推送的是副本：外部改动不会污染引擎日志
+    log[0].events[0].detail.mutated = true;
+    expect(engine.publicState().log[0].events[0].detail.mutated).toBeUndefined();
+
+    // 击倒与胜负同样进日志（前端渲染"XX 倒下了！/ gary 获胜！"）
+    const ko = new BattleEngine(
+      [mon('a1', 149, 60, ['hyper-beam'])],
+      [mon('b1', 25, 5, ['tackle'])],
+      scripted([0, 0.5, 0]),
+    );
+    ko.submitAction('A', { type: 'move', moveIndex: 0 });
+    ko.submitAction('B', { type: 'move', moveIndex: 0 });
+    const last = ko.publicState().log.at(-1)!;
+    const kinds = last.events.map((e) => e.kind);
+    expect(kinds).toEqual(expect.arrayContaining(['move', 'damage', 'faint', 'win']));
+    expect(last.events.find((e) => e.kind === 'faint')!.detail.pokemonId).toBe('b1');
+    expect(last.events.find((e) => e.kind === 'win')!.side).toBe('A');
+  });
+
+  it('羁绊加成进入最终能力值：非 HP 五项 × (1 + bond/255 × 5%)，伤害按含羁绊的攻击值结算', () => {
+    const plain = new BattleEngine(
+      [mon('a1', 25, 50, ['tackle'])],
+      [mon('b1', 9, 50, ['tackle'])],
+      scripted([0, 0.5, 0]),
+    );
+    const bonded = new BattleEngine(
+      [mon('a1', 25, 50, ['tackle'], { bond: 255 })],
+      [mon('b1', 9, 50, ['tackle'])],
+      scripted([0, 0.5, 0]),
+    );
+    const stats = finalStats(25, 50);
+    // HP 不吃羁绊
+    expect(plain.active('A').maxHp).toBe(stats.hp);
+    expect(bonded.active('A').maxHp).toBe(stats.hp);
+    // 其余五项 ×1.05 向下取整
+    expect(plain.active('A').atk).toBe(stats.atk);
+    expect(bonded.active('A').atk).toBe(Math.floor(stats.atk * 1.05));
+    expect(bonded.active('A').speed).toBe(Math.floor(stats.speed * 1.05));
+
+    plain.submitAction('A', { type: 'move', moveIndex: 0 });
+    bonded.submitAction('A', { type: 'move', moveIndex: 0 });
+    const plainDamage = plain.submitAction('B', { type: 'move', moveIndex: 0 }).entry!.events.find((e) => e.kind === 'damage')!;
+    const bondedDamage = bonded.submitAction('B', { type: 'move', moveIndex: 0 }).entry!.events.find((e) => e.kind === 'damage')!;
+    const def = finalStats(9, 50).def;
+    const base = (atk: number) => Math.floor((((2 * 50) / 5 + 2) * 40 * atk) / def / 50) + 2;
+    expect(plainDamage.detail.damage).toBe(Math.floor(base(stats.atk) * 0.85));
+    expect(bondedDamage.detail.damage).toBe(Math.floor(base(Math.floor(stats.atk * 1.05)) * 0.85));
+    expect(bonded.active('A').atk).toBeGreaterThan(plain.active('A').atk);
+  });
+
   it('declares the winner on knockout and on run', () => {
     const engine = new BattleEngine(
       [mon('a1', 149, 60, ['hyper-beam'])],

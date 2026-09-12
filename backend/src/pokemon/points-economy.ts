@@ -19,6 +19,27 @@ export const WILD_FAINT_POINTS_PER_LEVEL = 1;
 /** 放生宝可梦：等级 × 该系数（放生是"清仓"而不是刷分手段）。 */
 export const RELEASE_POINTS_PER_LEVEL = 1;
 
+/** 改名：第一次免费，之后每次 50 积分（sink；docs/backend-api.md §2「改名」）。 */
+export const RENAME_COST = 50;
+
+/** 第 `ordinal` 次改名的扣费 reason（ordinal 从 1 起，第 1 次免费不产生流水）。 */
+export function renameReason(pokemonId: string, ordinal: number): string {
+  return `rename:${pokemonId}:${ordinal}`;
+}
+
+/**
+ * 第 `ordinal` 次改名的确定性幂等键。链上幂等记录是**全局命名空间**
+ * （`idemp:<key>`，与交易类型无关），扣费与 `ApplyGrowth` 必须用不同的键，
+ * 否则第二笔会命中第一笔的结果。重试同一请求两笔都按首次结果返回，不会重复扣分。
+ */
+export function renameIdemKey(pokemonId: string, ordinal: number): string {
+  return `${pokemonId}-rename-${ordinal}`;
+}
+
+export function renameChargeIdemKey(pokemonId: string, ordinal: number): string {
+  return `${pokemonId}-rename-${ordinal}-charge`;
+}
+
 export function catchRewardReason(pokemonId: string): string {
   return `reward:catch:${pokemonId}`;
 }

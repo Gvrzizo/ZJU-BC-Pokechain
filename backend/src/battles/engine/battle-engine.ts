@@ -26,10 +26,13 @@ export interface EngineMonInput {
   evs?: StatBlock;
   /** 性格（25 种，影响最终能力值非 HP 五项 ±10%）；缺省按无修正 */
   nature?: string;
+  /** 羁绊值 0–255：非 HP 五项 × (1 + bond/255 × 5%)，缺省 0（docs/backend-api.md §11） */
+  bond?: number;
   moves: string[];
   /**
-   * 出战时的当前 HP（链下 Redis 的伤势，缺省 = 满血）。
-   * 0 的宝可梦不能出战（队伍提交时已被 FAINTED 拒绝，见 docs/backend-api.md §2）。
+   * 出战时的当前 HP（缺省 = 满血）。**实时 PvP 对局一律满血出战**（房间/排位/机器人，
+   * 由 `BattleManagerService.startBattle` 统一剥掉该字段，见 docs/backend-api.md §2）；
+   * 该入参只对直接构造引擎的调用方生效。0 的宝可梦不能出战（队伍提交时已被 FAINTED 拒绝）。
    */
   currentHp?: number;
 }
@@ -77,6 +80,11 @@ export interface EngineEvent {
     | 'drain'
     | 'recoil';
   side?: Side;
+  /**
+   * 结构化细节。除各事件自身的字段外，**攻击/受击/异常/能力阶级事件都会带上
+   * `pokemonId`（受影响单位）以及 `attacker`/`defender`（出手方/目标方）的宝可梦 id**，
+   * 供前端把回合日志渲染成中文文本（名称走 i18n，见 docs/backend-api.md §5）。
+   */
   detail: Record<string, unknown>;
 }
 
@@ -93,8 +101,8 @@ export { CRIT_MULT, CRIT_RATE } from './battle-math';
 function buildMon(input: EngineMonInput): EngineMon {
   const species = getSpecies(input.speciesId);
   if (!species) throw new Error(`UNKNOWN_SPECIES: ${input.speciesId}`);
-  // 最终能力值：种族值 + IV + EV + 等级 + 性格修正（docs/backend-api.md §2 能力值计算）
-  const stats = computeStats(species.base, input.ivs, input.evs, input.level, input.nature ?? 'hardy');
+  // 最终能力值：种族值 + IV + EV + 等级 + 性格修正 + 羁绊加成（docs/backend-api.md §2 能力值计算 / §11）
+  const stats = computeStats(species.base, input.ivs, input.evs, input.level, input.nature ?? 'hardy', input.bond ?? 0);
   const moves = input.moves
     .map((m) => getMove(m))
     .filter((m): m is MoveDef => !!m)
@@ -123,18 +131,29 @@ function buildMon(input: EngineMonInput): EngineMon {
   };
 }
 
+/** PvP 一律满血出战：剥掉链下伤势（`currentHp`），竞技只比养成与策略（docs/backend-api.md §2）。 */
+export function withFullHealth(team: EngineMonInput[]): EngineMonInput[] {
+  return team.map((mon) => {
+    const copy = { ...mon };
+    delete copy.currentHp;
+    return copy;
+  });
+}
+
 /**
  * Server-authoritative simplified turn engine (docs/backend-api.md §5):
  * speed decides order (paralysis halves it), 6-type chart, damage
  *   floor( floor(((2*level/5+2)*power*atk/def)/50) + 2 * eff * crit * rand(0.85..1) )
  * where atk/def/hp/speed are the final stats from game-data/stats.computeStats
- * (base + IV + EV/4 + level + nature) adjusted by stat stages (±6), and the
- * opening hp comes from the persisted off-chain HP (EngineMonInput.currentHp,
- * docs/backend-api.md §2「伤势持久化」) — a battle no longer resets the party
- * to full health. Roll order (docs/randomness.md §4): paralysis
- * check (only when paralyzed), hit, crit, damage factor, effect chance (only
- * for moves with a stat/status effect); burn/poison residual damage at the end
- * of the turn consumes no roll.
+ * (base + IV + EV/4 + level + nature, then the non-HP five × the bond multiplier)
+ * adjusted by stat stages (±6). Live PvP battles start at full health —
+ * `BattleManagerService.startBattle` strips any `EngineMonInput.currentHp`;
+ * only direct engine callers see the persisted off-chain HP honoured.
+ * Roll order (docs/randomness.md §4): paralysis check (only when paralyzed),
+ * hit, crit, damage factor, effect chance (only for moves with a stat/status
+ * effect); burn/poison residual damage at the end of the turn consumes no roll.
+ * `publicState().log` carries every resolved turn (events enriched with the
+ * acting/target pokemon ids) so the client can render the realtime text log.
  */
 export class BattleEngine {
   readonly teamA: EngineMon[];
@@ -260,7 +279,7 @@ export class BattleEngine {
       entry.events.push({
         kind: 'status-damage',
         side,
-        detail: { status: mon.status, damage, hp: mon.hp, maxHp: mon.maxHp },
+        detail: { status: mon.status, damage, hp: mon.hp, maxHp: mon.maxHp, pokemonId: mon.pokemonId },
       });
       this.checkFaints(entry);
     }
@@ -278,21 +297,22 @@ export class BattleEngine {
 
   private applyMove(side: Side, attacker: EngineMon, defender: EngineMon, moveIndex: number, entry: TurnEntry): void {
     const move = attacker.moves[moveIndex];
+    const pair = { attacker: attacker.pokemonId, defender: defender.pokemonId };
 
     // paralysis: 25% chance to lose the action (consumes a roll before the move event)
     if (attacker.status === 'par') {
       const parRoll = this.rand();
       if (paralysisSkips(parRoll)) {
-        entry.events.push({ kind: 'paralyzed', side, detail: { move: move.id, roll: round6(parRoll) } });
+        entry.events.push({ kind: 'paralyzed', side, detail: { move: move.id, roll: round6(parRoll), pokemonId: attacker.pokemonId } });
         return;
       }
     }
 
-    entry.events.push({ kind: 'move', side, detail: { move: move.id, attacker: attacker.pokemonId, defender: defender.pokemonId } });
+    entry.events.push({ kind: 'move', side, detail: { move: move.id, ...pair } });
 
     const hitRoll = this.rand();
     if (!hitCheck(move.accuracy, hitRoll)) {
-      entry.events.push({ kind: 'miss', side, detail: { move: move.id, roll: round6(hitRoll) } });
+      entry.events.push({ kind: 'miss', side, detail: { move: move.id, roll: round6(hitRoll), ...pair } });
       return;
     }
 
@@ -324,6 +344,7 @@ export class BattleEngine {
         roll: round6(factor),
         defenderHp: defender.hp,
         defenderMaxHp: defender.maxHp,
+        ...pair,
       },
     });
 
@@ -333,7 +354,12 @@ export class BattleEngine {
       const effectRoll = effect.kind === 'stat' || effect.kind === 'status' ? this.rand() : 0;
       for (const result of applyMoveEffect(effect, attacker, defender, damage, effectRoll)) {
         const ev = effectEvent(result);
-        entry.events.push({ kind: ev.kind, side, detail: ev.detail });
+        // 受影响单位（status/stat 可能落在守方，drain/recoil 落在出手方）供日志补名字
+        const subject =
+          ev.kind === 'status' || (ev.kind === 'stat' && ev.detail.target === 'foe')
+            ? defender.pokemonId
+            : attacker.pokemonId;
+        entry.events.push({ kind: ev.kind, side, detail: { ...ev.detail, pokemonId: subject } });
       }
       this.checkFaints(entry);
     }
@@ -402,6 +428,15 @@ export class BattleEngine {
       B: sideState('B'),
       finished: this.finished,
       outcome: this.outcome,
+      /**
+       * 已结算回合的完整日志（含当前回合）：随每次 `battle:state` 推送，
+       * 前端据此渲染实时中文战斗日志（docs/backend-api.md §5）。
+       */
+      log: this.log.map((turn) => ({
+        turn: turn.turn,
+        actions: { A: turn.actions.A, B: turn.actions.B },
+        events: turn.events.map((event) => ({ kind: event.kind, side: event.side, detail: { ...event.detail } })),
+      })),
     };
   }
 }

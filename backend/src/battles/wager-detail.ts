@@ -94,6 +94,47 @@ export async function enrichWager(
   };
 }
 
+/**
+ * 出战队伍的富化明细（房间详情 `teamDetailA/B`）：与押注宝可梦同一口径，
+ * 逐只读链上资产后补中文名/等级/闪光/羁绊/最终能力值。房间当事人与旁观者看到的一致。
+ */
+export async function enrichTeam(
+  contract: ContractService,
+  pokemonIds: string[] | null | undefined,
+): Promise<WagerPokemonDetail[]> {
+  const team: WagerPokemonDetail[] = [];
+  for (const id of pokemonIds ?? []) team.push(await pokemonDetail(contract, id));
+  return team;
+}
+
+/**
+ * 排位接受期对手阵容（docs/backend-api.md §11.1）：只保留**对局中人人可见**的信息——
+ * 昵称（链上 `name`）、种族（id / 中英文名）、等级、闪光与最终六项能力值。
+ * 裁剪掉羁绊与 IV/EV/性格（装备在对手视角不可见），也不要 `unavailable` 占位字段。
+ */
+export interface OpponentPokemonDetail {
+  id: string;
+  name: string | null;
+  speciesId: number | null;
+  nameZh: string | null;
+  level: number | null;
+  shiny: boolean;
+  /** 最终六项能力值（隐去了推导它的 IV/EV/性格） */
+  stats: StatBlock | null;
+}
+
+export function toOpponentTeam(details: WagerPokemonDetail[]): OpponentPokemonDetail[] {
+  return details.map(({ id, name, speciesId, nameZh, level, shiny, stats }) => ({
+    id,
+    name,
+    speciesId,
+    nameZh,
+    level,
+    shiny,
+    stats,
+  }));
+}
+
 async function pokemonDetail(contract: ContractService, id: string): Promise<WagerPokemonDetail> {
   const mon = await contract.getPokemon(id).catch(() => null);
   if (!mon) {

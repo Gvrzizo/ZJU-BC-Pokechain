@@ -70,6 +70,12 @@ export class BattlesController {
     return this.battles.kick(identityForUser(user), id, dto.playerId);
   }
 
+  /** 房主删除房间（仅 WAITING；有人加入先 kick，激活/结束的房间不可删）。 */
+  @Delete('rooms/:id')
+  deleteRoom(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.battles.deleteRoom(identityForUser(user), id);
+  }
+
   /** 技能元数据（静态表）：战斗界面技能按钮展示 威力/命中/属性/说明。注意须先于 `:id` 声明。 */
   @Get('moves')
   listMoves() {

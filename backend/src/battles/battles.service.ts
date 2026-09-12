@@ -17,10 +17,10 @@ import { BattleManagerService } from './battle-manager.service';
 import { errorCodeOf } from './battle-error';
 import { DisputeRecord } from './entities/dispute-record.entity';
 import { BattleMoveInfo, battleMoveCatalog } from './battle-moves';
-import { BattleEngine, EngineMonInput } from './engine/battle-engine';
+import { EngineMonInput } from './engine/battle-engine';
 import { CreateRoomDto, JOIN_MESSAGE_MAX, JoinRoomDto, ROOM_NAME_MAX, ROOM_NOTE_MAX, UpdateRoomDto } from './dto/room.dto';
 import { sanitizeRoomText } from './room-text';
-import { WagerDetail, enrichWager } from './wager-detail';
+import { WagerDetail, WagerPokemonDetail, enrichTeam, enrichWager } from './wager-detail';
 
 export interface BattleRoom {
   id: string;
@@ -46,10 +46,14 @@ export interface BattleRoom {
   updatedAt?: string;
 }
 
-/** 房间详情（GET /battles/rooms/:id）：房间本体 + 双方押注的富化明细。 */
+/** 房间详情（GET /battles/rooms/:id）：房间本体 + 双方押注/出战队伍的富化明细。 */
 export interface BattleRoomDetail extends BattleRoom {
   wagerDetailA: WagerDetail;
   wagerDetailB: WagerDetail | null;
+  /** 房主出战队伍的富化明细（所有人可看，含旁观者） */
+  teamDetailA: WagerPokemonDetail[];
+  /** 加入者出战队伍的富化明细（未加入时为 null） */
+  teamDetailB: WagerPokemonDetail[] | null;
 }
 
 export interface BattleActivatedEvent {
@@ -80,6 +84,22 @@ export interface BattleSettledEvent {
   teamB: string[];
 }
 
+/** 出战队伍规模：1-6 只（房间创建/加入与排位入队同一口径，docs/backend-api.md §5/§11） */
+export const TEAM_SIZE_MIN = 1;
+export const TEAM_SIZE_MAX = 6;
+
+/** 队伍规模校验：违规 400 `INVALID_TEAM_SIZE`（链上/引擎按最多 6 只设计）。 */
+export function assertTeamSize(pokemonIds: string[]): void {
+  const size = Array.isArray(pokemonIds) ? pokemonIds.length : 0;
+  if (size < TEAM_SIZE_MIN || size > TEAM_SIZE_MAX) {
+    throw new AppException(
+      'INVALID_TEAM_SIZE',
+      `teamPokemonIds must contain ${TEAM_SIZE_MIN}-${TEAM_SIZE_MAX} pokemon, got ${size}`,
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
+
 const ROOM_TTL_SEC = 3600;
 /** chain battle states that still allow (re)joining the live battle screen */
 const LIVE_BATTLE_STATES = new Set(['CREATED', 'ACTIVE', 'RESULT_SUBMITTED']);
@@ -100,7 +120,7 @@ export class BattlesService implements OnModuleInit {
     private readonly manager: BattleManagerService,
     private readonly users: UsersService,
     private readonly blocks: PlayerBlockService,
-    /** 当前 HP（链下 Redis，对局结束后写回伤势，docs/backend-api.md §2） */
+    /** 链下当前 HP：只用于**出战前的濒死校验**（PvP 满血出战、不写回，docs/backend-api.md §2） */
     private readonly hp: PokemonHpService,
     @InjectRepository(AuditLog) private readonly audits: Repository<AuditLog>,
     @InjectRepository(DisputeRecord) private readonly disputes: Repository<DisputeRecord>,
@@ -111,10 +131,6 @@ export class BattlesService implements OnModuleInit {
     // the engine can end a battle on its own (timeout / disconnect / knockout):
     // close the room so it never lingers in the lobby list
     this.manager.events.on('end', (battleId: string) => {
-      // 引擎此刻还在内存里（finalize 先 emit 再 delete）：**同步**抓一份终局 HP，
-      // 再异步写回 Redis（伤势持久化，docs/backend-api.md §2）
-      const entries = this.battleHpEntries(this.manager.get(battleId)?.engine);
-      void this.persistBattleHp(entries);
       void this.closeRoomFor(battleId);
       // 结算挂钩：排位 ELO / 羁绊（引擎结束的路径也要广播，见 notifySettled）
       void this.notifySettled(battleId);
@@ -187,14 +203,19 @@ export class BattlesService implements OnModuleInit {
     return room;
   }
 
-  /** 房间详情：房间本体 + 双方押注的富化明细（大厅"查看押注"弹窗用）。 */
+  /**
+   * 房间详情：房间本体 + 双方押注与**出战队伍**的富化明细（大厅"查看押注"/"查看队伍"弹窗用）。
+   * 队伍富化对所有登录用户开放（含旁观者），不要求是房间当事人。
+   */
   async roomDetail(roomId: string): Promise<BattleRoomDetail> {
     const room = await this.getRoom(roomId);
-    const [wagerDetailA, wagerDetailB] = await Promise.all([
+    const [wagerDetailA, wagerDetailB, teamDetailA, teamDetailB] = await Promise.all([
       enrichWager(this.contract, room.wagerA),
       room.wagerB ? enrichWager(this.contract, room.wagerB) : Promise.resolve(null),
+      enrichTeam(this.contract, room.teamA),
+      room.teamB ? enrichTeam(this.contract, room.teamB) : Promise.resolve(null),
     ]);
-    return { ...room, wagerDetailA, wagerDetailB };
+    return { ...room, wagerDetailA, wagerDetailB, teamDetailA, teamDetailB };
   }
 
   /**
@@ -223,6 +244,32 @@ export class BattlesService implements OnModuleInit {
     const event: RoomKickedEvent = { roomId: room.id, hostId: room.playerA, playerId };
     this.events.emit('kicked', event);
     return room;
+  }
+
+  /**
+   * 房主删除房间（docs/backend-api.md §5）：仅房主、仅 **WAITING**（还没人加入）时可删；
+   * 有人加入（JOINED）要先请离（kick），否则 409 `ROOM_NOT_EMPTY`——避免把对手的报名直接抹掉。
+   * 已激活/已结束的房间不可删（409 `ROOM_NOT_OPEN`，资产已链上锁定/结算，只能走对局流程）。
+   */
+  async deleteRoom(as: ChainIdentity, roomId: string): Promise<{ deleted: true; roomId: string }> {
+    const room = await this.getRoom(roomId);
+    if (room.playerA !== as.userId) {
+      throw new AppException('NOT_HOST', `room ${roomId} belongs to ${room.playerA}`, HttpStatus.FORBIDDEN);
+    }
+    if (room.status === 'ACTIVE' || room.status === 'FINISHED') {
+      throw new AppException('ROOM_NOT_OPEN', `room ${roomId} is ${room.status}`, HttpStatus.CONFLICT);
+    }
+    if (room.status !== 'WAITING' || room.playerB) {
+      throw new AppException(
+        'ROOM_NOT_EMPTY',
+        `room ${roomId} has a challenger (${room.playerB}); kick them before deleting`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    await this.redis.del(this.roomKey(room.id));
+    await this.redis.srem('battle:rooms', room.id);
+    await this.redis.del('cache:battle:lobby');
+    return { deleted: true, roomId: room.id };
   }
 
   /** 屏蔽某玩家：其 join 该房主房间时 403 BLOCKED_BY_HOST（默认 30 分钟，见 PlayerBlockService）。 */
@@ -634,6 +681,7 @@ export class BattlesService implements OnModuleInit {
   }
 
   private async assertTeamOwnership(playerId: string, pokemonIds: string[]): Promise<void> {
+    assertTeamSize(pokemonIds);
     for (const id of pokemonIds) {
       const p = await this.contract.getPokemon(id).catch(() => null);
       if (!p || p.ownerId !== playerId) {
@@ -646,28 +694,6 @@ export class BattlesService implements OnModuleInit {
       if ((await this.hp.currentHp(p)) <= 0) {
         throw new AppException('FAINTED', `pokemon ${id} has fainted; heal it before battling`, HttpStatus.CONFLICT);
       }
-    }
-  }
-
-  /** 引擎双方的终局 HP 快照（同步；对局结束的 `end` 钩子里抓取）。 */
-  private battleHpEntries(engine: BattleEngine | undefined): Array<{ pokemonId: string; hp: number; maxHp: number }> {
-    if (!engine) return [];
-    const entries: Array<{ pokemonId: string; hp: number; maxHp: number }> = [];
-    for (const side of ['A', 'B'] as const) {
-      for (const mon of engine.team(side)) {
-        if (mon.pokemonId) entries.push({ pokemonId: mon.pokemonId, hp: mon.hp, maxHp: mon.maxHp });
-      }
-    }
-    return entries;
-  }
-
-  /** 把终局 HP 写回 Redis（失败只记日志：不能影响结算本身）。 */
-  private async persistBattleHp(entries: Array<{ pokemonId: string; hp: number; maxHp: number }>): Promise<void> {
-    if (entries.length === 0) return;
-    try {
-      await this.hp.persistMany(entries);
-    } catch (err) {
-      this.logger.warn(`battle hp persist failed: ${(err as Error).message}`);
     }
   }
 
@@ -701,6 +727,10 @@ export class BattlesService implements OnModuleInit {
     return bundle;
   }
 
+  /**
+   * 链上宝可梦 → 引擎入参：**满血满状态出战**（竞技只比养成与策略），
+   * 不带链下 Redis 的持久伤势、结算后也不写回（docs/backend-api.md §2「伤势持久化」）。
+   */
   private async loadTeam(pokemonIds: string[]): Promise<EngineMonInput[]> {
     const team: EngineMonInput[] = [];
     for (const id of pokemonIds) {
@@ -712,9 +742,9 @@ export class BattlesService implements OnModuleInit {
         ivs: p.ivs,
         evs: p.evs,
         nature: p.nature,
+        // 羁绊战斗加成：非 HP 五项 × (1 + bond/255 × 5%)（docs/backend-api.md §11）
+        bond: p.bond ?? 0,
         moves: p.moves,
-        // 伤势持久化：以链下 Redis 的当前 HP 出战（缺键 = 满血，docs/backend-api.md §2）
-        currentHp: await this.hp.currentHp(p),
       });
     }
     return team;

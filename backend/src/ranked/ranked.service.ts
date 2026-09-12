@@ -8,7 +8,8 @@ import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, identityForUser, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
-import { BattleRoom, BattlesService } from '../battles/battles.service';
+import { BattleRoom, BattlesService, assertTeamSize } from '../battles/battles.service';
+import { OpponentPokemonDetail, enrichTeam, toOpponentTeam } from '../battles/wager-detail';
 import { PokemonHpService } from '../pokemon/pokemon-hp.service';
 import { RankedBattleLauncher } from './battle-launcher';
 import { BOT_DAILY_LIMIT, BOT_NICKNAME, BOT_OFFER_AFTER_MS, BOT_PLAYER_ID, botDailyKey, utcDate } from './bot';
@@ -80,7 +81,13 @@ export interface QueueStatusResult {
   bot?: boolean;
   roomId?: string | null;
   battleId?: string;
-  opponent?: { playerId: string; nickname: string; rating: number };
+  opponent?: {
+    playerId: string;
+    nickname: string;
+    rating: number;
+    /** MATCH_PENDING：对手出战队伍的**裁剪**富化视图（不含 IV/EV/性格/羁绊，docs/backend-api.md §11.1） */
+    team?: OpponentPokemonDetail[];
+  };
   message?: string;
 }
 
@@ -438,6 +445,8 @@ export class RankedService {
     const opponentRating = side === 'A' ? pending.ratingB : pending.ratingA;
     const entry = await this.redis.getJson<RankedQueueEntry>(this.entryKey(playerId));
     const waitedMs = entry ? Date.now() - entry.joinedAt : 0;
+    // 接受期展示对手阵容：只给公开信息（富化后裁剪掉 IV/EV/性格/羁绊）
+    const opponentTeam = await enrichTeam(this.contract, await this.teamOf(pending, side === 'A' ? 'B' : 'A'));
     return {
       state: 'MATCH_PENDING',
       mode: pending.mode,
@@ -451,8 +460,18 @@ export class RankedService {
         playerId: opponentId,
         nickname: (await this.users.findByUsername(opponentId).catch(() => null))?.nickname ?? opponentId,
         rating: opponentRating,
+        team: toOpponentTeam(opponentTeam),
       },
     };
+  }
+
+  /** 待确认对局里某一方的出战队伍 id：优先用配对时快照，旧记录（无快照）回退读其排队条目。 */
+  private async teamOf(pending: RankedPendingMatch, side: 'A' | 'B'): Promise<string[]> {
+    const snapshot = side === 'A' ? pending.teamA : pending.teamB;
+    if (snapshot?.length) return snapshot;
+    const playerId = side === 'A' ? pending.playerA : pending.playerB;
+    const entry = await this.redis.getJson<RankedQueueEntry>(this.entryKey(playerId));
+    return entry?.teamPokemonIds ?? [];
   }
 
   // ---------------------------------------------------------------- 匹配 --
@@ -547,6 +566,9 @@ export class RankedService {
       ratingA: a.rating,
       playerB: b.playerId,
       ratingB: b.rating,
+      // 接受期双方可见的"对手阵容"（docs/backend-api.md §11.1）：配对时的队伍快照
+      teamA: [...new Set(a.teamPokemonIds)],
+      teamB: [...new Set(b.teamPokemonIds)],
       acceptA: false,
       acceptB: false,
       deadline: Date.now() + MATCH_ACCEPT_MS,
@@ -908,9 +930,8 @@ export class RankedService {
    * （伤势持久化，docs/backend-api.md §2）。
    */
   async assertTeam(playerId: string, pokemonIds: string[]): Promise<void> {
-    if (!Array.isArray(pokemonIds) || pokemonIds.length === 0) {
-      throw new AppException('INVALID_PARAM', 'teamPokemonIds must be a non-empty array', HttpStatus.BAD_REQUEST);
-    }
+    // 队伍规模 1-6（与房间创建/加入同一口径）：违规 400 INVALID_TEAM_SIZE
+    assertTeamSize(pokemonIds);
     for (const id of [...new Set(pokemonIds)]) {
       const pokemon = await this.contract.getPokemon(id).catch(() => null);
       if (!pokemon || pokemon.ownerId !== playerId) {

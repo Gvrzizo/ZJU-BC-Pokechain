@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
-import { ValidationPipe } from '@nestjs/common';
-import { BattlesService, RoomKickedEvent } from '../src/battles/battles.service';
+import { HttpException, ValidationPipe } from '@nestjs/common';
+import { BattlesService, RoomKickedEvent, TEAM_SIZE_MAX, assertTeamSize } from '../src/battles/battles.service';
 import { PlayerBlockService } from '../src/users/player-block.service';
 import { PlayerBlock } from '../src/users/entities/player-block.entity';
 import { WagerTemplateService } from '../src/battles/wager-template.service';
@@ -39,6 +39,7 @@ type Contract = ReturnType<typeof makeChain>['contract'];
 interface Stack {
   chain: ReturnType<typeof makeChain>['chain'];
   contract: Contract;
+  redis: ReturnType<typeof makeRedis>;
   svc: BattlesService;
   blocks: PlayerBlockService;
   kicks: RoomKickedEvent[];
@@ -62,7 +63,7 @@ async function makeStack(config: Record<string, unknown> = {}): Promise<Stack> {
   );
   const kicks: RoomKickedEvent[] = [];
   svc.events.on('kicked', (e: RoomKickedEvent) => kicks.push(e));
-  return { chain, contract, svc, blocks, kicks };
+  return { chain, contract, redis, svc, blocks, kicks };
 }
 
 const WAGER = (over: Record<string, unknown> = {}) => ({
@@ -431,5 +432,167 @@ describe('押注模板 GET/POST/DELETE /battles/templates', () => {
     await expect(
       pipe.transform({ name: 'ok', wager: { items: [{ id: 'i_1', qty: 0 }] } }, { type: 'body', metatype: SaveTemplateDto }),
     ).rejects.toThrow();
+  });
+});
+
+describe('出战队伍数量限制 1-6（docs/backend-api.md §5）', () => {
+  it('assertTeamSize 边界：0 / 7 只 400 INVALID_TEAM_SIZE，1 / 6 只放行', () => {
+    expect(() => assertTeamSize([])).toThrow(/^INVALID_TEAM_SIZE:/);
+    expect(() => assertTeamSize(['a', 'b', 'c', 'd', 'e', 'f', 'g'])).toThrow(/^INVALID_TEAM_SIZE:/);
+    expect(() => assertTeamSize(['a'])).not.toThrow();
+    expect(() => assertTeamSize(Array.from({ length: 6 }, (_, i) => `p${i}`))).not.toThrow();
+    expect(TEAM_SIZE_MAX).toBe(6);
+  });
+
+  it('创建 / 加入房间带 7 只 → 400 INVALID_TEAM_SIZE（6 只放行，先于资产校验）', async () => {
+    const { chain, contract, svc } = await makeStack();
+    await registerPlayers(contract, 'ash', 'gary');
+    const ashTeam = Array.from({ length: 6 }, (_, i) => `p_ash_${i}`);
+    const garyTeam = Array.from({ length: 6 }, (_, i) => `p_gary_${i}`);
+    for (const id of ashTeam) await seedPokemon(chain, 'ash', { id });
+    for (const id of garyTeam) await seedPokemon(chain, 'gary', { id });
+
+    // 第 7 只在链上不存在也没关系：规模校验先于归属校验（不会被误报 NOT_OWNER）
+    const err = await svc
+      .createRoom(userIdentity('ash'), ROOM_DTO({ teamPokemonIds: [...ashTeam, 'p_ghost'] }))
+      .catch((e: HttpException) => e);
+    expect(err.message).toMatch(/^INVALID_TEAM_SIZE:/);
+    expect(err.getStatus()).toBe(400);
+
+    const room = await svc.createRoom(userIdentity('ash'), ROOM_DTO({ teamPokemonIds: ashTeam }));
+    expect(room.teamA).toHaveLength(6);
+
+    const joinErr = await svc
+      .joinRoom(userIdentity('gary'), room.id, JOIN_DTO({ teamPokemonIds: [...garyTeam, 'p_ghost'] }))
+      .catch((e: HttpException) => e);
+    expect(joinErr.message).toMatch(/^INVALID_TEAM_SIZE:/);
+    expect(joinErr.getStatus()).toBe(400);
+    // 失败的加入没有把玩家写进房间
+    expect((await svc.getRoom(room.id)).playerB).toBeNull();
+
+    const joined = await svc.joinRoom(userIdentity('gary'), room.id, JOIN_DTO({ teamPokemonIds: garyTeam }));
+    expect(joined.teamB).toHaveLength(6);
+  });
+});
+
+describe('房主删除房间 DELETE /battles/rooms/:id', () => {
+  it('WAITING 房间：房主可删，房间记录 / 房间索引 / 大厅缓存一并清理', async () => {
+    const { chain, contract, redis, svc } = await makeStack();
+    await registerPlayers(contract, 'ash', 'gary');
+    await seedPokemon(chain, 'ash', { id: 'p_ash' });
+    const room = await svc.createRoom(userIdentity('ash'), ROOM_DTO({ name: '要撤了' }));
+    await svc.listRooms(); // 先把大厅列表写进缓存
+    expect(await redis.getJson('cache:battle:lobby')).not.toBeNull();
+
+    expect(await svc.deleteRoom(userIdentity('ash'), room.id)).toEqual({ deleted: true, roomId: room.id });
+    await expect(svc.getRoom(room.id)).rejects.toThrow(/ROOM_NOT_FOUND/);
+    // ioredis-mock 在同进程内共享数据：只断言"这个房间"从索引/缓存里消失
+    expect(await redis.get('cache:battle:lobby')).toBeNull();
+    expect(await redis.smembers('battle:rooms')).not.toContain(room.id);
+    expect((await svc.listRooms()).map((r) => r.id)).not.toContain(room.id);
+
+    // 幂等性：重复删除 404
+    await expect(svc.deleteRoom(userIdentity('ash'), room.id)).rejects.toThrow(/ROOM_NOT_FOUND/);
+  });
+
+  it('非房主 403 NOT_HOST；有人加入 409 ROOM_NOT_EMPTY（先 kick 再删）；激活后 409 ROOM_NOT_OPEN', async () => {
+    const { chain, contract, svc } = await makeStack();
+    await registerPlayers(contract, 'ash', 'gary', 'brock');
+    await seedPokemon(chain, 'ash', { id: 'p_ash' });
+    await seedPokemon(chain, 'gary', { id: 'p_gary' });
+    const room = await svc.createRoom(userIdentity('ash'), ROOM_DTO());
+
+    const notHost = await svc.deleteRoom(userIdentity('gary'), room.id).catch((e: HttpException) => e);
+    expect(notHost.message).toMatch(/^NOT_HOST:/);
+    expect(notHost.getStatus()).toBe(403);
+
+    await svc.joinRoom(userIdentity('gary'), room.id, JOIN_DTO());
+    const notEmpty = await svc.deleteRoom(userIdentity('ash'), room.id).catch((e: HttpException) => e);
+    expect(notEmpty.message).toMatch(/^ROOM_NOT_EMPTY:/);
+    expect(notEmpty.getStatus()).toBe(409);
+    expect(notEmpty.message).toContain('kick');
+    // 房间还在，挑战者也还在
+    expect((await svc.getRoom(room.id)).playerB).toBe('gary');
+
+    // 先请离 → 房间回 WAITING → 可删
+    await svc.kick(userIdentity('ash'), room.id, 'gary');
+    await svc.deleteRoom(userIdentity('ash'), room.id);
+    await expect(svc.getRoom(room.id)).rejects.toThrow(/ROOM_NOT_FOUND/);
+
+    // 激活后的房间不可删（资产已链上锁定）
+    const active = await svc.createRoom(userIdentity('ash'), ROOM_DTO({ name: '打完再说' }));
+    await svc.joinRoom(userIdentity('gary'), active.id, JOIN_DTO());
+    await svc.confirmWager(userIdentity('ash'), active.id);
+    await svc.confirmWager(userIdentity('gary'), active.id);
+    const opened = await svc.deleteRoom(userIdentity('ash'), active.id).catch((e: HttpException) => e);
+    expect(opened.message).toMatch(/^ROOM_NOT_OPEN:/);
+    expect(opened.getStatus()).toBe(409);
+    expect((await svc.getRoom(active.id)).status).toBe('ACTIVE');
+  });
+});
+
+describe('互看出战队伍（房间详情 teamDetailA/B，所有人可见）', () => {
+  it('双方出战队伍富化为 id/昵称/种族/等级/闪光/羁绊/能力值；未加入时 B 为 null', async () => {
+    const { chain, contract, svc } = await makeStack();
+    await registerPlayers(contract, 'ash', 'gary');
+    const pika = await seedPokemon(chain, 'ash', {
+      id: 'p_team_a1',
+      speciesId: 25,
+      level: 22,
+      shiny: true,
+      bond: 55,
+      moves: ['tackle'],
+    });
+    const charmander = await seedPokemon(chain, 'ash', { id: 'p_team_a2', speciesId: 4, level: 12, bond: 40 });
+    const gyarados = await seedPokemon(chain, 'gary', { id: 'p_team_b1', speciesId: 130, level: 30, bond: 70 });
+
+    const room = await svc.createRoom(
+      userIdentity('ash'),
+      ROOM_DTO({ teamPokemonIds: [pika.id, charmander.id] }),
+    );
+    const waiting = await svc.roomDetail(room.id);
+    expect(waiting.teamDetailA.map((m) => m.id)).toEqual([pika.id, charmander.id]);
+    expect(waiting.teamDetailA[0]).toMatchObject({
+      id: pika.id,
+      name: 'pikachu',
+      speciesId: 25,
+      nameZh: '皮卡丘',
+      level: 22,
+      shiny: true,
+      bond: 55,
+      unavailable: false,
+    });
+    const species = getSpecies(25)!;
+    expect(waiting.teamDetailA[0].stats).toEqual(
+      computeStats(species.base, pika.ivs, normalizeEvs(pika.evs), pika.level, pika.nature),
+    );
+    // 契约：只有公开字段（不含 IV / EV / 性格等私有数据）
+    expect(Object.keys(waiting.teamDetailA[0]).sort()).toEqual(
+      ['id', 'name', 'speciesId', 'nameZh', 'level', 'shiny', 'bond', 'stats', 'unavailable'].sort(),
+    );
+    expect(waiting.teamDetailB).toBeNull();
+
+    await svc.joinRoom(userIdentity('gary'), room.id, JOIN_DTO({ teamPokemonIds: [gyarados.id] }));
+    const detail = await svc.roomDetail(room.id);
+    expect(detail.teamDetailB?.map((m) => m.id)).toEqual([gyarados.id]);
+    expect(detail.teamDetailB?.[0]).toMatchObject({ nameZh: '暴鲤龙', level: 30, bond: 70 });
+    // teamA/teamB 仍是 id 数组（引擎/结算用），富化结果另开字段
+    expect(detail.teamA).toEqual([pika.id, charmander.id]);
+    expect(detail.teamB).toEqual([gyarados.id]);
+  });
+
+  it('链上读不到的成员富化为 unavailable 占位（不改写队伍 id 列表）', async () => {
+    const { chain, contract, svc, redis } = await makeStack();
+    await registerPlayers(contract, 'ash');
+    await seedPokemon(chain, 'ash', { id: 'p_team_ok' });
+    const room = await svc.createRoom(userIdentity('ash'), ROOM_DTO({ teamPokemonIds: ['p_team_ok'] }));
+    // 直接改房间记录模拟"成员已被清理"（正常流程里队伍在创建时已校验归属）
+    const stored = await redis.getJson<{ teamA: string[] }>(`battle:room:${room.id}`);
+    await redis.setJson(`battle:room:${room.id}`, { ...stored, teamA: ['p_team_ok', 'p_team_gone'] }, 3600);
+
+    const detail = await svc.roomDetail(room.id);
+    expect(detail.teamA).toEqual(['p_team_ok', 'p_team_gone']);
+    expect(detail.teamDetailA).toHaveLength(2);
+    expect(detail.teamDetailA[1]).toMatchObject({ id: 'p_team_gone', unavailable: true, speciesId: null, stats: null });
   });
 });

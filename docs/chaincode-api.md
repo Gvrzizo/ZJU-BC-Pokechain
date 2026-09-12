@@ -71,7 +71,7 @@
   "serverSeed":"", "resultHash":"", "status":"COMMITTED", "createdAt":"ISO",
   "meta":"" }
 ```
-`meta`：可选的链下上下文备注（如难度调整/诱饵付费，≤256 字节 UTF-8，缺省空串），随承诺一起上链留痕，`GetRandom` 原样返回。
+`meta`：可选的链下上下文备注（如区域/诱饵付费，≤256 字节 UTF-8，缺省空串），随承诺一起上链留痕，`GetRandom` 原样返回。
 `status`：`COMMITTED → REVEALED → CONSUMED`。
 
 ### Trade `trade:<id>`

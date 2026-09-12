@@ -9,6 +9,7 @@ import {
   makeHpService,
   makeRedis,
   mintBall,
+  mockRepo,
   registerPlayers,
   seedPokemon,
   userIdentity,
@@ -22,7 +23,7 @@ function makeService() {
   const { chain, contract } = makeChain();
   const redis = makeRedis();
   const events = { stream$: new Subject().asObservable() };
-  const service = new PokemonService(contract, redis, events as never, makeHpService(redis));
+  const service = new PokemonService(contract, redis, events as never, makeHpService(redis), mockRepo() as never);
   return { chain, contract, redis, service };
 }
 
@@ -51,7 +52,7 @@ describe('PokemonService：六项最终能力值与 EV', () => {
     const { chain, contract } = makeChain();
     const redis = makeRedis();
     const capture = new CaptureService(chain, contract, redis);
-    const service = new PokemonService(contract, redis, { stream$: new Subject().asObservable() } as never, makeHpService(redis));
+    const service = new PokemonService(contract, redis, { stream$: new Subject().asObservable() } as never, makeHpService(redis), mockRepo() as never);
     await registerPlayers(contract, 'ash');
     const ball = await mintBall(contract, 'ash', 'i_ball_capture', 'poke-ball', 5);
     const ash = userIdentity('ash');
@@ -81,6 +82,28 @@ describe('PokemonService：六项最终能力值与 EV', () => {
       computeStats(species.base, caught.pokemon.ivs, caught.pokemon.evs, caught.pokemon.level, caught.pokemon.nature),
     );
     expect((await service.getOne(caught.pokemon.id)).stats).toEqual(caught.pokemon.stats);
+  });
+
+  it('详情/列表附带 bondBonus 百分比（羁绊战斗加成，非 HP 五项），stats 仍为基础最终值', async () => {
+    const { chain, contract, redis, service } = makeService();
+    await registerPlayers(contract, 'ash');
+    const bare = await seedPokemon(chain, 'ash', { id: 'p_bond_0', level: 50, bond: 0 });
+    const minted = await seedPokemon(chain, 'ash', { id: 'p_bond_50', level: 50, bond: 50 });
+    const half = await seedPokemon(chain, 'ash', { id: 'p_bond_128', level: 50, bond: 128 });
+    const full = await seedPokemon(chain, 'ash', { id: 'p_bond_255', level: 50, bond: 255 });
+
+    expect((await service.getOne(bare.id)).bondBonus).toBe(0);
+    expect((await service.getOne(minted.id)).bondBonus).toBe(0.98);
+    expect((await service.getOne(half.id)).bondBonus).toBe(2.51);
+    expect((await service.getOne(full.id)).bondBonus).toBe(5);
+    // ioredis-mock 在同进程内共享数据：先清掉上一个用例留下的列表缓存再验证列表形态
+    await redis.del('cache:pokemon:ash');
+    expect((await service.listMine('ash')).find((p) => p.id === full.id)?.bondBonus).toBe(5);
+
+    // stats 不含羁绊（API 口径 = 链下基础最终值），战斗引擎在出战时才乘上加成
+    const detail = await service.getOne(full.id);
+    const species = getSpecies(detail.speciesId)!;
+    expect(detail.stats).toEqual(computeStats(species.base, detail.ivs, detail.evs, detail.level, detail.nature));
   });
 
   it('特训只加 EV：每点花费 4 EV、主攻项优先；不加 exp/等级（积分不再换等级）', async () => {

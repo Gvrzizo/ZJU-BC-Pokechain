@@ -6,18 +6,12 @@ import { DeriveStream, sha256hex } from '../common/utils/crypto.util';
 import { ChainAdapter } from '../fabric/chain.adapter';
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, SYSTEM_IDENTITY } from '../fabric/chain.types';
+import { ZONE_IDS, ZoneId, resolveZone } from '../game-data/encounter.data';
 import { getSpecies } from '../game-data/species.data';
 import { computeStats, normalizeEvs } from '../game-data/stats';
 import { resolveOwnedBall } from './ball';
 import { CATCH_REWARD_POINTS, catchRewardReason } from './points-economy';
-import {
-  DEFAULT_TEAM_TOP_LEVEL,
-  SHINY_CHANCE,
-  computeDnaHash,
-  deriveAttempt,
-  deriveWild,
-  lureSpec,
-} from './capture-derive';
+import { SHINY_CHANCE, computeDnaHash, deriveAttempt, deriveWild, lureSpec } from './capture-derive';
 import { loadWildSessionByEvent } from '../wild/wild-session';
 
 /** 遇敌会话（Redis `capture:<eventId>`）：快速捕捉与野怪战斗共用同一事件与投球计数。 */
@@ -28,6 +22,8 @@ export interface CaptureSession {
   attempts: number;
   speciesId: number;
   wildLevel: number;
+  /** 遇敌区域（决定野生池与等级带，docs/backend-api.md §2） */
+  zoneId?: ZoneId;
   /** 付费诱饵档位（0 免费 / 1 = 50 积分 / 2 = 200 积分）；缺省按 0 */
   lureTier?: number;
   /** 闪光判定阈值：1/4096，诱饵 tier 2 → 1/1024；缺省按基准 */
@@ -66,11 +62,20 @@ export class CaptureService {
     await this.redis.del(this.sessionKey(eventId));
   }
 
-  async encounter(as: ChainIdentity, clientSeedInput?: string, lureTierInput?: number) {
+  async encounter(as: ChainIdentity, clientSeedInput?: string, lureTierInput?: number, zoneIdInput?: string) {
     const tier = lureTierInput ?? 0;
     const lure = lureSpec(tier);
     if (!lure) {
       throw new AppException('INVALID_LURE_TIER', `lureTier must be 0, 1 or 2 (got ${String(lureTierInput)})`, HttpStatus.BAD_REQUEST);
+    }
+    // 区域（docs/backend-api.md §2「区域等级带」）：未传按南部；非法 id 直接拒绝
+    const zone = resolveZone(zoneIdInput);
+    if (!zone) {
+      throw new AppException(
+        'INVALID_ZONE',
+        `zoneId must be one of ${ZONE_IDS.join('|')} (got ${String(zoneIdInput)})`,
+        HttpStatus.BAD_REQUEST,
+      );
     }
     const serverSeed = randomBytes(32).toString('hex');
     const clientSeed = clientSeedInput && /^[0-9a-f]{8,64}$/i.test(clientSeedInput)
@@ -78,6 +83,11 @@ export class CaptureService {
       : randomBytes(16).toString('hex');
     const eventId = `ev_${randomUUID()}`;
     const commitHash = sha256hex(serverSeed);
+    // 链上留痕：区域（决定 n=0 抽样池与 n=1 等级带）与付费诱饵档位，/fairness 可复核
+    const meta = JSON.stringify({
+      zone: zone.id,
+      ...(lure.cost > 0 ? { lureTier: tier, cost: lure.cost } : {}),
+    });
 
     // 0) paid lure: debit the points first (admin/system identity like /pokemon/:id/train),
     //    then bind {lureTier, cost} into the on-chain Commit meta so /fairness can audit it.
@@ -95,7 +105,7 @@ export class CaptureService {
         playerId: as.userId,
         commitHash,
         clientSeed,
-        ...(lure.cost > 0 ? { meta: JSON.stringify({ lureTier: tier, cost: lure.cost }) } : {}),
+        meta,
       });
     } catch (err) {
       // 承诺失败（极少见）→ 尽力退还诱饵费用，避免玩家白扣分
@@ -110,8 +120,7 @@ export class CaptureService {
     }
 
     const stream = new DeriveStream(serverSeed, clientSeed, eventId);
-    const teamTopLevel = await this.teamTopLevel(as.userId);
-    const { species, level } = deriveWild(stream, teamTopLevel, lure.levelBonus);
+    const { species, level } = deriveWild(stream, zone, lure.levelBonus);
     const shinyChance = SHINY_CHANCE * lure.shinyMultiplier;
 
     const session: CaptureSession = {
@@ -121,6 +130,7 @@ export class CaptureService {
       attempts: 0,
       speciesId: species.id,
       wildLevel: level,
+      zoneId: zone.id,
       lureTier: tier,
       shinyChance,
     };
@@ -128,6 +138,7 @@ export class CaptureService {
 
     return {
       eventId,
+      zone: { id: zone.id, name: zone.name, minLevel: zone.minLevel, maxLevel: zone.maxLevel, maxStage: zone.maxStage },
       wild: {
         speciesId: species.id,
         name: species.name,
@@ -138,17 +149,9 @@ export class CaptureService {
         catchRate: species.catchRate,
       },
       lure: { tier, cost: lure.cost, levelBonus: lure.levelBonus, shinyMultiplier: lure.shinyMultiplier },
-      teamTopLevel,
       commitHash,
       clientSeed,
     };
-  }
-
-  /** 队伍水平线：owner 名下 IDLE 宝可梦的最高等级；无队伍按 5（新账号第一只也有合理强度）。 */
-  private async teamTopLevel(playerId: string): Promise<number> {
-    const owned = await this.contract.queryPokemonByOwner(playerId).catch(() => []);
-    const levels = owned.filter((p) => p.status === 'IDLE').map((p) => p.level);
-    return levels.length > 0 ? Math.max(...levels) : DEFAULT_TEAM_TOP_LEVEL;
   }
 
   async attempt(as: ChainIdentity, eventId: string, ballItemId: string) {

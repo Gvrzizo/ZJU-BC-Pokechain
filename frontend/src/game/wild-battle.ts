@@ -1,9 +1,13 @@
 import type { WildBattleEvent, WildStatus } from '@/types';
+import { num, statLabel, statusLabel } from './battle-log';
 
 /**
  * 野怪战斗（PvE）的纯展示逻辑：捕捉成功率格式化与战斗日志文案。
  * 不含任何网络/组件依赖，供 CaptureOverlay.vue 与单测复用。
+ * 异常状态/能力阶级的中文名表与 PvP 日志（battle-log.ts）共用。
  */
+
+export { STATUS_LABELS, statusLabel } from './battle-log';
 
 export interface WildLogContext {
   /** 我方宝可梦名（服务端日志只带 id，显示名在前端补） */
@@ -99,26 +103,6 @@ function moveName(detail: Record<string, unknown>, ctx: WildLogContext): string 
   return ctx.moveNames?.[id] ?? id ?? '技能';
 }
 
-/** 异常状态 → 中文名（brn 灼伤 / psn 中毒 / par 麻痹） */
-export const STATUS_LABELS: Record<string, string> = { brn: '灼伤', psn: '中毒', par: '麻痹' };
-
-export function statusLabel(status: unknown): string {
-  return typeof status === 'string' ? STATUS_LABELS[status] ?? status : '';
-}
-
-/** 能力阶级项 → 中文名 */
-const STAT_LABELS: Record<string, string> = {
-  atk: '攻击',
-  def: '防御',
-  spatk: '特攻',
-  spdef: '特防',
-  speed: '速度',
-};
-
-function statLabel(stat: unknown): string {
-  return typeof stat === 'string' ? STAT_LABELS[stat] ?? stat : '能力';
-}
-
 /** 技能元数据的最小展示形状（后端 GET /battles/moves 与野怪状态里的技能表都满足） */
 export interface MoveDetailInfo {
   name: string;
@@ -139,11 +123,6 @@ export function moveDetailText(label: string, move: MoveDetailInfo | null | unde
   ];
   if (move.effectText) lines.push(move.effectText);
   return lines.join('\n');
-}
-
-function num(detail: Record<string, unknown>, key: string): number {
-  const value = detail[key];
-  return typeof value === 'number' ? value : 0;
 }
 
 /** 单条战斗事件 → 中文日志行（'end' 之类不产生文案的返回空串）。 */

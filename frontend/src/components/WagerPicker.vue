@@ -4,6 +4,7 @@ import { listWagerTemplates, saveWagerTemplate } from '@/api/battles';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useI18n } from '@/composables/useI18n';
 import { clampWagerToInventory, describeWager } from '@/components/wager-inventory';
+import { TEAM_SIZE_MAX, toggleTeamMember } from '@/components/team-picker';
 import { isFainted } from '@/utils/pokemon-hp';
 import type { Pokemon, WagerItemRef, WagerRequest, WagerTemplate } from '@/types';
 import ItemIcon from '@/ui/ItemIcon.vue';
@@ -28,6 +29,8 @@ const templateName = ref('');
 const templateNote = ref('');
 const showSave = ref(false);
 const templateHint = ref('');
+/** 出战队伍超上限（6 只）时的提示 */
+const teamHint = ref('');
 
 onMounted(async () => {
   try {
@@ -50,8 +53,15 @@ function toggleWagerPokemon(id: string) {
   emit('update:wager', { ...props.wager, pokemonIds: toggleList(props.wager.pokemonIds, id) });
 }
 
+/** 出战队伍勾选：最多 6 只（与服务端 1-6 校验同一口径），超限时提示而不改动选择 */
 function toggleTeam(id: string) {
-  emit('update:team', toggleList(props.team, id));
+  const { team, rejected } = toggleTeamMember(props.team, id);
+  if (rejected) {
+    teamHint.value = `出战队伍最多 ${TEAM_SIZE_MAX} 只（当前已选 ${props.team.length} 只）`;
+    return;
+  }
+  teamHint.value = '';
+  emit('update:team', team);
 }
 
 /**
@@ -173,6 +183,7 @@ async function saveAsTemplate() {
     </div>
     <label style="font-size: var(--px-fs-sm)">
       出战队伍 / 押注宝可梦（我的 IDLE 宝可梦，濒死者不可出战）
+      <span class="text-dim">出战 {{ team.length }}/{{ TEAM_SIZE_MAX }}</span>
     </label>
     <div style="max-height: 160px; overflow: auto; font-size: var(--px-fs-sm); margin-bottom: 8px">
       <div v-for="p in idlePokemon" :key="p.id" :class="{ 'picker-row--fainted': isFainted(p) }">
@@ -180,7 +191,7 @@ async function saveAsTemplate() {
           <input
             type="checkbox"
             :checked="team.includes(p.id)"
-            :disabled="isFainted(p)"
+            :disabled="isFainted(p) || (!team.includes(p.id) && team.length >= TEAM_SIZE_MAX)"
             @change="toggleTeam(p.id)"
           />
           出战 {{ monName(p.speciesId, p.name) }} Lv{{ p.level }}
@@ -202,6 +213,7 @@ async function saveAsTemplate() {
       <p v-else-if="selectableCount === 0" class="text-dim" style="font-size: var(--px-fs-sm)">
         没有可出战的宝可梦——先去草丛捕捉一只吧。
       </p>
+      <p v-if="teamHint" style="font-size: var(--px-fs-sm); color: var(--gba-red)">{{ teamHint }}</p>
     </div>
     <label style="font-size: var(--px-fs-sm)">押注道具（可押部分数量）</label>
     <div style="max-height: 120px; overflow: auto; font-size: var(--px-fs-sm)">

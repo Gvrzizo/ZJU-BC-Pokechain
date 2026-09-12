@@ -18,6 +18,7 @@
 **更新纪律（强制）**：任何改动合并前，必须同步更新本 `AGENTS.md` 的相关段落——结构/命令/**测试数**/架构决策四项，
 以及受影响模块的清单与页面列表；**子代理任务完成后由主代理核对**本文件是否与代码一致（实测跑一遍三套 `npm test` 并更新计数）。
 文档与代码不一致时以代码为准，但要在同一次改动里把文档改回来。
+**Git 纪律**：仓库已初始化（main 分支）。每完成一个功能/修复批次：三套测试全绿 → 更新本文件 → `git add -A && git commit`（中文约定式提交，如 `feat(battle): 实时战斗日志`）；不把 `node_modules/`、构建产物、`network/organizations`、`frontend/public/assets/vendor/`（版权素材，本地投放）提交入库。
 
 ## 常用命令
 
@@ -25,10 +26,10 @@
 # 链码
 cd chaincode/pokemon-cc && npm test && npm run build      # 88 单测（8 套）+ tsc
 # 后端
-cd backend && npm run build && npm test                   # nest build + 295 单测（26 套，内存 mock，免外部服务）
+cd backend && npm run build && npm test                   # nest build + 342 单测（29 套，内存 mock，免外部服务）
 cd backend && npm run seed                                # 演示数据（需先 build；PG/Redis 可达，mock 模式）；npm run seed:dev 免构建
 # 前端
-cd frontend && npm run build && npm test                  # vue-tsc + vite + 84 单测（vitest，16 个测试文件）
+cd frontend && npm run build && npm test                  # vue-tsc + vite + 107 单测（vitest，21 个测试文件）
 # 全栈演示（mock 链模式，默认）
 docker compose up -d --build && ./scripts/seed-demo.sh    # 浏览器 :8080，账号 ash/gary/arbiter/admin 密码 demo1234
 # 真链模式（先按根 compose 文件头 [real-fabric] 注释取消 backend 的 volumes/networks 注释）
@@ -47,7 +48,7 @@ BASE_URL=http://localhost:3100 ./scripts/e2e-smoke.sh     # 打本地实例（�
 5. **身份模型**：角色 `player|admin|system|arbitrator` 存 CA 属性；链码用 CID `getAttrValue('role')` + mspId 校验；仲裁要求 Org2MSP + arbitrator。后端托管用户 X.509（AES-256-GCM 存 PG），以用户证书代发交易；system 服务身份用于 CreateBattle/SubmitResult 等。
 6. **双链模式**：后端 `ChainAdapter` 抽象有 Fabric 与 Mock 两实现（`FABRIC_MOCK=true` 默认）。Mock 完整复刻链码语义（真实 sha256/HMAC），课堂演示与单测都走它——**改链码行为时必须同步改 MockChainAdapter 与两边测试**。Mock 世界状态存 Redis（键前缀 `mockchain:`，`backend/src/fabric/mock-chain.store.ts`），seed 进程 / backend 进程 / 重跑共享同一份状态；单测不传 store 时退回纯内存。
 7. **错误约定**：链码 `throw new Error('CODE: message')`（全大写蛇形码），后端过滤器透传为 `{statusCode, code, message}`。前端 axios 拦截器自动注入 `X-Nonce`/`X-Timestamp`（防重放）与 JWT。
-8. **能力值体系**：链上只存种族值表 + IV(0-31) + EV(单项 0-255/总和 ≤510) + 等级 + 性格，最终六项能力值按第三世代官方公式在链下算（`backend/src/game-data/stats.ts`，含 25 种性格 ±10% 修正；HP 不吃性格），战斗 HP 上限/速度/伤害 A/D 与 API `stats` 字段都用该最终值；改公式须同步链码 EV 校验、MockChainAdapter、前端展示与文档。详见 `docs/backend-api.md` §2「能力值计算」。
+8. **能力值体系**：链上只存种族值表 + IV(0-31) + EV(单项 0-255/总和 ≤510) + 等级 + 性格，最终六项能力值按第三世代官方公式在链下算（`backend/src/game-data/stats.ts`，含 25 种性格 ±10% 修正；HP 不吃性格），战斗 HP 上限/速度/伤害 A/D 与 API `stats` 字段都用该最终值；**羁绊加成**：非 HP 五项再 ×(1 + bond/255 × 5%)（满羁绊 +5%，向下取整，`computeStats` 的 bond 参数，PvP/野怪战斗均已接入；API 返回 `bondBonus` 百分比）。改公式须同步链码 EV 校验、MockChainAdapter、前端展示与文档。详见 `docs/backend-api.md` §2「能力值计算」。
 9. **积分经济（2026-09 全面重平衡：收紧 faucet、抬升 sink、让稀有道具真正稀有）**。积分是链上游戏发行资产，只能由 `admin`/`system` 经 `PlayerContract.AddPoints` 增减（reason 可审计），口径集中在 `backend/src/pokemon/points-economy.ts`：
    - **faucet（日收入约 100–300P）**：注册 1000 / **收服 +20** / **击倒 野怪等级×1** / **放生 等级×1** / 押注赢取 / **积分场 arena**（准入青铜 20 白银 50 黄金 100 白金 200 大师 400，胜者得双方准入 + 准入 50% 补贴，每人每日补贴上限 3 次、分差 >400 与机器人场不发）；**PvP 只给经验不给积分**。
    - **sink**：训练（只加 EV，1 积分=4 EV）、付费诱饵（50/200）、商店购买（`POST /shop/buy`，价目见下）、押注托管、积分场准入、**宝可梦中心治疗（每次 10P）**。
@@ -57,7 +58,9 @@ BASE_URL=http://localhost:3100 ./scripts/e2e-smoke.sh     # 打本地实例（�
    - 详见 `docs/backend-api.md` §3（价目表）与 §10（积分经济）。
 10. **养成与升级路径**：**积分只换努力值**（`POST /pokemon/:id/train` 只加 EV，1 积分=4 EV，不改 exp/level）、**等级只靠战斗经验与神奇糖果**（野怪击倒 / 收服 +20 exp / PvP 胜 +30 / `rare-candy` +1 级）、**个体值只靠王冠**（`bottle-cap` 单项、`gold-bottle-cap` 六项 → 31）。所有经验走 `PokemonService.applyExp`（曲线 `level=floor(cbrt(exp))`，按学习表学技能，返回 `{levelsGained,movesLearned,canEvolve}`）；**升级学习表** `backend/src/game-data/learnsets.data.ts` 由 `node tools/gen-learnsets.mjs` **确定性生成**（386 族各 4-8 条），改算法只改脚本再重跑。进化 `POST /pokemon/:id/evolve`：不带 `stoneItemId` = 等级进化、带 = 进化石；详情/图鉴带 `evolution(s)` 进化链。详见 `docs/backend-api.md` §2。
 11. **排位与羁绊**：`backend/src/ranked/` 负责排队匹配/ELO/排行榜（Redis `ranked:*`）与羁绊挂钩（`BondService`，对局 SETTLED 后按战果发放）。匹配窗口从 ±200 起每 10 秒扩 50（上限 ±1000），配到后双方各 15 秒接受期（`MATCH_PENDING` → `accept`/`decline`，拒绝方 30 秒内窗口重置 ±200）才建房；排队满 60 秒可打**机器人**（链上 `BOT` 玩家 + 内存 3 只队伍，出招走派生流，奖励减半、每日 5 场）；`mode:'arena'` 是**积分场**（见决策 9）。**羁绊长线化**：`Pokemon.bond`（0-255）铸造 50、**易主（转移/交易/押注被赢走）重置 30**、**PvP 胜 +2 / 负 +1 / 平 +1**（机器人场 ×0.5 向下取整）、**野怪收服 +1 / 击倒不给**、**每日每宠上限 +6**（Redis `bond:day:<pokemonId>:<yyyy-mm-dd>` 哈希记账，超出截断、重放不重复占额度）；**羁绊 ≥200 前端显示「灵魂搭档」徽章**（`frontend/src/ui/BondHearts.vue`，链上无新字段）。提升一律走 `BondUp`（system 身份，幂等键 `<battleId|sessionId>-bond-*`，255 截断）。详见 `docs/backend-api.md` §11。
-12. **伤势持久化（HP 跨战斗保留）**：链上**不存 HP**——当前 HP 存链下 Redis `poke:hp:<pokemonId>`（`backend/src/pokemon/pokemon-hp.service.ts`），**缺键 = 满血**（上限 = `computeStats().hp`），越界夹到 `[0, maxHp]`，无需数据迁移，Redis 丢失只损失伤势不损失资产。写入时机：野怪会话每次落盘（`wild.service::save`）、PvP 引擎终局（`battles.service` 的 `end` 钩子写回双方参战队伍）；出战注入 `EngineMonInput.currentHp`（`wild.service::toCombatant`、`battles.service::loadTeam`、`ranked/battle-launcher::loadTeam`）。**濒死（0 HP）不能出战/不能进队伍提交**：野怪 `FAINTED`；PvP 房间 `assertTeamOwnership`（提交与押注双确认前各一次，链上资产此时尚未锁定）；**排位 `ranked.service::assertTeam` 入队即校验**（`/ranked/queue` 409 `FAINTED` 并指明是哪只，arena 同样、未扣准入）。前端 `RankedView` 队伍勾选与大厅 `WagerPicker` 的濒死成员灰显禁选并提示。恢复只有两条：伤药 `potion`/`super-potion` +20/+50（`POST /items/:id/use {targetPokemonId}`，满血抛 `HP_FULL`）与**宝可梦中心 `POST /pokemon/center/heal`（全队回满，每次 10P `reason='heal:center'`，全员满血不扣费）**；放生会清掉伤势键。API 的 `GET /pokemon` 每只带 `currentHp`/`fainted`。详见 `docs/backend-api.md` §2「伤势持久化」。
+12. **伤势持久化（HP 跨战斗保留，仅野怪/PvE）**：链上**不存 HP**——当前 HP 存链下 Redis `poke:hp:<pokemonId>`（`backend/src/pokemon/pokemon-hp.service.ts`），**缺键 = 满血**（上限 = `computeStats().hp`），越界夹到 `[0, maxHp]`，无需数据迁移，Redis 丢失只损失伤势不损失资产。**PvP（排位/房间/机器人）一律满血出战、赛后不回写**（`battle-manager::startBattle` 统一 `withFullHealth()`，竞技不消耗真实伤势）；写入时机只剩野怪会话落盘（`wild.service`）；出战注入 `EngineMonInput.currentHp` 仅野怪路径（`wild.service::toCombatant`）。**濒死（0 HP）不能出战/不能进队伍提交**：野怪 `FAINTED`；PvP 房间 `assertTeamOwnership`（提交与押注双确认前各一次，链上资产此时尚未锁定）；**排位 `ranked.service::assertTeam` 入队即校验**（409 `FAINTED` 并指明是哪只，arena 同样、未扣准入）。前端 `RankedView` 队伍勾选与大厅 `WagerPicker` 的濒死成员灰显禁选并提示。恢复只有两条：伤药 `potion`/`super-potion` +20/+50（`POST /items/:id/use {targetPokemonId}`，满血抛 `HP_FULL`）与**宝可梦中心 `POST /pokemon/center/heal`（全队回满，每次 10P `reason='heal:center'`，全员满血不扣费）**；放生会清掉伤势键。API 的 `GET /pokemon` 每只带 `currentHp`/`fainted`。详见 `docs/backend-api.md` §2「伤势持久化」。
+13. **遇敌 = 区域等级带**（`backend/src/game-data/encounter.data.ts`）：地图按 y 分三区——南部 `south` Lv2-6 只出未进化型（出生区）、中部 `mid` Lv8-16 允许一阶段、北部 `north` Lv17-28 允许二阶段；稀有度按捕获率加权（常见 60/少见 30/稀有 10，种族值 ≥500 再 ×0.3）；野怪等级只取带内随机，**与玩家队伍等级彻底脱钩**（防止抓高级怪滚雪球）；付费诱饵改为带内 +2/+5 并封顶。派生槽 n=0=区域加权索引、n=1=带内等级，`Commit.meta` 带 `{"zone":...}`。详见 `docs/randomness.md` §3。
+14. **房间与排位队伍规则**：出战队伍限 **1-6 只**（房间/排位统一 `assertTeamSize`，`INVALID_TEAM_SIZE`）；房主可 `DELETE /battles/rooms/:id`（仅 WAITING，有人先 kick）；房间详情带 `teamDetailA/B` 富化阵容（任何人可看）；排位 `MATCH_PENDING` 时返回对手阵容（**裁剪掉 IV/EV/性格/羁绊**，仅 name/level/shiny/stats）。宝可梦改名 `POST /pokemon/:id/rename`：首次免费、之后 50P（PG 表 `pokemon_rename` 计数），昵称存链上 name 字段、进化后保留。PvP 战斗实时日志：引擎 `publicState().log` 逐回合推送结构化事件，前端 `game/battle-log.ts` 渲染中文文案（i18n 名称在前端，故文案不后端生成）。
 
 ## 环境与服务
 

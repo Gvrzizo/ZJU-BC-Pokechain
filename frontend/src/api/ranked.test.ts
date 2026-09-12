@@ -132,4 +132,13 @@ describe('排位帮助文案键（RankedView 帮助面板）', () => {
     expect(MESSAGES.zh.ui['ranked.queued']).toContain('{window}');
     expect(MESSAGES.en.ui['ranked.queued']).toContain('{window}');
   });
+
+  it('接受期对手阵容文案：只给公开信息（个体值/努力值/性格不可见）', () => {
+    expect(MESSAGES.zh.ui['ranked.pending.teamTitle']).toContain('{n}');
+    expect(MESSAGES.zh.ui['ranked.pending.teamHint']).toContain('个体值');
+    expect(MESSAGES.zh.ui['ranked.pending.teamHint']).toContain('性格');
+    expect(MESSAGES.en.ui['ranked.pending.teamTitle']).toContain('{n}');
+    expect(MESSAGES.en.ui['ranked.pending.teamHint']).toContain('IVs');
+    expect(MESSAGES.en.ui['ranked.pending.teamHint']).toContain('nature');
+  });
 });

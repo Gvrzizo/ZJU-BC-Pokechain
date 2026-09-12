@@ -10,7 +10,7 @@ import { BattleState, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { RedisService } from '../common/redis/redis.service';
 import { BattleLog } from './entities/battle-log.entity';
 import { SigningService } from './signing.service';
-import { BattleEngine, EngineAction, EngineMonInput, Side } from './engine/battle-engine';
+import { BattleEngine, EngineAction, EngineMonInput, Side, withFullHealth } from './engine/battle-engine';
 
 export interface ActiveBattle {
   battleId: string;
@@ -83,6 +83,10 @@ export class BattleManagerService {
    * grace window to reach the battle screen; only once both sockets joined
    * does the first turn clock (30s) start. A party that never arrives forfeits
    * when the window closes — a DRAW is only possible when both never arrive.
+   *
+   * Every live PvP battle (room / ranked / bot) starts at **full health**: any
+   * `EngineMonInput.currentHp` is stripped here, so the off-chain injuries
+   * (`poke:hp:*`) only affect wild battles (docs/backend-api.md §2「伤势持久化」).
    */
   async startBattle(battleId: string, playerA: string, playerB: string, teamA: EngineMonInput[], teamB: EngineMonInput[]): Promise<ActiveBattle> {
     const serverSeed = randomBytes(32).toString('hex');
@@ -96,7 +100,7 @@ export class BattleManagerService {
       clientSeed,
     });
     const stream = new DeriveStream(serverSeed, clientSeed, eventId);
-    const engine = new BattleEngine(teamA, teamB, () => stream.next());
+    const engine = new BattleEngine(withFullHealth(teamA), withFullHealth(teamB), () => stream.next());
     const battle: ActiveBattle = {
       battleId,
       playerA,

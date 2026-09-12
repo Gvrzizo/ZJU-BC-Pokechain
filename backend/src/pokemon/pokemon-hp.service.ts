@@ -22,7 +22,8 @@ export interface PokemonHpView {
  * - 链上**不存 HP**：HP 是每场战斗都在变的高频非关键状态，放链上会让每回合都产生交易；
  *   Redis 丢失只损失"伤势"（全员满血），不损失资产，符合课程环境的取舍；
  * - 越界读取一律夹到 `[0, maxHp]`：等级提升/进化让上限变大时旧值仍合法，上限变小时自动截断；
- * - 写入点只有两处：野怪战斗会话每次落盘、PvP 结束（`BattlesService` 的 `end` 钩子）。
+ * - 写入点只有野怪战斗会话每次落盘（`wild.service`）：**PvP（房间/排位/机器人）一律满血出战、
+ *   结算后不写回**，伤势只影响 PvE 与队伍页展示（docs/backend-api.md §2「伤势持久化」）。
  */
 @Injectable()
 export class PokemonHpService {
@@ -80,7 +81,7 @@ export class PokemonHpService {
     return value;
   }
 
-  /** 批量写回（战斗结束）：无 maxHp 的一方按"只夹到 ≥0"处理，调用方负责给出正确上限。 */
+  /** 批量写回（野怪战斗会话每次落盘；PvP 不再写回）：调用方负责给出正确的 maxHp 上限。 */
   async persistMany(entries: Array<{ pokemonId: string; hp: number; maxHp: number }>): Promise<void> {
     for (const entry of entries) {
       if (!entry.pokemonId) continue;

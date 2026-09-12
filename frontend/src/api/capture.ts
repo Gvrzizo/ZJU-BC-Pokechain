@@ -1,9 +1,11 @@
 import { http } from './http';
+import type { ZoneId } from '@/stores/zone';
 import type { CaptureResult, WildEncounter } from '@/types';
 
 /**
  * 付费诱饵档位（与后端 `backend/src/pokemon/capture-derive.ts` 的 LURE_TIERS 对齐）：
- * 0 免费 / 1 = 50 积分（野怪 +5 级）/ 2 = 200 积分（+10 级、闪光概率 ×4）。
+ * 0 免费 / 1 = 50 积分（带内 +2 级）/ 2 = 200 积分（带内 +5 级、闪光概率 ×4）。
+ * 等级加成只在**区域内**生效并封顶区域上界（docs/backend-api.md §2「区域等级带」）。
  */
 export interface LureOption {
   tier: 0 | 1 | 2;
@@ -15,20 +17,25 @@ export interface LureOption {
 
 export const LURE_TIERS: LureOption[] = [
   { tier: 0, nameZh: '不投放', cost: 0, levelBonus: 0, shinyMultiplier: 1 },
-  { tier: 1, nameZh: '普通诱饵', cost: 50, levelBonus: 5, shinyMultiplier: 1 },
-  { tier: 2, nameZh: '高级诱饵', cost: 200, levelBonus: 10, shinyMultiplier: 4 },
+  { tier: 1, nameZh: '普通诱饵', cost: 50, levelBonus: 2, shinyMultiplier: 1 },
+  { tier: 2, nameZh: '高级诱饵', cost: 200, levelBonus: 5, shinyMultiplier: 4 },
 ];
 
-/** 遇敌响应：在共享类型上补充诱饵与实际使用的队伍水平线 */
+/** 遇敌响应：在共享类型上补充区域（等级带 / 阶段门槛）与诱饵 */
 export interface WildEncounterResult extends WildEncounter {
+  zone: { id: ZoneId; name: string; minLevel: number; maxLevel: number; maxStage: number };
   lure: { tier: number; cost: number; levelBonus: number; shinyMultiplier: number };
-  teamTopLevel: number;
 }
 
-export async function encounter(clientSeed?: string, lureTier = 0): Promise<WildEncounterResult> {
+export async function encounter(
+  clientSeed?: string,
+  lureTier = 0,
+  zoneId?: ZoneId,
+): Promise<WildEncounterResult> {
   const { data } = await http.post<WildEncounterResult>('/capture/encounter', {
     clientSeed,
     lureTier,
+    zoneId,
   });
   return data;
 }

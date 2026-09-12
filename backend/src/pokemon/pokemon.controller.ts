@@ -2,7 +2,14 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { identityForUser } from '../fabric/chain.types';
 import { CaptureService } from './capture.service';
-import { AttemptDto, EncounterDto, EvolveDto, LearnMoveDto, TrainDto } from './dto/pokemon.dto';
+import {
+  AttemptDto,
+  EncounterDto,
+  EvolveDto,
+  LearnMoveDto,
+  RenamePokemonDto,
+  TrainDto,
+} from './dto/pokemon.dto';
 import { PokemonService } from './pokemon.service';
 
 @Controller()
@@ -39,7 +46,7 @@ export class PokemonController {
 
   @Post('capture/encounter')
   encounter(@CurrentUser() user: AuthUser, @Body() dto: EncounterDto) {
-    return this.capture.encounter(identityForUser(user), dto.clientSeed, dto.lureTier);
+    return this.capture.encounter(identityForUser(user), dto.clientSeed, dto.lureTier, dto.zoneId);
   }
 
   @Post('capture/attempt')
@@ -56,6 +63,15 @@ export class PokemonController {
   @Post('pokemon/:id/evolve')
   evolve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: EvolveDto) {
     return this.pokemon.evolve(identityForUser(user), id, dto.stoneItemId);
+  }
+
+  /**
+   * 改名：第一次免费，之后每次 50P（`AddPoints(-50, reason='rename:<pokemonId>:<count>')`）。
+   * 昵称 1-12 字符（拒绝控制字符与 `<>&"'`），锁定/已放生的宝可梦拒绝改名。
+   */
+  @Post('pokemon/:id/rename')
+  rename(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: RenamePokemonDto) {
+    return this.pokemon.rename(identityForUser(user), id, dto.name);
   }
 
   @Post('pokemon/:id/release')

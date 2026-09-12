@@ -1,4 +1,6 @@
 import { HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
 import { RedisService } from '../common/redis/redis.service';
 import { AppException } from '../common/utils/errors';
 import { ChainEventsService } from '../fabric/chain-events.service';
@@ -7,7 +9,9 @@ import { ChainIdentity, GrowthPatch, PokemonState, SYSTEM_IDENTITY } from '../fa
 import { getMove } from '../game-data/moves.data';
 import { EVOLUTIONS, getSpecies, SPECIES } from '../game-data/species.data';
 import { getItemType } from '../game-data/items.data';
+import { PokemonRename } from './entities/pokemon-rename.entity';
 import { applyLearned, movesCrossing, movesKnownAt } from './learnset';
+import { normalizePokemonName } from './pokemon-name';
 import {
   EvolutionStep,
   canEvolveNow,
@@ -15,10 +19,18 @@ import {
   levelEvolutionRule,
   stoneEvolutionRule,
 } from './evolution';
-import { RELEASE_POINTS_PER_LEVEL, releaseRewardReason } from './points-economy';
+import {
+  RENAME_COST,
+  RELEASE_POINTS_PER_LEVEL,
+  releaseRewardReason,
+  renameChargeIdemKey,
+  renameIdemKey,
+  renameReason,
+} from './points-economy';
 import { CENTER_HEAL_COST, PokemonHpService } from './pokemon-hp.service';
 import {
   applyTrainingEvs,
+  bondBonusPercent,
   computeStats,
   evTotal,
   EV_MAX_TOTAL,
@@ -66,6 +78,27 @@ export interface PokemonView extends PokemonState {
   currentHp: number;
   /** 是否濒死（currentHp = 0，不能出战/进队伍，需伤药或宝可梦中心治疗） */
   fainted: boolean;
+  /**
+   * 羁绊战斗加成百分比（展示用，两位小数）：非 HP 五项在战斗中 × (1 + bond/255 × 5%)，
+   * 满羁绊（255）为 5%、128 为 2.51%（docs/backend-api.md §2「羁绊加成」/ §11）。
+   * `stats` 仍是链下基础最终值（不含羁绊），战斗引擎在出战时会把这个加成算进去。
+   */
+  bondBonus: number;
+  /**
+   * 改名次数（链下 PG `pokemon_rename`，0/缺省 = 从未改名）。
+   * `GET /pokemon` / `GET /pokemon/:id` 附带，用于前端显示"首次免费 / 本次 50P"（docs/backend-api.md §2）。
+   */
+  renameCount?: number;
+}
+
+/** `POST /pokemon/:id/rename` 的响应（docs/backend-api.md §2「改名」）。 */
+export interface RenameResult {
+  /** 改名后的链上 name（昵称） */
+  name: string;
+  /** 改名后的累计次数（第一次改名后为 1） */
+  renameCount: number;
+  /** 本次是否扣费（第一次免费为 false） */
+  charged: boolean;
 }
 
 /** 读链后的视图：最终能力值 + 进化信息（当前 HP 由 PokemonHpService 在链下附加）。 */
@@ -80,7 +113,12 @@ function withComputedStats(pokemon: PokemonState): PokemonBaseView {
     pokemon.stats = computeStats(species.base, pokemon.ivs, evs, pokemon.level, pokemon.nature);
   }
   const evolutions = evolutionSteps(pokemon.speciesId, pokemon.level);
-  return { ...pokemon, evolution: evolutions[0] ?? null, evolutions };
+  return {
+    ...pokemon,
+    evolution: evolutions[0] ?? null,
+    evolutions,
+    bondBonus: bondBonusPercent(pokemon.bond),
+  };
 }
 
 @Injectable()
@@ -93,6 +131,8 @@ export class PokemonService implements OnModuleInit {
     private readonly events: ChainEventsService,
     /** 当前 HP / 治疗（链下 Redis，docs/backend-api.md §2「伤势持久化」） */
     readonly hp: PokemonHpService,
+    /** 改名次数（链下 PG，docs/backend-api.md §2「改名」） */
+    @InjectRepository(PokemonRename) private readonly renames: Repository<PokemonRename>,
   ) {}
 
   onModuleInit(): void {
@@ -115,22 +155,43 @@ export class PokemonService implements OnModuleInit {
     return { ...base, currentHp: view.currentHp, fainted: view.fainted };
   }
 
+  /** 改名次数（链下 PG；无记录 = 0，即从未改名）。 */
+  private async renameCountOf(pokemonId: string): Promise<number> {
+    const row = await this.renames.findOne({ where: { pokemonId } });
+    return row?.count ?? 0;
+  }
+
+  /** 批量取改名次数（列表用一次查询，避免 N+1）。 */
+  private async renameCountsOf(pokemonIds: string[]): Promise<Map<string, number>> {
+    if (pokemonIds.length === 0) return new Map();
+    const rows = await this.renames.find({ where: { pokemonId: In(pokemonIds) } });
+    return new Map(rows.map((row) => [row.pokemonId, row.count]));
+  }
+
   async listMine(username: string): Promise<PokemonView[]> {
     const key = `cache:pokemon:${username}`;
     const cached = await this.redis.getJson<PokemonView[]>(key).catch(() => null);
     if (cached) return cached;
     const bases = (await this.contract.queryPokemonByOwner(username)).map(withComputedStats);
+    const counts = await this.renameCountsOf(bases.map((base) => base.id));
     const hp = await this.hp.loadMany(bases as unknown as PokemonState[]);
     const list: PokemonView[] = bases.map((base) => {
       const view = hp.get(base.id);
-      return { ...base, currentHp: view?.currentHp ?? base.stats?.hp ?? 1, fainted: view?.fainted ?? false };
+      return {
+        ...base,
+        renameCount: counts.get(base.id) ?? 0,
+        currentHp: view?.currentHp ?? base.stats?.hp ?? 1,
+        fainted: view?.fainted ?? false,
+      };
     });
     await this.redis.setJson(key, list, LIST_CACHE_TTL_SEC).catch(() => undefined);
     return list;
   }
 
   async getOne(id: string): Promise<PokemonView> {
-    return this.withHp(withComputedStats(await this.contract.getPokemon(id)));
+    const base = withComputedStats(await this.contract.getPokemon(id));
+    base.renameCount = await this.renameCountOf(id);
+    return this.withHp(base);
   }
 
   async pokedex(username: string) {
@@ -189,6 +250,51 @@ export class PokemonService implements OnModuleInit {
     // EVs are applied as a single growth patch: the chain re-validates 255/510.
     const updated = await this.contract.applyGrowth(SYSTEM_IDENTITY, id, { evs });
     return this.withHp(withComputedStats(updated));
+  }
+
+  /**
+   * 改名（`POST /pokemon/:id/rename`，docs/backend-api.md §2「改名」）：
+   * **第一次免费，之后每次 `RENAME_COST`（50P）**，次数存链下 PG `pokemon_rename`。
+   *
+   * - 校验顺序：昵称格式（trim / 折叠空白 / 1-12 码点 / 拒绝控制字符与 `<>&"'`）→ 归属 → `IDLE`；
+   * - `ordinal = 已改名次数 + 1`（第一次改名 ordinal=1 免费，之后 `ordinal > 1` 每次扣 50P）；
+   * - 扣费 `AddPoints(-50, reason='rename:<pokemonId>:<ordinal>')` 与链上 `ApplyGrowth({name})`
+   *   都用由 `ordinal` 派生的确定性幂等键（**两个键必须不同**，链上幂等记录是全局命名空间）：
+   *   中途失败后重试不会重复扣分，也不会"花一次钱改出多个名字"；
+   * - 新昵称与当前链上 `name` 相同视为空操作（不扣分、不计数、不发交易）。
+   */
+  async rename(as: ChainIdentity, id: string, rawName: string): Promise<RenameResult> {
+    const name = normalizePokemonName(rawName);
+    const pokemon = await this.mustOwn(as, id);
+    if (pokemon.status !== 'IDLE') {
+      throw new AppException('ASSET_LOCKED', `pokemon ${id} is ${pokemon.status}`, HttpStatus.CONFLICT);
+    }
+    const record = await this.renames.findOne({ where: { pokemonId: id } });
+    const renamed = record?.count ?? 0;
+    if (name === pokemon.name) {
+      return { name: pokemon.name, renameCount: renamed, charged: false };
+    }
+    const ordinal = renamed + 1;
+    const charged = ordinal > 1;
+    if (charged) {
+      const player = await this.contract.getPlayer(as.userId);
+      if (player.points < RENAME_COST) {
+        throw new AppException(
+          'INSUFFICIENT_POINTS',
+          `rename costs ${RENAME_COST}P, balance ${player.points}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      await this.contract.addPoints(SYSTEM_IDENTITY, as.userId, -RENAME_COST, renameReason(id, ordinal), {
+        idemKey: renameChargeIdemKey(id, ordinal),
+      });
+    }
+    const updated = await this.contract.applyGrowth(SYSTEM_IDENTITY, id, { name }, { idemKey: renameIdemKey(id, ordinal) });
+    if (record) record.count = ordinal;
+    await this.renames.save(record ?? this.renames.create({ pokemonId: id, count: ordinal }));
+    await this.redis.del(`cache:pokemon:${as.userId}`).catch(() => undefined);
+    this.logger.log(`renamed ${id} to "${name}" (ordinal ${ordinal}, charged=${charged})`);
+    return { name: updated.name, renameCount: ordinal, charged };
   }
 
   /**
@@ -322,10 +428,11 @@ export class PokemonService implements OnModuleInit {
     const target = SPECIES[targetSpeciesId];
     const candidates = movesKnownAt(targetSpeciesId, pokemon.level, pokemon.moves);
     const { moves, learned } = applyLearned(pokemon.moves, candidates);
-    const patch: GrowthPatch = {
-      speciesId: targetSpeciesId,
-      name: target?.name ?? pokemon.name,
-    };
+    const patch: GrowthPatch = { speciesId: targetSpeciesId };
+    // 改过名（链下 PG 有计数记录）的宝可梦进化后保留昵称，不覆盖成新种族名
+    if ((await this.renameCountOf(pokemon.id)) === 0) {
+      patch.name = target?.name ?? pokemon.name;
+    }
     if (learned.length > 0) patch.moves = moves;
     const updated = await this.contract.applyGrowth(SYSTEM_IDENTITY, pokemon.id, patch);
     return this.withHp(withComputedStats(updated));

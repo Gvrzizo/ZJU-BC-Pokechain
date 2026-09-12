@@ -42,6 +42,14 @@ export async function updateRoom(
   return data;
 }
 
+/** 房主删除房间（仅 WAITING；有人加入需先请离，激活/结束的房间 409）。 */
+export async function deleteRoom(roomId: string): Promise<{ deleted: true; roomId: string }> {
+  const { data } = await http.delete<{ deleted: true; roomId: string }>(
+    `/battles/rooms/${encodeURIComponent(roomId)}`,
+  );
+  return data;
+}
+
 /** 房主请离加入者（仅在双方确认押注前）：房间回到 WAITING。 */
 export async function kickPlayer(roomId: string, playerId: string): Promise<BattleRoom> {
   const { data } = await http.post<BattleRoom>(

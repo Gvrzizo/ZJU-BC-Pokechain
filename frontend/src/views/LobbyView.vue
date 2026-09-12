@@ -5,6 +5,7 @@ import {
   blockPlayer,
   confirmWager,
   createRoom,
+  deleteRoom,
   joinRoom,
   kickPlayer,
   listRooms,
@@ -21,6 +22,7 @@ import PixelDialog from '@/ui/PixelDialog.vue';
 import ItemIcon from '@/ui/ItemIcon.vue';
 import WagerPicker from '@/components/WagerPicker.vue';
 import WagerInspectDialog from '@/components/WagerInspectDialog.vue';
+import TeamInspectDialog from '@/components/TeamInspectDialog.vue';
 import BlockedPlayersPanel from '@/components/BlockedPlayersPanel.vue';
 
 const router = useRouter();
@@ -37,6 +39,9 @@ const confirming = ref<BattleRoom | null>(null);
 const wagerLocked = ref(false);
 /** "查看押注"弹窗（房间卡片 / 加入面板 / 确认面板共用） */
 const inspecting = ref<BattleRoom | null>(null);
+/** "查看队伍"弹窗（同上，展示双方出战队伍，旁观者也能看） */
+const inspectingTeam = ref<BattleRoom | null>(null);
+const deleting = ref<BattleRoom | null>(null);
 const kicking = ref<BattleRoom | null>(null);
 const blocking = ref<BattleRoom | null>(null);
 const editing = ref<BattleRoom | null>(null);
@@ -110,7 +115,9 @@ function errorText(e: unknown, fallback: string): string {
   if (code === 'BLOCKED_BY_HOST') return '你已被房主屏蔽（30 分钟内不能加入该房主的房间）';
   if (code === 'NOT_HOST') return '只有房主能做这个操作';
   if (code === 'ROOM_NOT_OPEN') return '房间已进入对战，不能再用这个操作';
+  if (code === 'ROOM_NOT_EMPTY') return '房间里已有挑战者——请先"请离"对方，再删除房间';
   if (code === 'PLAYER_NOT_IN_ROOM') return '该玩家已不在房间里';
+  if (code === 'INVALID_TEAM_SIZE') return '出战队伍需要 1-6 只宝可梦';
   return err?.response?.data?.message ?? fallback;
 }
 
@@ -289,6 +296,23 @@ async function doKick() {
   }
 }
 
+/** 房主删除房间（仅 WAITING：有人加入要先"请离"；二次确认对话框里执行） */
+async function doDelete() {
+  const room = deleting.value;
+  if (!room) return;
+  try {
+    await deleteRoom(room.id);
+    message.value = `房间「${roomTitle(room)}」已删除`;
+    deleting.value = null;
+    if (inspecting.value?.id === room.id) inspecting.value = null;
+    if (inspectingTeam.value?.id === room.id) inspectingTeam.value = null;
+    await refresh();
+  } catch (e: unknown) {
+    deleting.value = null;
+    message.value = errorText(e, '删除失败');
+  }
+}
+
 /** 屏蔽对手（默认 30 分钟）：对方不能加入我创建的房间 */
 async function doBlock() {
   const room = blocking.value;
@@ -386,10 +410,12 @@ async function submitEdit() {
             对局进行中
           </span>
           <PixelButton @click="inspecting = r">查看押注</PixelButton>
+          <PixelButton @click="inspectingTeam = r">查看队伍</PixelButton>
         </div>
-        <!-- 房主专属操作：改房名/备注；押注双确认前可请离 / 屏蔽挑战者 -->
+        <!-- 房主专属操作：改房名/备注；押注双确认前可请离 / 屏蔽挑战者；空房间可直接删除 -->
         <div v-if="isHost(r) && r.status !== 'ACTIVE' && r.status !== 'FINISHED'" class="row mt-8">
           <PixelButton @click="openEdit(r)">改房名</PixelButton>
+          <PixelButton v-if="r.status === 'WAITING'" variant="danger" @click="deleting = r">删除房间</PixelButton>
           <template v-if="r.playerB">
             <PixelButton variant="danger" @click="kicking = r">请离 {{ r.playerB }}</PixelButton>
             <PixelButton variant="danger" @click="blocking = r">屏蔽 {{ r.playerB }}</PixelButton>
@@ -437,6 +463,7 @@ async function submitEdit() {
       <p v-if="joining.note" class="mb-8" style="font-size: var(--px-fs-sm)">房主备注：{{ joining.note }}</p>
       <div class="row mb-8">
         <PixelButton variant="blue" @click="inspecting = joining">查看押注</PixelButton>
+        <PixelButton @click="inspectingTeam = joining">查看队伍</PixelButton>
       </div>
       <div class="px-field">
         <label>留言（≤100 字，房主可见）</label>
@@ -464,6 +491,7 @@ async function submitEdit() {
       </p>
       <div class="row mt-8">
         <PixelButton variant="blue" @click="inspecting = confirming">查看押注</PixelButton>
+        <PixelButton @click="inspectingTeam = confirming">查看队伍</PixelButton>
       </div>
       <p class="mt-8" style="font-size: var(--px-fs-sm)">对方押注：{{ wagerSummary(opponentWager(confirming)) }}</p>
       <p class="mt-8" style="font-size: var(--px-fs-sm)">我的押注：{{ wagerSummary(myWager(confirming)) }}</p>
@@ -493,6 +521,31 @@ async function submitEdit() {
       :title="`查看押注：${roomTitle(inspecting)}`"
       @close="inspecting = null"
     />
+
+    <!-- 查看队伍（双方出战阵容，旁观者也能看） -->
+    <TeamInspectDialog
+      v-if="inspectingTeam"
+      :room-id="inspectingTeam.id"
+      :title="`查看队伍：${roomTitle(inspectingTeam)}`"
+      @close="inspectingTeam = null"
+    />
+
+    <!-- 房主删除房间（二次确认；仅空房间可删） -->
+    <PixelDialog
+      v-if="deleting"
+      title="删除房间"
+      confirm-text="确认删除"
+      danger
+      @confirm="doDelete"
+      @cancel="deleting = null"
+    >
+      <p style="font-size: var(--px-fs-sm)">
+        删除房间「{{ roomTitle(deleting) }}」？房间会从大厅消失，已经提交的押注清单作废。
+      </p>
+      <p v-if="deleting.playerB" class="mt-8" style="font-size: var(--px-fs-sm); color: var(--gba-red)">
+        房间里还有挑战者 {{ deleting.playerB }}：请先用"请离"把他移出，再删除房间。
+      </p>
+    </PixelDialog>
 
     <!-- 房主请离 -->
     <PixelDialog

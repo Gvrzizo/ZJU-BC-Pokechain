@@ -1,4 +1,3 @@
-import { computeWagerHash } from '../src/fabric/chain.adapter';
 import { BattleEngine } from '../src/battles/engine/battle-engine';
 import { BattleManagerService } from '../src/battles/battle-manager.service';
 import { BattlesService } from '../src/battles/battles.service';
@@ -9,11 +8,11 @@ import { AuditLog } from '../src/admin/entities/audit-log.entity';
 import { ItemsService } from '../src/items/items.service';
 import { PokemonHpService } from '../src/pokemon/pokemon-hp.service';
 import { CaptureService } from '../src/pokemon/capture.service';
+import { RankedBattleLauncher } from '../src/ranked/battle-launcher';
 import { WildService } from '../src/wild/wild.service';
 import { loadWildSession, wildSessionKey } from '../src/wild/wild-session';
 import { sha256hex } from '../src/common/utils/crypto.util';
 import {
-  SYSTEM_IDENTITY,
   makeBlocks,
   makeBondService,
   makeChain,
@@ -245,13 +244,13 @@ describe('伤势持久化：链下当前 HP（docs/backend-api.md §2）', () =>
     expect((await ctx.contract.getItem(extra.id)).quantity).toBe(1);
   });
 
-  it('PvP：以当前 HP 出战、结束后写回终局 HP；濒死宝可梦不能进队伍（FAINTED）', async () => {
+  it('PvP：满血出战、结束后不回写 poke:hp；濒死宝可梦不能进队伍（FAINTED）', async () => {
     const ctx = makeBattleStack();
     await registerPlayers(ctx.contract, 'ash', 'gary');
     const strong = await seedPokemon(ctx.chain, 'ash', { id: 'p_hp_pvp_a', speciesId: 149, level: 60, moves: ['hyper-beam'] });
     const weak = await seedPokemon(ctx.chain, 'gary', { id: 'p_hp_pvp_b', speciesId: 133, level: 2, moves: ['tackle'] });
     const maxA = ctx.hp.maxHpOf(strong);
-    await ctx.hp.set(strong.id, 5, maxA); // 上一场留下的伤势
+    await ctx.hp.set(strong.id, 5, maxA); // 野怪战斗留下的伤势：竞技不继承
 
     const room = await ctx.battles.createRoom(ash, {
       mode: '1v1',
@@ -266,23 +265,24 @@ describe('伤势持久化：链下当前 HP（docs/backend-api.md §2）', () =>
     const active = await ctx.battles.confirmWager(gary, room.id);
     const battleId = active.battleId as string;
 
-    // 引擎以残血开场
+    // 满血满状态出战：链下伤势（5 HP）被忽略
     const engine = ctx.manager.get(battleId)!.engine;
-    expect(engine.active('A').hp).toBe(5);
+    expect(engine.active('A').hp).toBe(maxA);
     expect(engine.active('A').maxHp).toBe(maxA);
+    expect(engine.active('B').hp).toBe(ctx.hp.maxHpOf(weak));
 
     // 一回合：hyper-beam（lv60）必定击倒 lv2，对局结束
     ctx.manager.submitAction(battleId, 'ash', { type: 'move', moveIndex: 0 });
     ctx.manager.submitAction(battleId, 'gary', { type: 'move', moveIndex: 0 });
     expect(await waitFor(() => ctx.manager.get(battleId) === undefined)).toBe(true);
 
-    // 终局 HP 写回：败方 0（濒死），胜方保留剩余血量
-    const weakFresh = await ctx.contract.getPokemon(weak.id);
-    expect(await waitFor(async () => (await ctx.hp.currentHp(weakFresh)) === 0)).toBe(true);
-    const strongHp = await ctx.hp.currentHp(await ctx.contract.getPokemon(strong.id));
-    expect(strongHp).toBeLessThanOrEqual(5);
+    // 不回写：战前伤势原样保留，从未受伤的对手也不会凭空多出毒伤势键
+    expect(await ctx.hp.currentHp(await ctx.contract.getPokemon(strong.id))).toBe(5);
+    expect(await ctx.hp.currentHp(await ctx.contract.getPokemon(weak.id))).toBe(ctx.hp.maxHpOf(weak));
+    expect(await ctx.redis.get(PokemonHpService.key(weak.id))).toBeNull();
 
-    // 濒死的宝可梦不能进新的队伍提交（FAINTED：链上资产尚未锁定）
+    // 濒死校验保留：0 HP 的宝可梦不能进新的队伍提交（FAINTED：链上资产尚未锁定）
+    await ctx.hp.set(weak.id, 0, ctx.hp.maxHpOf(weak));
     await expect(
       ctx.battles.createRoom(gary, { mode: '1v1', wager: { pokemonIds: [], items: [], points: 0 }, teamPokemonIds: [weak.id] }),
     ).rejects.toThrow(/FAINTED/);
@@ -298,27 +298,33 @@ describe('伤势持久化：链下当前 HP（docs/backend-api.md §2）', () =>
   });
 });
 
-describe('伤势持久化：PvP 结算后的写回与链上资产状态无关', () => {
-  it('对局结束后 HP 写回不依赖押注（wager=0 的排位房同样写回）', async () => {
+describe('伤势持久化：PvP 满血出战、不写回（房间与排位路径）', () => {
+  it('排位/机器人启动器（launcher.loadTeam 仍带 currentHp）同样满血出战且不写回', async () => {
     const ctx = makeBattleStack();
     await registerPlayers(ctx.contract, 'ash', 'gary');
     const pa = await seedPokemon(ctx.chain, 'ash', { id: 'p_hp_zero_a', level: 20, moves: ['tackle'] });
     const pb = await seedPokemon(ctx.chain, 'gary', { id: 'p_hp_zero_b', level: 20, moves: ['tackle'] });
-    const wagerA = { pokemonIds: [] as string[], items: [] as { id: string; qty: number }[], points: 0 };
-    const wagerB = { pokemonIds: [] as string[], items: [] as { id: string; qty: number }[], points: 0 };
+    const maxA = ctx.hp.maxHpOf(pa);
+    const maxB = ctx.hp.maxHpOf(pb);
+    await ctx.hp.set(pa.id, 4, maxA);
+    await ctx.hp.set(pb.id, 9, maxB);
+
+    // 排位对局走 RankedBattleLauncher（wager=0）：loadTeam 仍会带上链下当前 HP
+    const launcher = new RankedBattleLauncher(ctx.contract, ctx.manager, makeHpService(ctx.redis));
     const battleId = 'b_hp_zero';
-    const hash = computeWagerHash('ash', 'gary', wagerA, wagerB);
-    await ctx.contract.createBattle(SYSTEM_IDENTITY, { id: battleId, playerA: 'ash', playerB: 'gary', wagerA, wagerB, wagerHash: hash });
-    await ctx.contract.activateBattle(SYSTEM_IDENTITY, battleId);
-    const manager = ctx.manager;
-    await manager.startBattle(battleId, 'ash', 'gary', [
-      { pokemonId: pa.id, speciesId: pa.speciesId, level: pa.level, ivs: pa.ivs, evs: pa.evs, nature: pa.nature, moves: pa.moves, currentHp: 4 },
-    ], [
-      { pokemonId: pb.id, speciesId: pb.speciesId, level: pb.level, ivs: pb.ivs, evs: pb.evs, nature: pb.nature, moves: pb.moves, currentHp: 9 },
-    ]);
-    expect(manager.get(battleId)!.engine.active('A').hp).toBe(4);
-    await manager.forfeit(battleId, 'ash');
-    expect(await waitFor(async () => (await ctx.hp.currentHp(pa)) === 4)).toBe(true);
+    const teamA = await launcher.loadTeam([pa.id]);
+    const teamB = await launcher.loadTeam([pb.id]);
+    expect(teamA[0].currentHp).toBe(4); // launcher 确实带了伤势
+    await launcher.launch({ battleId, playerA: 'ash', playerB: 'gary', teamA, teamB });
+
+    // 引擎仍按满血开局（BattleManagerService.startBattle 统一剥掉 currentHp）
+    const engine = ctx.manager.get(battleId)!.engine;
+    expect(engine.active('A').hp).toBe(maxA);
+    expect(engine.active('B').hp).toBe(maxB);
+
+    await ctx.manager.forfeit(battleId, 'ash');
+    expect(await waitFor(async () => ctx.manager.get(battleId) === undefined)).toBe(true);
+    expect(await ctx.hp.currentHp(pa)).toBe(4);
     expect(await ctx.hp.currentHp(pb)).toBe(9);
   });
 });

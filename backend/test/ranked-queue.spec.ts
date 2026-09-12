@@ -20,6 +20,8 @@ import {
 } from '../src/ranked/arena';
 import { BOT_DAILY_LIMIT, BOT_PLAYER_ID, BOT_TEAM_SIZE, botDailyKey, pickBotAction, utcDate } from '../src/ranked/bot';
 import { MoveDef, getMove } from '../src/game-data/moves.data';
+import { computeStats, normalizeEvs } from '../src/game-data/stats';
+import { getSpecies } from '../src/game-data/species.data';
 import {
   SYSTEM_IDENTITY,
   makeBlocks,
@@ -311,6 +313,70 @@ describe('匹配接受期（MATCH_PENDING）', () => {
     expect((await stack.ranked.status(userIdentity('ash'))).state).toBe('IDLE');
     expect((await stack.ranked.status(userIdentity('gary'))).state).toBe('QUEUED');
     expect(await stack.redis.client.zcard('ranked:queue')).toBe(1);
+  });
+});
+
+describe('排位队伍规模 1-6 与接受期对手阵容（docs/backend-api.md §11.1）', () => {
+  it('入队 7 只 → 400 INVALID_TEAM_SIZE，且不会进队列', async () => {
+    const stack = await makeStack();
+    const { pa } = await seedTeams(stack.chain, stack.contract);
+    const err = await stack.ranked
+      .enqueue(userIdentity('ash'), [pa.id, 'p_x2', 'p_x3', 'p_x4', 'p_x5', 'p_x6', 'p_x7'])
+      .catch((e: HttpException) => e);
+    expect(err.message).toMatch(/^INVALID_TEAM_SIZE:/);
+    expect(err.getStatus()).toBe(400);
+    expect(await stack.redis.get('ranked:queue:ash')).toBeNull();
+    expect(await stack.redis.client.zscore('ranked:queue', 'ash')).toBeNull();
+  });
+
+  it('MATCH_PENDING 返回对手出战队伍富化：id/昵称/种族/等级/闪光/最终能力值，裁剪 IV/EV/性格/羁绊', async () => {
+    const stack = await makeStack();
+    const { pa, pb } = await seedTeams(stack.chain, stack.contract);
+    const pika2 = await seedPokemon(stack.chain, 'ash', { id: 'p_rank_a2', speciesId: 4, level: 12, bond: 50 });
+    await stack.ranked.enqueue(userIdentity('ash'), [pa.id, pika2.id]);
+    const gary = await stack.ranked.enqueue(userIdentity('gary'), [pb.id]);
+    expect(gary.state).toBe('MATCH_PENDING');
+    expect(gary.opponent?.team).toHaveLength(2);
+
+    const species = getSpecies(25)!;
+    expect(gary.opponent?.team?.[0]).toEqual({
+      id: pa.id,
+      name: 'pikachu',
+      speciesId: 25,
+      nameZh: '皮卡丘',
+      level: 20,
+      shiny: false,
+      stats: computeStats(species.base, pa.ivs, normalizeEvs(pa.evs), pa.level, pa.nature),
+    });
+    // 对手视角看不到私有养成数据
+    const raw = JSON.stringify(gary.opponent);
+    expect(raw).not.toMatch(/ivs|evs|nature|bond/);
+
+    // 对称：房主侧也能看到对手（gary）的队伍
+    const ash = await stack.ranked.status(userIdentity('ash'));
+    expect(ash.state).toBe('MATCH_PENDING');
+    expect(ash.opponent?.team?.map((m) => m.id)).toEqual([pb.id]);
+    expect(ash.opponent?.team?.[0]).toMatchObject({ nameZh: '皮卡丘', level: 20 });
+
+    // 接受期结束后（双方 accept → MATCHED）不再需要队伍预览，返回的仍是 MATCHED 状态
+    await stack.ranked.accept(userIdentity('ash'));
+    const matched = await stack.ranked.accept(userIdentity('gary'));
+    expect(matched.state).toBe('MATCHED');
+  });
+
+  it('旧待确认记录（无队伍快照）回退读排队条目里的队伍', async () => {
+    const stack = await makeStack();
+    const { pa, pb } = await seedTeams(stack.chain, stack.contract);
+    await enqueuePair(stack, pa.id, pb.id);
+    const matchId = await stack.redis.get('ranked:pending:of:ash');
+    const key = `ranked:pending:${matchId}`;
+    const pending = await stack.redis.getJson<Record<string, unknown>>(key);
+    delete pending.teamA;
+    delete pending.teamB; // 模拟升级前写入的记录
+    await stack.redis.setJson(key, pending, 60);
+
+    const gary = await stack.ranked.status(userIdentity('gary'));
+    expect(gary.opponent?.team?.map((m) => m.id)).toEqual([pa.id]);
   });
 });
 

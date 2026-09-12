@@ -7,6 +7,7 @@ import { ContractService } from '../src/fabric/contract.service';
 import { MockChainAdapter } from '../src/fabric/mock-chain.adapter';
 import { PokemonHpService } from '../src/pokemon/pokemon-hp.service';
 import { PokemonService } from '../src/pokemon/pokemon.service';
+import { PokemonRename } from '../src/pokemon/entities/pokemon-rename.entity';
 import { BondService } from '../src/ranked/bond.service';
 import { PlayerBlockService } from '../src/users/player-block.service';
 import {
@@ -30,9 +31,20 @@ export function makeHpService(redis: RedisService = makeRedis()): PokemonHpServi
   return new PokemonHpService(redis);
 }
 
-/** PokemonService 的最小构造：链事件流用空 Subject 冒充（升级/进化测试用）。 */
-export function makePokemonService(contract: ContractService, redis: RedisService): PokemonService {
-  return new PokemonService(contract, redis, { stream$: new Subject().asObservable() } as never, makeHpService(redis));
+/** PokemonService 的最小构造：链事件流用空 Subject 冒充（升级/进化测试用）。
+ * 改名次数仓库默认新建一个内存 mock（`mockRepo`）；需要断言计数时把同一实例传进来。 */
+export function makePokemonService(
+  contract: ContractService,
+  redis: RedisService,
+  renames: ReturnType<typeof mockRepo<PokemonRename>> = mockRepo<PokemonRename>(),
+): PokemonService {
+  return new PokemonService(
+    contract,
+    redis,
+    { stream$: new Subject().asObservable() } as never,
+    makeHpService(redis),
+    renames as never,
+  );
 }
 
 /** BondService 的最小构造（野怪战斗的羁绊挂钩，见 src/ranked/bond.service.ts）。

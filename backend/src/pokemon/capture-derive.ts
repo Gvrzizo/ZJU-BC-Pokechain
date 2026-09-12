@@ -1,7 +1,8 @@
 import { DeriveStream, sha256hex } from '../common/utils/crypto.util';
 import { PokemonIvs } from '../fabric/chain.types';
+import { ZONES, ZoneDef, pickZoneSpecies } from '../game-data/encounter.data';
 import { NATURES } from '../game-data/natures.data';
-import { SpeciesDef, WILD_TABLE } from '../game-data/species.data';
+import { SpeciesDef } from '../game-data/species.data';
 
 /**
  * Deterministic derivation layout for capture events. One RandomCommit event
@@ -9,10 +10,12 @@ import { SpeciesDef, WILD_TABLE } from '../game-data/species.data';
  * capture attempt, so the doc's simple "rand(0..8)" layout is offset into
  * disjoint blocks (documented for auditors, see FairnessModule):
  *
- *   n=0          wild species index (into WILD_TABLE)
- *   n=1          wild base level = clamp(L-2 + floor(rand*5), 2, 100)
- *                (L = highest IDLE party level, 5 when the player has none;
- *                 +5/+10 for lure tier 1/2, capped at 100)
+ *   n=0          wild species: weighted index into the zone pool
+ *                (zone = player-chosen band, see game-data/encounter.data.ts;
+ *                 the pool holds stage <= zone.maxStage species weighted by rarity)
+ *   n=1          wild level = zone.minLevel + floor(rand * (zone.maxLevel - zone.minLevel + 1))
+ *                (+2/+5 for lure tier 1/2, clamped to zone.maxLevel — the band is
+ *                 fully independent of the player's party levels)
  *   attempt k:   base = 2 + (k-1)*10
  *     +0  catch roll   -> success iff roll < captureProbability(...)
  *     +1..+6  IVs hp/atk/def/spatk/spdef/speed = floor(rand*32)
@@ -40,7 +43,10 @@ import { SpeciesDef, WILD_TABLE } from '../game-data/species.data';
  */
 export const CAPTURE_DERIVATION_DOC =
   'rand(n)=HMAC-SHA256(key=serverSeed,msg=`${clientSeed}|${eventId}|${n}`) first 8 bytes BE / 2^64; ' +
-  'n=0 species, n=1 wild base level=clamp(partyTopLevel-2+floor(r*5),2,100) (+lure tier bonus, capped 100); ' +
+  'n=0 wild species = weighted index into the zone wild pool ' +
+  '(zone=Commit.meta.zone; pool = stage<=zone.maxStage, weights 60/30/10 by catchRate >=200/>=80/<80, x0.3 when baseStatTotal>=500), ' +
+  `n=1 wild level = zone.minLevel + floor(r*(zone.maxLevel-zone.minLevel+1)) (zones: ${ZONES.map((z) => `${z.id}=Lv${z.minLevel}-Lv${z.maxLevel}/stage<=${z.maxStage}`).join(', ')}), ` +
+  '+2 (tier 1) / +5 (tier 2) lure bonus clamped to zone.maxLevel; ' +
   'attempt k uses base=2+(k-1)*10: +0 catch roll vs ' +
   'p=min(1,a/255), a=((3*maxHP-2*curHP)*catchRate*ballBonus)/(3*maxHP), ' +
   '+1..6 IVs=floor(r*32), +7 nature=r*25, +8 shiny=r<shinyChance (1/4096, x4 with lure tier 2), +9 shakes=1+floor(r*3); ' +
@@ -62,7 +68,7 @@ export const MASTER_BALL_BONUS = 255;
 /** 闪光基准概率（第 3 世代 1/4096）；诱饵 tier 2 ×4 → 1/1024 */
 export const SHINY_CHANCE = 1 / 4096;
 
-/** 付费诱饵档位：0 免费 / 1 = 50 积分 +5 级 / 2 = 200 积分 +10 级且闪光概率 ×4 */
+/** 付费诱饵档位：0 免费 / 1 = 50 积分（带内 +2 级）/ 2 = 200 积分（带内 +5 级且闪光概率 ×4） */
 export interface LureSpec {
   cost: number;
   levelBonus: number;
@@ -71,17 +77,14 @@ export interface LureSpec {
 
 export const LURE_TIERS: Record<number, LureSpec> = {
   0: { cost: 0, levelBonus: 0, shinyMultiplier: 1 },
-  1: { cost: 50, levelBonus: 5, shinyMultiplier: 1 },
-  2: { cost: 200, levelBonus: 10, shinyMultiplier: 4 },
+  1: { cost: 50, levelBonus: 2, shinyMultiplier: 1 },
+  2: { cost: 200, levelBonus: 5, shinyMultiplier: 4 },
 };
 
 /** 档位 → 规格；非法档位返回 null（调用方抛 INVALID_LURE_TIER） */
 export function lureSpec(tier: number): LureSpec | null {
   return LURE_TIERS[tier] ?? null;
 }
-
-/** 水平线的队伍最高等级：无队伍按 5 计（新账号第一只也有合理的野怪强度） */
-export const DEFAULT_TEAM_TOP_LEVEL = 5;
 
 /**
  * 官方风格捕捉率（第三世代起）：
@@ -104,21 +107,22 @@ export function captureProbability(
 }
 
 /**
- * 野怪基础等级：`clamp(L − 2 + floor(rand(1)×5), 2, 100)`，再叠加诱饵等级加成（上限 100）。
- * L = 玩家队伍（链上 IDLE）最高等级，无队伍按 5 计（docs/backend-api.md §2）。
+ * 野怪等级：**带内均匀** `zone.minLevel + floor(rand(1) × (zone.maxLevel − zone.minLevel + 1))`，
+ * 再叠加诱饵等级加成并封顶 `zone.maxLevel`（docs/backend-api.md §2「区域等级带」）。
+ * 与玩家队伍等级彻底脱钩——抓多少高级宝可梦都不会改变某个区域出怪的等级。
  */
-export function deriveWildLevel(stream: DeriveStream, teamTopLevel = DEFAULT_TEAM_TOP_LEVEL, levelBonus = 0): number {
-  const base = teamTopLevel - 2 + Math.floor(stream.at(1) * 5);
-  return Math.min(100, Math.max(2, base + levelBonus));
+export function deriveWildLevel(stream: DeriveStream, zone: ZoneDef, levelBonus = 0): number {
+  const span = zone.maxLevel - zone.minLevel + 1;
+  const base = zone.minLevel + Math.floor(stream.at(1) * span);
+  return Math.min(zone.maxLevel, base + levelBonus);
 }
 
 export function deriveWild(
   stream: DeriveStream,
-  teamTopLevel = DEFAULT_TEAM_TOP_LEVEL,
+  zone: ZoneDef,
   levelBonus = 0,
 ): { species: SpeciesDef; level: number } {
-  const species = WILD_TABLE[Math.floor(stream.at(0) * WILD_TABLE.length) % WILD_TABLE.length];
-  return { species, level: deriveWildLevel(stream, teamTopLevel, levelBonus) };
+  return { species: pickZoneSpecies(stream.at(0), zone), level: deriveWildLevel(stream, zone, levelBonus) };
 }
 
 export interface CaptureDerivation {

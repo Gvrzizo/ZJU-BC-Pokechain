@@ -98,13 +98,13 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 
 | n | 含义 | 计算 |
 |---|---|---|
-| 0 | 野生宝可梦种类 | `WILD_TABLE[floor(rand*8)]`（遇敌表 8 种） |
-| 1 | 野生**基础等级** | `clamp(L − 2 + floor(rand×5), 2, 100)`，`L` = 队伍（链上 IDLE）最高等级，无队伍按 5；付费诱饵在此之上 +5（tier 1）/ +10（tier 2），再封顶 100 |
+| 0 | 野生宝可梦种类 | 区域野生池的**加权索引**：`target = rand × 总权重`，取累计权重区间覆盖 target 的种族（池 = `stage ≤ zone.maxStage`，权重按捕获率 60/30/10、种族值总量 ≥500 再 ×0.3） |
+| 1 | 野生**等级** | `zone.minLevel + floor(rand × (zone.maxLevel − zone.minLevel + 1))`，即区域内均匀；**只由区域决定，与队伍等级无关**；付费诱饵带内 +2（tier 1）/ +5（tier 2）并封顶 `zone.maxLevel` |
 | 第 k 次投球（k=1,2,…）：base = 2 + (k−1)×10 | | |
 | base+0 | 捕捉判定 | 成功 ⟺ `rand < p`，`a = ((3×maxHP−2×curHP)×catchRate×ballBonus)/(3×maxHP)`，`p = min(1, a/255)`（大师球 ballBonus=255 → p=1 必中；快速捕捉等价于满血 curHP=maxHP） |
 | base+1 .. base+6 | 个体值 IV：hp/atk/def/spatk/spdef/speed（**快速捕捉路径**；野怪战斗用 20000 区，见下） | `floor(rand×32)` → 0..31 |
 | base+7 | 性格（快速捕捉路径） | `NATURES[floor(rand×25)]`（25 种性格表） |
-| base+8 | 闪光（快速捕捉路径） | `rand < shinyChance`：基准 **1/4096**；付费诱饵 tier 2 **×4 → 1/1024**（同一条流、同一个槽位，只改判定阈值，购买记录见 `RandomCommit.meta={lureTier,cost}`） |
+| base+8 | 闪光（快速捕捉路径） | `rand < shinyChance`：基准 **1/4096**；付费诱饵 tier 2 **×4 → 1/1024**（同一条流、同一个槽位，只改判定阈值，购买记录见 `RandomCommit.meta={zone,lureTier,cost}`） |
 | base+9 | 失败时的摇晃次数 | `1 + floor(rand×3)` → 1..3 |
 | 野怪战斗个体样本（开场派生一次，整场固定并用于铸造）：base = 20000 | | |
 | +0 .. +5 | 野怪 IV 六维 | `floor(rand×32)` |
@@ -131,8 +131,9 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 - **遇敌与投掷同事件**：种类/等级在 Commit 后立即派生并展示预览，但 IV/性格/闪光只在捕捉成功后才揭晓——预览不泄露高价值信息，且全流程一次承诺即可覆盖，减少链上交易数。
 - **野怪战斗独立区段（20000 / 30000）**：战斗回合的掷点与投球判定互不干扰（否则"多打几回合"会挪动 attempt 块的位置）；两个偏移量与 attempt 块天然不重叠（块要达到 n=20000 需要 2000 次投球）。野怪个体在开场固定（而非每次投球重抽），**战斗里遇到的野怪与最终捕捉到的是同一只**，既保证 HP 显示与铸造结果自洽，也堵住"故意投失重刷个体/闪光"的刷子玩法。
 - **战斗掉落独立区段（40000）**：掉落与回合掷点、投球判定互不干扰，只在收服/击倒结算时读 +0/+1 两槽——"多打几个回合""投失几个球"都不会改变掉落结果，且掉落物与它所属的战斗在派生流上一一对应（同一 eventId 完整可复核）。
-- **动态等级 + 付费诱饵都在同一槽位**：基础等级仍只读 `rand(1)`（映射函数随玩家水平线变化，`docs/backend-api.md` §2 公示），诱饵是"在同一掷点上加常数/换闪光阈值"——不新增槽位、不可在看过后挑选，加成范围在购买前即已确定。
-- **付费留痕上链**：`Commit` 的可选 `meta`（≤256 字节）承载 `{"lureTier":n,"cost":c}`，与扣费交易 `AddPoints(-c,'lure:tierN')` 一一对应；`GET /fairness/:eventId` 返回该字段，任何人可核对"只付了 0 的遇敌不可能享受 tier 2 的等级/闪光加成"。
+- **区域等级带 + 付费诱饵都在同一槽位**：等级仍只读 `rand(1)`，映射函数按区域（`south` Lv2-6 / `mid` Lv8-16 / `north` Lv17-28，`docs/backend-api.md` §2 公示）取值，**与玩家队伍等级彻底脱钩**——不存在"抓高级怪→野怪更强"的滚雪球；诱饵是"在同一掷点上加常数（带内 +2/+5，封顶区域上界）/换闪光阈值"——不新增槽位、不可在看过后挑选，加成范围在购买前即已确定。
+- **区域写进 `Commit.meta`**：`meta` 恒含 `zone`（`{"zone":"north"}`，付费档追加 `lureTier`/`cost`），因此 n=0 的加权抽样与 n=1 的等级带都能被第三方从链上记录独立复算——没有 meta 里的区域，n=0 的"加权索引"就是不可复核的。
+- **付费留痕上链**：`Commit` 的可选 `meta`（≤256 字节）恒含区域，付费档追加 `{"lureTier":n,"cost":c}`，与扣费交易 `AddPoints(-c,'lure:tierN')` 一一对应；`GET /fairness/:eventId` 返回该字段，任何人可核对"只付了 0 的遇敌不可能享受 tier 2 的等级/闪光加成"。
 - **快速捕捉路径**（`POST /capture/attempt`，兼容/冒烟用）继续使用 attempt 块内的 IV/性格/闪光槽位；两条路径共用同一份 attempt 计数与块索引，互不冲突。
 
 补充：种子脚本 `backend/src/scripts/seed.ts` 用同一 DeriveStream 按 rand(1..8) 布局铸造演示宝可梦（不走 attempt 分块），属于演示数据的简化路径，与捕捉主流程布局不冲突。
@@ -141,12 +142,12 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 
 | 场景 | 事件 purpose | 消费点 | 消费方式 |
 |---|---|---|---|
-| 遇敌 | capture | `POST /capture/encounter` | rand(0) 种类、rand(1) 基础等级（`clamp(L−2+floor(rand×5), 2, 100)`，L = 队伍最高等级/无队伍 5；付费诱饵 +5/+10 级并写入 Commit.meta）；展示预览 |
+| 遇敌 | capture | `POST /capture/encounter` | rand(0) 区域野生池加权索引（`stage ≤ zone.maxStage`，权重 60/30/10，种族值总量 ≥500 ×0.3）、rand(1) 带内等级（`zone.minLevel + floor(rand × 带宽)`，诱饵带内 +2/+5 封顶区域上界；`zone` 与付费档写入 Commit.meta）；展示预览 |
 | 捕捉判定 | capture（同一事件） | `POST /wild/:id/action {type:'ball'}` 与快速捕捉 `POST /capture/attempt` | 块内 +0：`rand < p`，`p = min(1, a/255)`，`a = ((3×maxHP−2×curHP)×catchRate×ballBonus)/(3×maxHP)`；球倍率 精灵球×1 / 超级球×1.5 / 高级球×2 / 大师球×255（`game-data/items.data.ts`，255 → p=1 必中）。快速捕捉等价于满血投球 |
 | 个体值 IV / 性格 / 闪光 | 同上 | 捕捉成功时铸造 | 野怪战斗取 20000 区（开场固定，战斗 HP 与铸造结果同源）；快速捕捉取块内 +1..+6 / +7 / +8。闪光阈值可被付费诱饵 tier 2 放大 4 倍（1/4096 → 1/1024），槽位不变 |
 | 特性 | — | 铸造 | **不耗随机**：取 species 表固定 ability（P0 简化） |
 | 失败反馈 | 同上 | 捕捉失败返回 | 块内 +9 摇晃次数 1..3 |
-| 付费诱饵 | 同上 | `POST /capture/encounter {lureTier}` | **不耗随机**：链码 `AddPoints(-cost,'lure:tierN')` 扣费 + `Commit.meta="{lureTier,cost}"` 上链留痕（`/fairness` 可核对） |
+| 付费诱饵 | 同上 | `POST /capture/encounter {lureTier}` | **不耗随机**：链码 `AddPoints(-cost,'lure:tierN')` 扣费 + `Commit.meta="{zone,lureTier,cost}"` 上链留痕（`/fairness` 可核对） |
 | 野怪战斗 | capture（同一事件） | `POST /wild/:id/action`（`wild/wild-battle.ts`） | 30000 区每回合 16 槽：野怪 AI 选招、双方各五个掷点（麻痹/命中/暴击/浮动/追加效果）、平速裁决；伤害/命中/暴击/能力阶级/异常状态与 PvP 共用 `battle-math.ts` |
 | 战斗掉落 | capture（同一事件） | 收服成功 / 击倒野怪的结算 | 40000 区：+0 是否掉落（`rand < 0.2`）、+1 品类（60% 伤药 / 30% 精灵球 / 10% 超级球），掉落经 `MintItem` 上链（idemKey `<sessionId>-drop`，重放不重复发放） |
 | 战斗判定 | battle | BattleEngine 全程 | 见下 |
@@ -190,7 +191,7 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 1. 拉取 `GET /api/v1/fairness/:eventId` → 返回链上 RandomCommit 全量（commitHash/serverSeed/clientSeed/resultHash/状态）、派生算法说明文本、服务端 secp256k1 公钥。
 2. Web Crypto 重算 `sha256(serverSeed)`，与 commitHash 比对 —— 验证"揭示的种子就是承诺的种子"。
 3. 重算 `sha256("${serverSeed}|${clientSeed}|${eventId}")`，与 resultHash 比对 —— 验证"链上锚定的流身份"。
-4. 重算 HMAC-SHA256 派生流：捕捉事件按 §3 分块布局复核种类/等级/某次投掷的判定/IV/性格/闪光；战斗事件按 §4 顺序复核麻痹/命中/暴击/浮动/追加效果，并可用 `sha256(canonical(回合日志))==resultHash` 与 secp256k1 公钥验 serverSig；付费诱饵的 `event.meta`（`{lureTier,cost}`）可与扣费交易、等级/闪光阈值变化互证。
+4. 重算 HMAC-SHA256 派生流：捕捉事件按 §3 分块布局复核种类/等级/某次投掷的判定/IV/性格/闪光；战斗事件按 §4 顺序复核麻痹/命中/暴击/浮动/追加效果，并可用 `sha256(canonical(回合日志))==resultHash` 与 secp256k1 公钥验 serverSig；付费诱饵的 `event.meta`（`{zone,lureTier,cost}`）可与扣费交易、等级/闪光阈值变化互证，区域字段则是复算 n=0 加权抽样与 n=1 等级带的前置输入。
 5. 页面逐项打勾展示，任一不等即标红——复核不依赖后端返回的"结论"，只用后端返回的"证据"。
 
 ## 7. 局限性（诚实声明）

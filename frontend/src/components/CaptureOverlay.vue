@@ -18,6 +18,7 @@ import {
 } from '@/game/wild-battle';
 import { useI18n } from '@/composables/useI18n';
 import { usePokemonStore } from '@/stores/pokemon';
+import { useZoneStore } from '@/stores/zone';
 import type { WildBallOption } from '@/types';
 import BondHearts from '@/ui/BondHearts.vue';
 import HpBar from '@/ui/HpBar.vue';
@@ -26,6 +27,7 @@ import SpriteIcon from '@/ui/SpriteIcon.vue';
 
 const emit = defineEmits<{ (e: 'done'): void }>();
 const store = usePokemonStore();
+const zoneStore = useZoneStore();
 const { t, monName, moveName, itemName } = useI18n();
 
 /** prep = 诱饵/首发选择；battle = 野怪战斗主流程；quick = 没有可出战宝可梦时的降级路径（直接投球） */
@@ -93,18 +95,16 @@ const healthyParty = computed(() => party.value.filter((m) => !m.fainted));
 /** 有队伍但全员濒死：不能进入草丛，先去宝可梦中心 */
 const allFainted = computed(() => party.value.length > 0 && healthyParty.value.length === 0);
 
-/** 队伍水平线（本地预估，用于准备阶段展示野怪等级带） */
-const teamTopLevel = computed(() => {
-  const levels = store.myPokemon.filter((p) => p.status === 'IDLE').map((p) => p.level);
-  return levels.length > 0 ? Math.max(...levels) : 5;
-});
+/** 当前所在区域（OverworldScene 按地图 y 带写入）：决定野怪等级带与野生池 */
+const zone = computed(() => zoneStore.zone);
 
 const selectedLure = computed(() => LURE_TIERS.find((l) => l.tier === lureTier.value) ?? LURE_TIERS[0]);
+/** 诱饵只在区域带内加成并封顶区域上界（docs/backend-api.md §2「区域等级带」） */
 const expectedLevels = computed(() => {
   const bonus = selectedLure.value.levelBonus;
   return {
-    min: Math.min(100, Math.max(2, teamTopLevel.value - 2 + bonus)),
-    max: Math.min(100, Math.max(2, teamTopLevel.value + 2 + bonus)),
+    min: Math.min(zone.value.maxLevel, zone.value.minLevel + bonus),
+    max: zone.value.maxLevel,
   };
 });
 
@@ -174,7 +174,7 @@ async function start() {
   try {
     // 已经付过诱饵的遇敌会保留：重试不再重复扣费
     if (!enc.value) {
-      enc.value = await encounter(clientSeed, lureTier.value);
+      enc.value = await encounter(clientSeed, lureTier.value, zone.value.id);
       playCry(enc.value.wild.speciesId);
     }
     const found = enc.value;
@@ -279,10 +279,17 @@ if (store.items.length === 0) {
     <div class="px-panel wild-panel">
       <template v-if="phase === 'prep' || phase === 'loading'">
         <h2 style="text-align: center">草丛中的动静…</h2>
+        <p class="wild-zone">
+          {{ zone.name }}
+          <span class="text-dim">
+            野怪 Lv{{ zone.minLevel }}–{{ zone.maxLevel }} ·
+            {{ zone.maxStage === 0 ? '只出未进化型' : zone.maxStage === 1 ? '可见一段进化型' : '可见二段进化型' }}
+          </span>
+        </p>
 
         <div class="wild-group" style="margin-top: 12px">
           <div class="wild-group__title">
-            诱饵 <span class="text-dim">（付费档位：野怪更强，但收益更高；费用在确认遇敌时链上扣除）</span>
+            诱饵 <span class="text-dim">（付费档位：带内等级加成 / 更高闪光率；费用在确认遇敌时链上扣除）</span>
           </div>
           <div class="wild-grid">
             <PixelButton
@@ -303,8 +310,9 @@ if (store.items.length === 0) {
             </PixelButton>
           </div>
           <p class="wild-hint">
-            预计野怪等级：Lv{{ expectedLevels.min }} ~ Lv{{ expectedLevels.max }}（随队伍最高等级
-            Lv{{ teamTopLevel }} 浮动）；付费档位会写入链上随机承诺的 meta，可在公平性页面复核。
+            预计野怪等级：Lv{{ expectedLevels.min }} ~ Lv{{ expectedLevels.max }}（{{ zone.name }} 的等级带
+            Lv{{ zone.minLevel }}–{{ zone.maxLevel }}，诱饵只在带内加成且不超过 Lv{{ zone.maxLevel }}；
+            野怪等级与队伍等级无关）。付费档位会写入链上随机承诺的 meta，可在公平性页面复核。
           </p>
         </div>
 
@@ -369,7 +377,7 @@ if (store.items.length === 0) {
           <SpriteIcon :species-id="enc.wild.speciesId" :size="96" />
         </div>
         <p style="font-size: var(--px-fs-sm); text-align: center">
-          Lv{{ enc.wild.level }} · 官方捕获率 {{ enc.wild.catchRate ?? '?' }}/255
+          {{ enc.zone.name }} · Lv{{ enc.wild.level }} · 官方捕获率 {{ enc.wild.catchRate ?? '?' }}/255
           <span v-if="enc.lure.tier > 0" class="text-dim">（诱饵：{{ enc.lure.tier }} 档）</span>
         </p>
         <p class="wild-hint" style="text-align: center">
@@ -750,6 +758,13 @@ if (store.items.length === 0) {
   margin: 6px 0 0;
   font-size: var(--px-fs-sm);
   line-height: var(--px-lh-tight);
+}
+
+/* 当前区域：区域名 + 等级带（区域等级带模型，docs/backend-api.md §2） */
+.wild-zone {
+  margin: 8px 0 0;
+  font-size: var(--px-fs-sm);
+  text-align: center;
 }
 
 .wild-hint {
