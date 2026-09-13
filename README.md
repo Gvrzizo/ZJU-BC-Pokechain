@@ -11,15 +11,18 @@ B/S 架构、GBA《宝可梦 红宝石/蓝宝石》像素风。宝可梦相关�
 ## 快速开始
 
 ```bash
-./scripts/up.sh          # 启动 Fabric 网络 + 通道 + 部署链码
-docker compose up -d     # 启动 PostgreSQL/Redis/MinIO + 后端 + 前端
-./scripts/seed-demo.sh   # 灌入演示数据
+# 克隆后先补素材（版权素材不入库；跳过也能跑，前端回退占位图）
+node scripts/fetch-assets.mjs                          # 宝可梦 sprite/叫声/道具图标
+python3 frontend/tools/build-world-assets.py           # 世界地图瓦片（需 pip install pillow）
+
+docker compose up -d --build  # 启动 PostgreSQL/Redis/MinIO + 后端 + 前端（默认 mock 链模式）
+./scripts/seed-demo.sh   # 灌入演示数据（账号 ash/gary/arbiter/admin，密码 demo1234）
 ./scripts/e2e-smoke.sh   # 端到端冒烟：注册→捕捉→交易→押注对战→结算
 ```
 
-浏览器访问 http://localhost:8080 。
+浏览器访问 http://localhost:8080 。**组员环境复刻的完整步骤（含真链模式与故障表）见 `docs/setup.md`。**
 
-课堂快速演示可免 Fabric 网络（根 compose 默认即 mock 链模式，世界状态存 Redis）：`FABRIC_MOCK=true docker compose up -d --build && ./scripts/seed-demo.sh`，随后 `./scripts/e2e-smoke.sh` 跑端到端冒烟。
+真链模式（Fabric 网络 + 真实链码部署）：`./scripts/up.sh && ./scripts/deployCC.sh`，再按根 `docker-compose.yaml` 文件头 `[real-fabric]` 注释切换后 `FABRIC_MOCK=false docker compose up -d --build`。
 
 详细文档见 `docs/`：
 
@@ -31,6 +34,7 @@ docker compose up -d     # 启动 PostgreSQL/Redis/MinIO + 后端 + 前端
 | `docs/randomness.md` | 可验证随机数方案（承诺-揭示 + VRF 扩展） |
 | `docs/security.md` | 安全设计（身份/链码/对战押注/链下资源/隐私/运维） |
 | `docs/deployment.md` | 部署与演示手册、故障处理规则 |
+| `docs/setup.md` | **组员环境复刻指南（克隆→素材→运行→故障）** |
 
 ## 仓库结构
 

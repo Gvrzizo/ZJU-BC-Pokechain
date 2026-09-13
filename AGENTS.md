@@ -11,9 +11,19 @@
 | `backend` | NestJS 10, TypeORM+pg, ioredis, Socket.IO, fabric-gateway | REST `/api/v1` + WS 命名空间 `/battle`；模块：auth/users · pokemon(+capture+**center 治疗**) · wild(野怪战斗) · items/shop(**buy/sell**) · trades · battles(**押注房 + 房名/备注/留言/请踢/屏蔽/押注模板**) · ranked(**排队扩圈/15s 接受期/机器人/积分场 arena/ELO/排行榜/羁绊**) · admin · fairness/assets/leaderboard |
 | `frontend` | Vue3 + Phaser 3 + Pinia + Vite | 像素风游戏前端，nginx 反代后端；页面 `/game /bag /shop /pokedex /team /trade /lobby /ranked /battle/:id /starter /admin /fairness` |
 | `scripts` | bash | prereq/common（公共库）/up/down/reset/deployCC/seed-demo/e2e-smoke |
-| `docs` | 中文 | architecture / chaincode-api / backend-api / randomness / security / deployment |
+| `docs` | 中文 | architecture / chaincode-api / backend-api / randomness / security / deployment / **setup（环境复刻）** |
 
 **权威契约文档**：改链码或 API 前先读 `docs/chaincode-api.md` 和 `docs/backend-api.md`，改完同步更新文档。
+
+## Agent 环境复刻（干净 clone 后的速查清单）
+
+```bash
+node scripts/fetch-assets.mjs                    # 宝可梦 sprite/叫声/道具图标（PokeAPI，幂等可重跑）
+python3 frontend/tools/build-world-assets.py     # 世界瓦片（需 Pillow；输出路径已固定为 frontend/public/...，与 cwd 无关）
+docker compose up -d --build && ./scripts/seed-demo.sh
+./scripts/e2e-smoke.sh                           # 25 项断言全绿 = 环境就绪
+```
+注意：`frontend/public/assets/vendor/`（版权素材）、`network/organizations`、`network/bin` 不在 git 内；跳过素材也能跑（前端回退程序化占位图）。人类读者的完整版见 `docs/setup.md`。
 
 **更新纪律（强制）**：任何改动合并前，必须同步更新本 `AGENTS.md` 的相关段落——结构/命令/**测试数**/架构决策四项，
 以及受影响模块的清单与页面列表；**子代理任务完成后由主代理核对**本文件是否与代码一致（实测跑一遍三套 `npm test` 并更新计数）。

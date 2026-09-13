@@ -609,7 +609,7 @@ def build_sprites(cache: str, out_dir: str) -> tuple[list[dict], dict[str, list[
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--out', default='public/assets/vendor/world')
+    ap.add_argument('--out', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public', 'assets', 'vendor', 'world'))
     ap.add_argument('--cache', default=os.environ.get('POKECHAIN_WORLD_CACHE', '/tmp/pokechain-world-build'))
     args = ap.parse_args()
 
