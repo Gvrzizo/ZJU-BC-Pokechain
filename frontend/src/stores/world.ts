@@ -65,6 +65,10 @@ export const useWorldStore = defineStore('world', {
   state: () => ({
     mapId: START_MAP_ID as MapId,
     position: { x: MAPS[START_MAP_ID].spawn.x, y: MAPS[START_MAP_ID].spawn.y },
+    /** 当前地图尺寸（HUD 避让判定用：靠左且靠上时卡片挪到右上角） */
+    size: { width: MAPS[START_MAP_ID].width, height: MAPS[START_MAP_ID].height },
+    /** 玩家是否正按住 Shift 跑步（HUD 显示跑步状态） */
+    isRunning: false,
     banner: null as WorldBanner | null,
     bannerSeq: 0,
   }),
@@ -72,6 +76,14 @@ export const useWorldStore = defineStore('world', {
     map: (s) => getMapDef(s.mapId),
     mapName(): string {
       return this.map.name;
+    },
+    /**
+     * HUD 需要避让玩家：玩家格子落在**左半 + 上三分之一**区域
+     * （`x < 宽/2 且 y < 高/3`）。判定只看玩家在图里的相对位置，
+     * 因此大地图（相机跟随）与小图（相机居中、图外露出底色）表现一致。
+     */
+    hudAvoidsPlayer(): boolean {
+      return this.position.x < this.size.width / 2 && this.position.y < this.size.height / 3;
     },
     zone(): ZoneDef {
       return zoneById(this.map.zoneId);
@@ -105,13 +117,15 @@ export const useWorldStore = defineStore('world', {
     enterMap(payload: { mapId: MapId; x: number; y: number; announce?: boolean }) {
       this.mapId = payload.mapId;
       this.position = { x: payload.x, y: payload.y };
+      this.size = { width: this.map.width, height: this.map.height };
       useZoneStore().enter(this.map.zoneId);
       storeSpawn({ mapId: payload.mapId, x: payload.x, y: payload.y });
       if (payload.announce) this.announceMap();
     },
-    /** 只更新坐标（同一张图内走路，不重复弹横幅） */
-    moveTo(x: number, y: number) {
+    /** 只更新坐标（同一张图内走路，不重复弹横幅）；`running` 为当前是否跑步中 */
+    moveTo(x: number, y: number, running = false) {
       this.position = { x, y };
+      this.isRunning = running;
       storeSpawn({ mapId: this.mapId, x, y });
     },
     announceMap() {

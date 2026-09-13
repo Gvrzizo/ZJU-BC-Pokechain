@@ -55,3 +55,19 @@ export async function claimStarter(speciesId: number): Promise<StarterClaim> {
   const { data } = await http.post<StarterClaim>('/users/me/starter', { speciesId });
   return data;
 }
+
+/** POST /users/me/running-shoes 响应：跑鞋堆叠 + 本次是否新领取 + 速度倍率 */
+export interface RunningShoesClaim {
+  item: Item;
+  claimed: boolean;
+  speedMultiplier: number;
+}
+
+/**
+ * 跑鞋领取（起始镇「妈妈」赠送）：一次性、幂等，新老账号都可领。
+ * 重复领取返回已有那一份（`claimed:false`），不会报错。
+ */
+export async function claimRunningShoes(): Promise<RunningShoesClaim> {
+  const { data } = await http.post<RunningShoesClaim>('/users/me/running-shoes', {});
+  return data;
+}

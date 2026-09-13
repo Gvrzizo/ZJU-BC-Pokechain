@@ -1,5 +1,9 @@
 import Phaser from 'phaser';
 import { MON_SIZE } from './mon-assets';
+import { RUNNING_SPEED_MULTIPLIER } from './running';
+
+/** 走路动画帧率（8 帧/秒）；跑步 = ×`RUNNING_SPEED_MULTIPLIER`，与移动速度同步 */
+const WALK_FRAME_RATE = 8;
 
 /**
  * 运行时占位像素贴图生成。
@@ -311,23 +315,23 @@ export function makeHeroSpritesheet(scene: Phaser.Scene, key = 'hero'): void {
 export type Direction = 'down' | 'up' | 'left' | 'right';
 export const DIR_ROW: Record<Direction, number> = { down: 0, up: 1, left: 2, right: 3 };
 
-/** 注册主角行走动画（幂等） */
+/** 注册主角行走动画（幂等）：走路 8 帧/秒，跑步 `hero-walk-<dir>-run` 帧率 ×2（与移动速度同步） */
 export function makeHeroAnims(scene: Phaser.Scene): void {
   for (const dir of ['down', 'up', 'left', 'right'] as Direction[]) {
-    const walkKey = `hero-walk-${dir}`;
-    if (!scene.anims.exists(walkKey)) {
-      const base = DIR_ROW[dir] * 3;
-      scene.anims.create({
-        key: walkKey,
-        frames: [
-          { key: 'hero', frame: base },
-          { key: 'hero', frame: base + 1 },
-          { key: 'hero', frame: base },
-          { key: 'hero', frame: base + 2 },
-        ],
-        frameRate: 8,
-        repeat: -1,
-      });
+    const base = DIR_ROW[dir] * 3;
+    const frames = [
+      { key: 'hero', frame: base },
+      { key: 'hero', frame: base + 1 },
+      { key: 'hero', frame: base },
+      { key: 'hero', frame: base + 2 },
+    ];
+    const animations: Array<[string, number]> = [
+      [`hero-walk-${dir}`, WALK_FRAME_RATE],
+      [`hero-walk-${dir}-run`, WALK_FRAME_RATE * RUNNING_SPEED_MULTIPLIER],
+    ];
+    for (const [key, frameRate] of animations) {
+      if (scene.anims.exists(key)) continue;
+      scene.anims.create({ key, frames, frameRate, repeat: -1 });
     }
   }
 }

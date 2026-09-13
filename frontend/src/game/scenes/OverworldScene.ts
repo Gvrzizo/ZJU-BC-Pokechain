@@ -1,12 +1,20 @@
 import Phaser from 'phaser';
 import { getMyItems } from '@/api/items';
 import { healTeam } from '@/api/pokemon';
+import { claimRunningShoes } from '@/api/auth';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useWorldStore, readStoredSpawn } from '@/stores/world';
 import { zoneHint, zoneById, zoneLabel } from '@/stores/zone';
 import { BUS_EVENTS, gameBus } from '../bus';
 import { DialogSession } from '../dialog';
 import { keyForMap, keyGateStatus, keyName, missingKeyLines, rememberPassage } from '../gates';
+import {
+  RUNNING_SPEED_MULTIPLIER,
+  hasRunningShoes,
+  isRunning,
+  setRunningShoes,
+  stepDuration,
+} from '../running';
 import {
   BLOCKED_TILES,
   START_MAP_ID,
@@ -24,6 +32,7 @@ import {
   type Facing,
   type MapDef,
   type MapId,
+  type NpcDef,
   type TileId,
   type WarpDef,
 } from '../maps';
@@ -41,9 +50,11 @@ const TERRAIN_LABEL: Partial<Record<TileId, string>> = {
   altar: '祭坛',
 };
 
-/** 每格行走耗时（毫秒）与撞墙动画时长 */
+/** 每格行走耗时（毫秒）与撞墙动画时长；按住 Shift（有跑鞋）时按 `RUNNING_SPEED_MULTIPLIER` 折半 */
 const STEP_MS = 150;
 const BUMP_MS = 120;
+/** 跑步时行走动画的帧率（走路 8 帧/秒，同步 ×2） */
+const WALK_FRAME_RATE = 8;
 /** 对话翻页的最小间隔，避免刚开口就被同一次按键翻过去 */
 const DIALOG_COOLDOWN_MS = 170;
 
@@ -70,11 +81,13 @@ const BIOME_BG: Record<BiomeId, string> = {
  *
  * - **多地图**：`scene.restart({ mapId, spawn })` 换图（维护成本最低的做法），
  *   换图带淡出/淡入；地图间靠边缘行走、门口与楼梯传送，`spawn` 落在目标格上。
- * - **行走**：方向键 / WASD 四向网格移动，阻挡瓦片与 NPC 都不可穿过。
+ * - **行走**：方向键 / WASD 四向网格移动，阻挡瓦片与 NPC 都不可穿过；
+ *   拿到跑鞋（起始镇「妈妈」赠送）后按住 **Shift** 跑步：每格耗时折半、行走动画帧率 ×2。
  * - **遇敌**：只有地图 `encounter.tiles` 列出的地形会触发（镇内没有配置），
  *   触发前把当前区域写进 world store（CaptureOverlay 据此请求后端决定野生池与等级）。
  * - **交互**：面向 NPC / 路牌按空格（或 Z / 回车）对话；踩到门口触发治疗、道具店跳转；
- *   传说区门口校验钥匙道具（`gates.ts`），没钥匙弹对话拦住。
+ *   传说区门口校验钥匙道具（`gates.ts`），没钥匙弹对话拦住；
+ *   带 `event: 'running-shoes'` 的 NPC（妈妈）对话结束后走领取流程。
  * - **HUD**：区域名 / 等级带 / 传说提示 / 跨图横幅都交给 Vue（`WorldHud.vue` 读 world store），
  *   场景只负责写状态，样式与布局在 Vue 侧维护。
  */
@@ -86,6 +99,7 @@ export class OverworldScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private actionKeys!: Phaser.Input.Keyboard.Key[];
+  private shiftKey!: Phaser.Input.Keyboard.Key;
   private dialog!: DialogBox;
   private session: DialogSession | null = null;
   private pendingAction: (() => void) | null = null;
@@ -94,6 +108,8 @@ export class OverworldScene extends Phaser.Scene {
   private tilePos = { x: 0, y: 0 };
   private facing: Facing = 'down';
   private moving = false;
+  /** 本次移动是否跑步（Shift + 跑鞋）：决定移动耗时与行走动画帧率 */
+  private running = false;
   /** 传送 / 请求进行中：不接受移动输入 */
   private busy = false;
 
@@ -111,6 +127,7 @@ export class OverworldScene extends Phaser.Scene {
     this.tilePos = { x: spot.x, y: spot.y };
     this.facing = 'down';
     this.moving = false;
+    this.running = false;
     this.busy = false;
     this.session = null;
     this.pendingAction = null;
@@ -142,12 +159,14 @@ export class OverworldScene extends Phaser.Scene {
     const enter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     const zKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
     this.actionKeys = [space, enter, zKey];
+    this.shiftKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
 
     this.dialog = new DialogBox(this, this.scale.width, this.scale.height);
     this.input.on(Phaser.Input.Events.POINTER_DOWN, () => this.advanceDialog());
 
     this.events.on(Phaser.Scenes.Events.RESUME, () => {
       this.moving = false;
+      this.running = false;
       this.busy = false;
       this.syncHud(false);
     });
@@ -313,14 +332,25 @@ export class OverworldScene extends Phaser.Scene {
     else this.player.anims.stop();
   }
 
+  /** 按住 Shift 且已拿到跑鞋 → 跑步（移动耗时减半、行走动画 ×2） */
+  private isRunningNow(): boolean {
+    return isRunning(this.shiftKey?.isDown ?? false, hasRunningShoes());
+  }
+
+  private playWalkAnim(dir: Facing, running: boolean) {
+    this.player.anims.play(`hero-walk-${dir}${running ? '-run' : ''}`, true);
+  }
+
   private tryMove(dir: Facing) {
     this.facing = dir;
-    this.player.anims.play(`hero-walk-${dir}`, true);
+    const running = this.isRunningNow();
+    this.running = running;
+    this.playWalkAnim(dir, running);
     const next = frontOf(this.tilePos, dir);
     if (!isWalkable(this.mapDef, next.x, next.y)) {
       // 撞墙 / 撞人：原地踏步一下
       this.moving = true;
-      this.time.delayedCall(BUMP_MS, () => {
+      this.time.delayedCall(stepDuration(BUMP_MS, running), () => {
         this.moving = false;
         this.player.anims.stop();
       });
@@ -329,12 +359,12 @@ export class OverworldScene extends Phaser.Scene {
 
     this.moving = true;
     this.tilePos = next;
-    gameBus.emit(BUS_EVENTS.PLAYER_MOVED, { ...next, mapId: this.mapDef.id });
+    gameBus.emit(BUS_EVENTS.PLAYER_MOVED, { ...next, mapId: this.mapDef.id, running });
     this.tweens.add({
       targets: this.player,
       x: next.x * TILE + TILE / 2,
       y: next.y * TILE + TILE / 2,
-      duration: STEP_MS,
+      duration: stepDuration(STEP_MS, running),
       onComplete: () => {
         this.moving = false;
         this.player.anims.stop();
@@ -447,12 +477,55 @@ export class OverworldScene extends Phaser.Scene {
           ? () => void this.healParty(npc.name)
           : npc.action === 'shop'
             ? () => gameBus.emit(BUS_EVENTS.OPEN_SHOP)
-            : undefined;
+            : npc.action === 'talk' && npc.event === 'running-shoes'
+              ? () => void this.takeRunningShoes(npc)
+              : undefined;
       this.openDialog(npc.name, npc.lines, action);
       return;
     }
     if (target.kind === 'sign') {
       this.openDialog('路牌', target.sign.lines ?? this.areaSignLines());
+    }
+  }
+
+  /**
+   * 妈妈赠送跑鞋（起始镇）：对话结束才调 `POST /users/me/running-shoes`（幂等，重复领取返回已有的）。
+   * 已经拿到过跑鞋时只说关心的话；领取成功后把状态同步给背包缓存与跑步逻辑（HUD 于是显示提示）。
+   */
+  private async takeRunningShoes(npc: NpcDef) {
+    const store = this.pokemonStore();
+    if (store?.hasRunningShoes) {
+      this.openDialog(npc.name, ['跑鞋合不合脚？按住 Shift 跑起来，别摔着了。']);
+      return;
+    }
+    this.busy = true;
+    try {
+      const res = await claimRunningShoes();
+      setRunningShoes(true);
+      gameBus.emit(BUS_EVENTS.RUNNING_SHOES, { speedMultiplier: res.speedMultiplier });
+      try {
+        await usePokemonStore().refreshItems();
+      } catch {
+        /* Pinia 不在时忽略（背包缓存下次进页面会刷新） */
+      }
+      this.openDialog(npc.name, [
+        '这是你的跑鞋——穿上它，按住 Shift（或右 Shift）就能跑起来！',
+        '速度是走路的两倍，赶路的时候记得按。',
+      ]);
+    } catch (error: any) {
+      const message = error?.response?.data?.message ?? '连接不上服务器，稍后再来拿吧。';
+      this.openDialog(npc.name, [`拿跑鞋失败了：${message}`]);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** 背包 store（Pinia 不在时返回 null），场景被单测直接创建时也能跑 */
+  private pokemonStore(): { hasRunningShoes: boolean } | null {
+    try {
+      return usePokemonStore();
+    } catch {
+      return null;
     }
   }
 
@@ -547,10 +620,11 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /** 把地图 / 坐标 / 区域写进 world store（Vue 侧 HUD 与遇敌流程都读它） */
-  private syncHud(announce: boolean) {
+  private syncHud(announce: boolean, running = this.running) {
     try {
       const store = useWorldStore();
       store.enterMap({ mapId: this.mapDef.id, x: this.tilePos.x, y: this.tilePos.y, announce });
+      store.isRunning = running;
       if (announce) gameBus.emit(BUS_EVENTS.MAP_CHANGED, { mapId: this.mapDef.id, name: this.mapDef.name });
     } catch {
       // Phaser 场景可能在 Pinia 之外被创建（单测/截图工具）：地图照常可玩，只是没有 HUD

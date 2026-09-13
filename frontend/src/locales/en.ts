@@ -429,6 +429,7 @@ export const en: LocaleDictionary = {
     'ruins-key': 'Ruins Key',
     'island-key': 'Island Key',
     'birth-key': 'Birth Island Ticket',
+    'running-shoes': 'Running Shoes',
   },
 
   natures: {

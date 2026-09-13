@@ -8,23 +8,27 @@ import { useWorldStore } from '@/stores/world';
 import type { Pokemon } from '@/types';
 import WorldHud from './WorldHud.vue';
 
-/** 世界 HUD：区域名 + 等级带常驻，传说区特殊配色与提示，跨图横幅 */
+/** 世界 HUD：区域名 + 等级带常驻，传说区特殊配色与提示，跨图横幅，靠左上时自动避让 */
 async function render(
-  payload: { mapId: MapId; x?: number; y?: number; announce?: boolean },
+  payload: { mapId: MapId; x?: number; y?: number; announce?: boolean; running?: boolean },
   ownedSpeciesIds: number[] = [],
+  items: Array<{ typeId: string; quantity: number; status?: string }> = [],
 ) {
   const app = createSSRApp({ render: () => h(WorldHud) });
   const pinia = createPinia();
   app.use(pinia);
-  useWorldStore(pinia).enterMap({
+  const world = useWorldStore(pinia);
+  world.enterMap({
     mapId: payload.mapId,
     x: payload.x ?? 2,
     y: payload.y ?? 3,
     announce: payload.announce ?? false,
   });
+  world.isRunning = payload.running ?? false;
   usePokemonStore(pinia).myPokemon = ownedSpeciesIds.map(
     (speciesId) => ({ id: `mon-${speciesId}`, speciesId }) as Pokemon,
   );
+  usePokemonStore(pinia).items = items as never;
   return renderToString(app);
 }
 
@@ -75,5 +79,45 @@ describe('WorldHud', () => {
     const legendary = await render({ mapId: 'southern-island', announce: true });
     expect(legendary).toContain('hud-banner--legendary');
     expect(legendary).toContain('传说宝可梦的气息…（可捕捉：拉帝亚斯/拉帝欧斯）');
+  });
+
+  it('自动避让：玩家在地图左上区域时卡片挂避让类（滑到右上角），离开即回', async () => {
+    // 未白镇 32×24：避让阈值 x < 16 且 y < 8
+    const topLeft = await render({ mapId: 'town', x: 4, y: 2 });
+    expect(topLeft).toContain('hud-card--right');
+    expect(topLeft).toContain('data-hud-side="right"');
+    expect(topLeft).toContain('(4, 2)');
+
+    const rightHalf = await render({ mapId: 'town', x: 20, y: 2 });
+    expect(rightHalf).toContain('data-hud-side="left"');
+    expect(rightHalf).not.toContain('hud-card--right');
+
+    const lowerLeft = await render({ mapId: 'town', x: 4, y: 12 });
+    expect(lowerLeft).toContain('data-hud-side="left"');
+    expect(lowerLeft).not.toContain('hud-card--right');
+  });
+
+  it('小图（相机居中）同样避让', async () => {
+    const small = await render({ mapId: 'sky-pillar-1f', x: 1, y: 1 });
+    expect(small).toContain('hud-card--right');
+    expect(small).toContain('data-hud-side="right"');
+  });
+
+  it('拿到跑鞋后提示"按住 Shift 跑步"，跑步中显示"跑步中"', async () => {
+    const noShoes = await render({ mapId: 'town', x: 13, y: 16 });
+    expect(noShoes).not.toContain('按住 Shift 跑步');
+    expect(noShoes).not.toContain('跑步中');
+
+    const shoes = await render({ mapId: 'town', x: 13, y: 16 }, [], [
+      { typeId: 'running-shoes', quantity: 1, status: 'IDLE' },
+    ]);
+    expect(shoes).toContain('按住 Shift 跑步');
+    expect(shoes).not.toContain('跑步中');
+
+    const running = await render({ mapId: 'town', x: 13, y: 16, running: true }, [], [
+      { typeId: 'running-shoes', quantity: 1, status: 'IDLE' },
+    ]);
+    expect(running).toContain('跑步中');
+    expect(running).not.toContain('按住 Shift 跑步');
   });
 });

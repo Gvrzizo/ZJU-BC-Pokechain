@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useWorldStore } from '@/stores/world';
 
 /**
- * 世界 HUD（叠在游戏画面左上角，不拦截鼠标）：当前地图/区域名 + 等级带常驻，
+ * 世界 HUD（叠在游戏画面左侧，不拦截鼠标）：当前地图/区域名 + 等级带常驻，
  * 传说区换特殊配色并显示"传说宝可梦的气息…"与可捕捉对象，跨图时在上方弹一条横幅。
+ *
+ * **自动避让**：玩家走进地图的"左半 + 上三分之一"区域时，卡片平滑滑到右上角
+ * （判定在 world store 的 `hudAvoidsPlayer`，只看玩家在图里的相对位置，
+ * 所以大地图跟着相机走、小图相机居中两种情况表现一致），离开该区域即滑回。
  */
 const world = useWorldStore();
 const pokemon = usePokemonStore();
@@ -39,11 +43,50 @@ watch(
 );
 
 onBeforeUnmount(clearTimer);
+
+/**
+ * 避让平移的距离 = 容器宽度（HUD 覆盖整块游戏画面，宽度就是画面宽）。
+ * 只能量出来：卡片宽度由内容决定（`100%` 在平移里没有参照物）。
+ * SSR / 单测没有真实布局时按 0 处理，此时 `--hud-width` 由 CSS 兜底。
+ */
+const hudWidth = ref(0);
+const hudEl = ref<HTMLElement | null>(null);
+
+function measure() {
+  hudWidth.value = hudEl.value?.clientWidth ?? 0;
+}
+
+let resizeObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+  measure();
+  if (typeof ResizeObserver !== 'undefined' && hudEl.value) {
+    resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(hudEl.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+});
 </script>
 
 <template>
-  <div class="world-hud">
-    <div class="px-panel px-panel--dark hud-card" :class="{ 'hud-card--legendary': !!legendary }">
+  <div
+    ref="hudEl"
+    class="world-hud"
+    :style="hudWidth > 0 ? { '--hud-width': `${hudWidth}px` } : undefined"
+  >
+    <div
+      class="px-panel px-panel--dark hud-card"
+      :class="{
+        'hud-card--legendary': !!legendary,
+        'hud-card--right': world.hudAvoidsPlayer,
+      }"
+      data-testid="world-hud-card"
+      :data-hud-side="world.hudAvoidsPlayer ? 'right' : 'left'"
+    >
       <div class="hud-name">{{ world.mapName }}</div>
       <div class="hud-line">
         <span v-if="zoneLine">{{ zoneLine }}</span>
@@ -59,7 +102,12 @@ onBeforeUnmount(clearTimer);
           你已经收服过它了（同一只传说不会再次出现）
         </div>
       </div>
-      <div class="mono hud-coord text-dim">({{ world.position.x }}, {{ world.position.y }})</div>
+      <div class="mono hud-coord text-dim">
+        ({{ world.position.x }}, {{ world.position.y }})
+        <span v-if="pokemon.hasRunningShoes" class="hud-run">
+          {{ world.isRunning ? '跑步中' : '按住 Shift 跑步' }}
+        </span>
+      </div>
     </div>
 
     <div v-if="banner" class="hud-banner" :class="`hud-banner--${banner.tone}`">
@@ -85,6 +133,13 @@ onBeforeUnmount(clearTimer);
   padding: 6px 10px;
   font-size: var(--px-fs-sm);
   line-height: var(--px-lh-tight);
+  /* 自动避让：只动 transform（合成层平滑滑动，不触发布局、不打断 Phaser 画布） */
+  transition: transform 0.28s ease-out;
+}
+
+/* 避让状态：整张卡片平移到右上角（左右各留 8px；--hud-width 是画面宽度，SSR 时退回视口宽） */
+.hud-card--right {
+  transform: translateX(calc(var(--hud-width, 100vw) - 100% - 16px));
 }
 
 .hud-card--legendary {
@@ -122,6 +177,12 @@ onBeforeUnmount(clearTimer);
 
 .hud-coord {
   margin-top: 2px;
+}
+
+/* 跑鞋提示 / 跑步状态（拿到跑鞋之后才显示） */
+.hud-run {
+  margin-left: 6px;
+  color: var(--gba-yellow);
 }
 
 .hud-banner {

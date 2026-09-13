@@ -3,6 +3,7 @@ import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorat
 import { identityForUser } from '../fabric/chain.types';
 import { UpdateMeDto } from '../auth/dto/auth.dto';
 import { ClaimStarterDto } from './dto/users.dto';
+import { RunningShoesService } from './running-shoes.service';
 import { StarterService } from './starter.service';
 import { UsersService } from './users.service';
 
@@ -11,6 +12,7 @@ export class UsersController {
   constructor(
     private readonly users: UsersService,
     private readonly starters: StarterService,
+    private readonly runningShoes: RunningShoesService,
   ) {}
 
   @Get('me')
@@ -27,6 +29,15 @@ export class UsersController {
   @Post('me/starter')
   claimStarter(@CurrentUser() auth: AuthUser, @Body() dto: ClaimStarterDto) {
     return this.starters.claim(identityForUser(auth), dto.speciesId);
+  }
+
+  /**
+   * 跑鞋：起始镇「妈妈」赠送的一次性道具（新老账号都可领）。
+   * 幂等——重复领取返回已有的那一份（`claimed:false`），不会报错也不会多发。
+   */
+  @Post('me/running-shoes')
+  claimRunningShoes(@CurrentUser() auth: AuthUser) {
+    return this.runningShoes.claim(identityForUser(auth));
   }
 
   @Patch('me')

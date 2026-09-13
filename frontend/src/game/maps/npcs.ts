@@ -14,6 +14,8 @@ export interface NpcPalette {
 export const NPC_SPRITES: Record<string, NpcPalette> = {
   /** 宝可梦中心护士（白帽 + 红十字） */
   nurse: { hair: '#f0a8c8', shirt: '#ffffff', pants: '#f0a8c8', skin: '#f8d0a0', cap: '#ffffff', accent: '#d84040' },
+  /** 主角的妈妈（起始镇民居，赠送跑鞋；红发 + 米色围裙，贴近原作 mom 的配色） */
+  mom: { hair: '#b8503c', shirt: '#e8b8a0', pants: '#8a5a40', skin: '#f8d0a0', accent: '#f0e8d8' },
   /** 道具店店员 */
   clerk: { hair: '#4a3420', shirt: '#4a74d0', pants: '#384858', skin: '#f8d0a0', accent: '#f8c848' },
   elder: { hair: '#e0e0e0', shirt: '#a8783c', pants: '#5c4a34', skin: '#e8c8a0', accent: '#6b4a2f' },

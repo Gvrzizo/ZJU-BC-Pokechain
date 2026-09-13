@@ -175,16 +175,24 @@ export class StarterService {
     }
   }
 
-  /** 礼包：每个 typeId 一个固定 idemKey —— 重复调用只会拿回首次的结果，不会重复铸造。 */
-  private async grantGift(playerId: string): Promise<ItemState[]> {
+  /**
+   * 发道具：每个 typeId 一个固定 idemKey —— 重复调用只会拿回首次的结果，不会重复铸造。
+   * 礼包与跑鞋（`RunningShoesService`）共用这段"一次性发放"机制，避免两处各自实现幂等。
+   * `giftItemId` 可给出确定到玩家的堆叠 ID（跑鞋用；缺省随机 ID 由链上合并堆叠处理）。
+   */
+  async grantGift(
+    playerId: string,
+    giftList: ReadonlyArray<{ typeId: string; quantity: number }> = STARTER_GIFT,
+    giftItemId: (typeId: string) => string = () => `i_${randomUUID()}`,
+  ): Promise<ItemState[]> {
     const granted: ItemState[] = [];
-    for (const gift of STARTER_GIFT) {
+    for (const gift of giftList) {
       const type = getItemType(gift.typeId);
       granted.push(
         await this.contract.mintItem(
           SYSTEM_IDENTITY,
           {
-            id: `i_${randomUUID()}`,
+            id: giftItemId(gift.typeId),
             playerId,
             typeId: gift.typeId,
             quantity: gift.quantity,

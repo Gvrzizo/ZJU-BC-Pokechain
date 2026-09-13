@@ -46,6 +46,10 @@ export const ITEM_TYPES: Record<string, ItemTypeDef> = Object.fromEntries(
     I('ruins-key', 'Ruins Key', '遗迹之钥', 'key'),
     I('island-key', 'Island Key', '岛之钥', 'key'),
     I('birth-key', 'Birth Island Ticket', '诞生岛船票', 'key'),
+    // 跑鞋（kind='key'）：**非消耗品**，一次性领取（POST /users/me/running-shoes，起始镇「妈妈」赠送），
+    // 持有即解锁野外按住 Shift 跑步（速度 ×2）。不上架也不可回收（见 shop.data.ts），
+    // 与钥匙同族但**不参与**任何进入校验；不可使用（POST /items/:id/use → NOT_USABLE）。
+    I('running-shoes', 'Running Shoes', '跑鞋', 'key'),
   ].map((i) => [i.typeId, i]),
 );
 

@@ -15,6 +15,9 @@ import { getItemType, ITEM_TYPES } from '../game-data/items.data';
  * 传说区钥匙（kind='key'，2026-09）：**上架但不回收**——每把 5000P 是长线积分 sink
  * （约等于月级目标），且钥匙是可交易的稀缺品，回收价会凭空造出积分 faucet。
  * 回收排除见 `shopSellPrice`。
+ *
+ * 跑鞋（`running-shoes`）：**既不上架也不回收**——它只由起始镇「妈妈」赠送
+ * （POST /users/me/running-shoes，一次性幂等），既不是 sink 也不该被回收换成积分。
  */
 export const SHOP_PRICES: Readonly<Record<string, number>> = {
   'poke-ball': 50,

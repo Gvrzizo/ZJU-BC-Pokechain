@@ -232,7 +232,7 @@ import { t, monName, moveName, itemName, natureName } from '@/composables/useI18
 | 路由 | 说明 |
 |---|---|
 | `/login` `/register` | 像素风表单；JWT 存 pinia + localStorage；axios 拦截器带 token、变更请求注入 `X-Nonce`(crypto.randomUUID) / `X-Timestamp`；401 自动 refresh 重放 |
-| `/game` | Phaser 主界面 + Vue HUD（`WorldHud.vue`：地图名 / 区域等级带 / 传说提示 / 跨图横幅）。BootScene（manifest + sha256 校验 + 占位生成 + world 素材包）→ OverworldScene（**15 张数据驱动地图**：未白镇 / 7 块野外 / 7 张传说区内部图；方向键/WASD 网格行走、空格对话与路牌、门口与楼梯换图、钥匙门控、遇敌地形随机遇敌 → `POST /capture/encounter` → 捕捉覆盖层） |
+| `/game` | Phaser 主界面 + Vue HUD（`WorldHud.vue`：地图名 / 区域等级带 / 传说提示 / 跨图横幅；玩家走到地图左上区域时卡片自动滑到右上角避让）。BootScene（manifest + sha256 校验 + 占位生成 + world 素材包）→ OverworldScene（**15 张数据驱动地图**：未白镇 / 7 块野外 / 7 张传说区内部图；方向键/WASD 网格行走、空格对话与路牌、门口与楼梯换图、钥匙门控、遇敌地形随机遇敌 → `POST /capture/encounter` → 捕捉覆盖层；起始镇民居门口的「妈妈」赠送**跑鞋**（`POST /users/me/running-shoes`，一次性幂等），拿到后**按住 Shift 跑步**——移动与行走动画帧率 ×2）。页面用 `<KeepAlive :include="['GameView']">` 保活：切走时 Phaser `loop.sleep()` + 音频暂停，切回来 resume 不重跑 BootScene，超过 20 分钟未回则销毁重建 |
 | `/bag` | 道具列表与使用（`POST /items/:id/use`，可选目标宝可梦） |
 | `/pokedex` | 图鉴列表 + 详情，已拥有高亮（`GET /pokedex`） |
 | `/team` | 我的宝可梦网格 + 详情（IV/性格/技能/dnaHash/链上状态徽章），训练 / 进化 / 放生（二次确认） |

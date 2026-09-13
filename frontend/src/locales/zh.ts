@@ -429,6 +429,7 @@ export const zh: LocaleDictionary = {
     'ruins-key': '遗迹之钥',
     'island-key': '岛之钥',
     'birth-key': '诞生岛船票',
+    'running-shoes': '跑鞋',
   },
 
   natures: {

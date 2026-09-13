@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, KeepAlive } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { logout } from '@/api/auth';
@@ -60,7 +60,13 @@ async function onLogout() {
       </button>
       <a href="#" @click.prevent="onLogout">{{ t('nav.logout') }}</a>
     </nav>
-    <router-view />
+    <router-view v-slot="{ Component }">
+      <!-- 游戏页保活：切走时 Phaser sleep（不重跑 BootScene），切回来直接 resume；
+           超过 20 分钟未回由 GameView 自己失效重建（见 views/GameView.vue） -->
+      <KeepAlive :include="['GameView']">
+        <component :is="Component" />
+      </KeepAlive>
+    </router-view>
   </template>
 </template>
 

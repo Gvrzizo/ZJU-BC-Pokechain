@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { getMyItems } from '@/api/items';
 import { getMyPokemon, getPokedex } from '@/api/pokemon';
+import { ownsRunningShoes } from '@/game/running';
 import type { Item, PokedexEntry, Pokemon } from '@/types';
 
 export const usePokemonStore = defineStore('pokemon', {
@@ -14,6 +15,8 @@ export const usePokemonStore = defineStore('pokemon', {
   getters: {
     balls: (s): Item[] =>
       s.items.filter((i) => i.typeId.includes('ball') && i.quantity > 0 && i.status === 'IDLE'),
+    /** 跑鞋（起始镇妈妈赠送）：持有就能按住 Shift 跑步 */
+    hasRunningShoes: (s): boolean => ownsRunningShoes(s.items),
     ownedSpeciesIds: (s): Set<number> => new Set(s.myPokemon.map((p) => p.speciesId)),
   },
   actions: {

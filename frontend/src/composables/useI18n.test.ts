@@ -25,6 +25,7 @@ const ITEM_TYPE_IDS = [
   'thunder-stone', 'water-stone', 'fire-stone', 'tm-thunderbolt', 'tm-flamethrower', 'tm-surf',
   'bottle-cap', 'gold-bottle-cap', 'rare-candy',
   'sky-key', 'ocean-key', 'magma-key', 'ruins-key', 'island-key', 'birth-key',
+  'running-shoes',
 ];
 const NATURE_IDS = [
   'hardy', 'lonely', 'brave', 'adamant', 'naughty', 'bold', 'docile', 'relaxed', 'impish', 'lax',
@@ -145,7 +146,7 @@ describe('词典完整性', () => {
     expect(monName('Deoxys')).toBe('Deoxys');
   });
 
-  it('技能 24 条 / 道具 21 条 / 性格 25 条，与后端清单一一对应', () => {
+  it('技能 24 条 / 道具 22 条 / 性格 25 条，与后端清单一一对应', () => {
     expect(Object.keys(MESSAGES.zh.moves).sort()).toEqual([...MOVE_IDS].sort());
     expect(Object.keys(MESSAGES.zh.items).sort()).toEqual([...ITEM_TYPE_IDS].sort());
     expect(Object.keys(MESSAGES.zh.natures).sort()).toEqual([...NATURE_IDS].sort());

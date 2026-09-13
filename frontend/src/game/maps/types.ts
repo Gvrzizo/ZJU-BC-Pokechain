@@ -75,7 +75,16 @@ export interface NpcDef {
   sprite: string;
   name: string;
   lines: string[];
-  action?: 'heal' | 'shop';
+  /**
+   * 对话结束后的动作：`heal` 全队治疗 / `shop` 跳商店 / `talk` 纯剧情
+   * （跑鞋这类"一次性事件"由地图对象的 `event` 字段指名，见下）。
+   */
+  action?: 'heal' | 'shop' | 'talk';
+  /**
+   * 一次性事件名（`action: 'talk'` 时生效）：引擎按它执行具体逻辑，
+   * 目前支持 `'running-shoes'`（起始镇「妈妈」赠送跑鞋，见 `game/running.ts`）。
+   */
+  event?: 'running-shoes';
   facing?: Facing;
 }
 
