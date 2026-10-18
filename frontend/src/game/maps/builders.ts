@@ -167,18 +167,18 @@ export function pond(
   blob(grid, T.water, cx, cy, rx, ry, rng, { jitter: 0.18, onlyOn: rim ? rim.tile : null });
 }
 
-/** 折线道路：`pts` 是每段走廊的拐点（左上角），转角处自动叠满拐角方块 */
+/** 折线道路：`pts` 是每段走廊的拐点（左上角），转角处叠满 width×width 方块；不向起点外多挖一格 */
 export function road(grid: Grid, pts: readonly TilePoint[], tile: number, width = 2): void {
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = pts[i];
     const b = pts[i + 1];
     if (a.y === b.y) {
-      const x0 = Math.min(a.x, b.x) - (width - 1);
-      const x1 = Math.max(a.x, b.x) + (width - 1);
+      const x0 = Math.min(a.x, b.x);
+      const x1 = Math.max(a.x, b.x) + width - 1;
       fillRect(grid, x0, a.y, x1 - x0 + 1, width, tile);
     } else if (a.x === b.x) {
-      const y0 = Math.min(a.y, b.y) - (width - 1);
-      const y1 = Math.max(a.y, b.y) + (width - 1);
+      const y0 = Math.min(a.y, b.y);
+      const y1 = Math.max(a.y, b.y) + width - 1;
       fillRect(grid, a.x, y0, width, y1 - y0 + 1, tile);
     }
   }

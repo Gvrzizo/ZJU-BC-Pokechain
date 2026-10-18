@@ -14,7 +14,6 @@ import { useRouter } from 'vue-router';
 import { createGame, destroyGame } from '@/game/createGame';
 import { gameBus, BUS_EVENTS } from '@/game/bus';
 import { RUNNING_SPEED_MULTIPLIER, setRunningShoes } from '@/game/running';
-import { useAssetsStore } from '@/stores/assets';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useWorldStore } from '@/stores/world';
 import CaptureOverlay from '@/components/CaptureOverlay.vue';
@@ -24,7 +23,6 @@ const gameHost = ref<HTMLElement | null>(null);
 const capturing = ref(false);
 /** 首次拿到跑鞋的提示（HUD 里也常驻一条"按住 Shift 跑步"） */
 const runHint = ref('');
-const assets = useAssetsStore();
 const pokemonStore = usePokemonStore();
 const world = useWorldStore();
 const router = useRouter();
@@ -141,51 +139,38 @@ onActivated(() => {
 </script>
 
 <template>
-  <div class="page">
-    <div class="game-wrap px-panel" style="padding: 8px; position: relative">
+  <div class="page game-page">
+    <div class="journey-heading">
+      <div><span class="journey-label">HOENN · FIELD GUIDE</span><h1>{{ world.mapName }}</h1></div>
+      <div class="journey-links"><router-link to="/team">查看队伍 →</router-link><router-link to="/bag">打开背包 →</router-link></div>
+    </div>
+    <div class="game-wrap px-panel">
       <div ref="gameHost" class="game-host" />
       <WorldHud />
       <CaptureOverlay v-if="capturing" @done="onCaptureDone" />
     </div>
-    <div class="row mt-8" style="justify-content: space-between">
-      <div class="px-panel px-panel--dark" style="padding: 8px 12px; font-size: var(--px-fs-sm)">
-        方向键 / WASD 移动 · 空格 / Z 对话与路牌 · 踩进草丛（深色）遇敌 · 门口与楼梯换图 ·
-        {{ pokemonStore.hasRunningShoes ? '按住 Shift 跑步 · ' : '' }}当前：{{ world.mapName }}
-      </div>
-      <div class="px-panel" style="padding: 8px 12px; font-size: var(--px-fs-sm)">
-        素材：vendor {{ Object.keys(assets.loadedFromVendor).length }} / 占位
-        {{ assets.placeholderKeys.length }}
-        <span v-if="assets.manifestError" class="text-dim">（{{ assets.manifestError }}）</span>
-      </div>
+    <div class="game-guide">
+      <div><kbd>WASD</kbd><span>移动</span><kbd>SPACE / Z</kbd><span>对话</span><template v-if="pokemonStore.hasRunningShoes"><kbd>SHIFT</kbd><span>跑步</span></template></div>
+      <span class="terrain-key"><i />深草中会遇到宝可梦</span>
     </div>
-    <p v-if="runHint" class="px-panel run-hint" style="font-size: var(--px-fs-sm)">
-      {{ runHint }}
-    </p>
+    <p v-if="runHint" class="px-panel run-hint" role="status">{{ runHint }}</p>
   </div>
 </template>
 
 <style scoped>
-.game-wrap {
-  width: fit-content;
-  margin: 0 auto;
-}
-
-.game-host {
-  width: 960px;
-  max-width: 100%;
-  aspect-ratio: 3 / 2;
-}
-
-.game-host :deep(canvas) {
-  image-rendering: pixelated;
-  display: block;
-  margin: 0 auto;
-}
-
-.run-hint {
-  width: fit-content;
-  margin: 8px auto 0;
-  padding: 6px 12px;
-  color: var(--gba-yellow);
-}
+.game-page { max-width: 1040px; }
+.journey-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.journey-label { color: var(--px-muted); font-size: 8px; letter-spacing: 1px; }
+.journey-heading h1 { font-size: 24px; margin: 4px 0 0; }
+.journey-links { display: flex; gap: 24px; flex-wrap: wrap; }
+.game-wrap { width: 100%; padding: 8px; background: #516f69; box-shadow: inset 0 0 0 2px #a6bba3, inset 0 0 0 4px #283f40, 0 6px 0 #354f5c30; }
+.game-host { width: 100%; max-width: 960px; aspect-ratio: 3 / 2; margin: auto; }
+.game-host :deep(canvas) { image-rendering: pixelated; display: block; margin: 0 auto; }
+.game-guide { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 4px; color: var(--px-muted); }
+.game-guide > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+kbd { padding: 4px 8px; background: var(--gba-cream); border: 1px solid var(--px-border); border-bottom-width: 3px; font: inherit; font-size: 8px; color: var(--gba-ink); }
+.terrain-key { display: inline-flex; align-items: center; gap: 8px; }
+.terrain-key i { width: 12px; height: 12px; background: var(--gba-green); box-shadow: inset 2px 2px 0 var(--gba-grass); }
+.run-hint { margin: 8px 0 0; padding: 16px; color: var(--gba-green); }
+@media (max-width: 600px) { .journey-links { gap: 12px; font-size: 12px; } .journey-heading { align-items: flex-start; } .journey-heading h1 { font-size: 16px; } .journey-label { letter-spacing: 0; } }
 </style>

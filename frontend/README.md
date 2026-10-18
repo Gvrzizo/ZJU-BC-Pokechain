@@ -259,13 +259,19 @@ src/
   stores/      pinia：auth（JWT 持久化）、assets（manifest/占位状态）、pokemon、battle（WS 驱动实时态）、zone（区域等级带）、world（当前地图/坐标/横幅）
   locales/     zh.ts / en.ts 词典（386 宝可梦 + 43 技能 + 12 道具 + 25 性格 + UI 文案）
   composables/ useI18n（t/monName/moveName/itemName/natureName，语言存 localStorage，默认中文）
-  game/        Phaser：scenes/BootScene、OverworldScene（多地图引擎）、BattleScene；maps/（地图数据 + 瓦片语义 + 传送查询）、gates.ts（传说区钥匙）、dialog.ts + ui/DialogBox.ts（对话框）、world-assets.ts / world-textures.ts（world 素材契约与程序化瓦片）、net/BattleSocket.ts、textures.ts、mon-assets.ts、cries.ts、bus.ts
-  ui/          像素风组件：PixelButton、PixelDialog、HpBar、SpriteIcon、ItemIcon（道具图标 + 占位回退）
+  game/        Phaser：scenes/BootScene、OverworldScene（多地图引擎）、BattleScene；maps/（地图数据 + 瓦片语义 + 传送查询）、gates.ts（传说区钥匙）、dialog.ts + ui/DialogBox.ts（对话框）、world-assets.ts / world-textures.ts（world 素材契约与程序化瓦片）、world-art.ts（邻接地形/完整建筑）、character-art.ts（四向人物）、net/BattleSocket.ts、textures.ts、mon-assets.ts、cries.ts、bus.ts
+  ui/          像素风组件：PixelButton、PixelDialog、HpBar、SpriteIcon、ItemIcon + ItemArtwork（道具图标 + 自绘回退）、PixelIcon（导航图标）
   components/  CaptureOverlay、WorldHud、WagerPicker、ItemActionRow
-  views/       12 个路由页面
+  views/       14 个路由页面（含登录/注册）
   styles/      pixel.css（全局像素风：字号阶梯变量、GBA 配色、像素边框/按钮/HP 条）、fonts.css（@font-face + 度量对齐）
   tools/       align-cjk-font.py（把中文像素字体字形上移 2 格，与 Press Start 2P 基线对齐）
 
 public/
   fonts/       自托管像素字体（Press Start 2P + Fusion Pixel）+ OFL 许可证，来源见「字体」一节
 ```
+
+## 丰缘视觉改造（2026-10-18）
+
+视觉规范与本轮验证状态见 [visual-design.md](../docs/visual-design.md)。`world-art.ts` 处理相邻地形和完整建筑，`character-art.ts` 共用四向人物绘制；主角自绘帧为 32×40，vendor 帧仍接受 32×32。导航使用 `PixelIcon`，道具缺图使用 `ItemArtwork`，自绘登录场景位于 `public/assets/ui/`。全站共享主题、响应式卡片、焦点和间距规则。
+
+按用户要求，本轮未运行任何测试、构建、类型检查或浏览器验证；测试数量未重新实测。

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="192" viewBox="0 0 160 96" shape-rendering="crispEdges">
+  <defs>
+    <g id="tree">
+      <path d="M7 17h4v7H7z" fill="#8f7957"/><path d="M5 0h8v2h3v4h2v10h-3v3H3v-3H0V6h2V2h3z" fill="#326b56"/>
+      <path d="M5 2h7v3h3v7h-3v4H4v-4H2V6h3z" fill="#55946c"/>
+      <path d="M5 3h6v2H5zM3 6h6v3H3zM9 10h5v2H9z" fill="#8bc287"/>
+    </g>
+    <g id="flower"><path d="M2 3h1v3H2z" fill="#4b8964"/><path d="M1 1h3v3H1zM2 0h1v1H2z" fill="#faf3dc"/><path d="M2 2h1v1H2z" fill="#e6b86d"/></g>
+  </defs>
+  <path d="M8 0h144v4h4v4h4v80h-4v4h-4v4H8v-4H4v-4H0V8h4V4h4z" fill="#8bbaa0"/>
+  <path d="M8 4h144v4h4v80h-4v4H8v-4H4V8h4z" fill="#bedbb0"/>
+  <path d="M76 45h12v20h44v10H88v17H76V75H20V65h56z" fill="#e5d2a2"/>
+  <path d="M76 45h2v20H20v2h58v8h-2zM88 65h44v2H88z" fill="#c7b989"/>
+  <path d="M42 23h54v32H42z" fill="#6c8275"/><path d="M44 25h50v28H44z" fill="#f8edcf"/>
+  <path d="M40 13h58v4h4v16H36V17h4z" fill="#a4595d"/>
+  <path d="M42 15h54v4h4v10H38V19h4z" fill="#dd8174"/>
+  <path d="M43 16h52v2H43zM39 22h60v2H39zM38 28h62v2H38z" fill="#f2b295"/>
+  <path d="M49 38h12v10H49zM77 38h12v10H77z" fill="#668f98"/>
+  <path d="M51 40h8v6h-8zM79 40h8v6h-8z" fill="#b1d8cc"/>
+  <path d="M65 36h8v19h-8z" fill="#526b78"/><path d="M67 38h4v12h-4z" fill="#7fa9b3"/>
+  <path d="M63 55h12v4H63z" fill="#eee5c2"/><path d="M65 59h8v8h-8z" fill="#e5d2a2"/>
+  <path d="M108 38h26v2h8v6h4v12h-4v4h-32v-4h-6V44h4z" fill="#809f8c"/>
+  <path d="M110 40h22v2h8v6h4v8h-4v4h-30v-4h-4V46h4z" fill="#70adb9"/>
+  <path d="M114 44h12v2h-12zM128 52h10v2h-10zM110 54h8v2h-8z" fill="#c0e2d8"/>
+  <use href="#tree" x="12" y="10"/><use href="#tree" x="112" y="8"/><use href="#tree" x="132" y="15"/>
+  <use href="#tree" x="8" y="38"/><use href="#tree" x="25" y="42"/><use href="#tree" x="135" y="65"/>
+  <use href="#tree" x="8" y="69"/><use href="#tree" x="29" y="71"/>
+  <use href="#flower" x="49" y="69"/><use href="#flower" x="54" y="73"/><use href="#flower" x="58" y="69"/>
+  <use href="#flower" x="100" y="78"/><use href="#flower" x="106" y="81"/><use href="#flower" x="111" y="77"/>
+  <path d="M80 73h6v1h1v4h-1v2h-6v-2h-1v-4h1z" fill="#e67b72"/>
+  <path d="M80 78h6v3h-6z" fill="#efc895"/><path d="M79 81h8v5h-8z" fill="#507e93"/>
+  <path d="M80 86h2v3h-2zm4 0h2v3h-2z" fill="#465a66"/>
+</svg>

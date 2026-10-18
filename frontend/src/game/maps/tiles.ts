@@ -57,7 +57,7 @@ export const BLOCKED_TILES: readonly TileId[] = [
 
 const BLOCKED = new Set<number>(BLOCKED_TILES.map((id) => T[id]));
 
-/** 屋顶画在玩家之上（第二层），避免玩家"踩"在屋顶上 */
+/** 屋顶语义标记（兼容瓦片工具）；当前 world-art 整栋绘制，通行由 BLOCKED_TILES 阻挡 */
 export const OVERLAY_TILES: readonly TileId[] = ['roof'];
 
 const OVERLAY = new Set<number>(OVERLAY_TILES.map((id) => T[id]));

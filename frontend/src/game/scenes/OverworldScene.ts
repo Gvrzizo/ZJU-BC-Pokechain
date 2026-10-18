@@ -9,14 +9,12 @@ import { BUS_EVENTS, gameBus } from '../bus';
 import { DialogSession } from '../dialog';
 import { keyForMap, keyGateStatus, keyName, missingKeyLines, rememberPassage } from '../gates';
 import {
-  RUNNING_SPEED_MULTIPLIER,
   hasRunningShoes,
   isRunning,
   setRunningShoes,
   stepDuration,
 } from '../running';
 import {
-  BLOCKED_TILES,
   START_MAP_ID,
   T,
   doorAt,
@@ -24,7 +22,6 @@ import {
   frontOf,
   getMapDef,
   isEncounterTile,
-  isOverlayIndex,
   isWalkable,
   warpAt,
   type BiomeId,
@@ -39,7 +36,7 @@ import {
 import { TILE } from '../textures';
 import { DialogBox } from '../ui/DialogBox';
 import { npcTextureKey } from '../world-textures';
-import { worldTilesetKey } from '../world-assets';
+import { makeMapArt } from '../world-art';
 
 /** 遇敌地形的中文名（路牌文案用） */
 const TERRAIN_LABEL: Partial<Record<TileId, string>> = {
@@ -53,8 +50,6 @@ const TERRAIN_LABEL: Partial<Record<TileId, string>> = {
 /** 每格行走耗时（毫秒）与撞墙动画时长；按住 Shift（有跑鞋）时按 `RUNNING_SPEED_MULTIPLIER` 折半 */
 const STEP_MS = 150;
 const BUMP_MS = 120;
-/** 跑步时行走动画的帧率（走路 8 帧/秒，同步 ×2） */
-const WALK_FRAME_RATE = 8;
 /** 对话翻页的最小间隔，避免刚开口就被同一次按键翻过去 */
 const DIALOG_COOLDOWN_MS = 170;
 
@@ -93,8 +88,6 @@ const BIOME_BG: Record<BiomeId, string> = {
  */
 export class OverworldScene extends Phaser.Scene {
   private mapDef!: MapDef;
-  private groundLayer?: Phaser.Tilemaps.TilemapLayer;
-  private overlayLayer?: Phaser.Tilemaps.TilemapLayer;
   private player!: Phaser.GameObjects.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -138,7 +131,6 @@ export class OverworldScene extends Phaser.Scene {
     this.buildTilemap();
     this.addAmbient();
     this.addEncounterHints();
-    this.addFacilityBadges();
     this.addNpcSprites();
     this.addPlayer();
 
@@ -149,6 +141,7 @@ export class OverworldScene extends Phaser.Scene {
     const boundsH = Math.max(mapH, this.scale.height);
     // 小图（塔内/遗迹）居中显示，而不是贴左上角露出大片底色
     cam.setBounds(-Math.max(0, (boundsW - mapW) / 2), -Math.max(0, (boundsH - mapH) / 2), boundsW, boundsH);
+    cam.setRoundPixels(true);
     cam.startFollow(this.player, true, 1, 1);
     cam.fadeIn(180, 0, 0, 0);
 
@@ -177,33 +170,7 @@ export class OverworldScene extends Phaser.Scene {
   // ─────────────────────────────────────────── 渲染
 
   private buildTilemap() {
-    const map = this.mapDef;
-    const tilesetKey = this.tilesetKey();
-    const terrain = this.make.tilemap({ data: map.grid, tileWidth: TILE, tileHeight: TILE });
-    const tileset = terrain.addTilesetImage('world', tilesetKey, TILE, TILE, 0, 0);
-    if (!tileset) return;
-    this.groundLayer = terrain.createLayer(0, tileset, 0, 0) ?? undefined;
-    if (this.groundLayer) {
-      this.groundLayer.setCollision(BLOCKED_TILES.map((id) => T[id]));
-      this.groundLayer.setDepth(1);
-    }
-
-    // 屋顶单独一层画在玩家之上（玩家在建筑后面时被屋顶挡住）
-    if (map.grid.some((row) => row.some((v) => isOverlayIndex(v)))) {
-      const overlayGrid = map.grid.map((row) => row.map((v) => (isOverlayIndex(v) ? v : -1)));
-      const roofMap = this.make.tilemap({ data: overlayGrid, tileWidth: TILE, tileHeight: TILE });
-      const roofTileset = roofMap.addTilesetImage('world', tilesetKey, TILE, TILE, 0, 0);
-      if (roofTileset) {
-        this.overlayLayer = roofMap.createLayer(0, roofTileset, 0, 0) ?? undefined;
-        this.overlayLayer?.setDepth(3);
-      }
-    }
-  }
-
-  /** 该生物群系的瓦片集（vendor 叠过程序化底图；没有也一定有程序化兜底） */
-  private tilesetKey(): string {
-    const key = worldTilesetKey(this.mapDef.biome);
-    return this.textures.exists(key) ? key : worldTilesetKey('grass');
+    this.add.image(0, 0, makeMapArt(this, this.mapDef)).setOrigin(0).setDepth(1);
   }
 
   private addAmbient() {
@@ -215,82 +182,27 @@ export class OverworldScene extends Phaser.Scene {
       .setDepth(4);
   }
 
-  /** 遇敌地形提示：在会遇敌的格子上铺一层极淡的呼吸高光。
-   * 素材（vendor 或程序化）怎么画都能让玩家一眼看出"哪里能遇到宝可梦"——
-   * 洞窟的碎石地 / 塔顶的祭坛在部分瓦片集里跟普通地面很像。
-   */
+  /** 仅祭坛保留低强度提示；草丛用草叶轮廓识别，不再整片闪白。 */
   private addEncounterHints() {
-    const config = this.mapDef.encounter;
-    if (!config) return;
-    const tiles = new Set(config.tiles.map((id) => T[id]));
+    if (!this.mapDef.encounter?.tiles.includes('altar')) return;
     const graphics = this.add.graphics().setDepth(1.5);
-    graphics.fillStyle(0xffffff, 0.12);
+    graphics.fillStyle(0xfff4cf, 0.45);
     for (let y = 0; y < this.mapDef.height; y++) {
       for (let x = 0; x < this.mapDef.width; x++) {
-        if (tiles.has(this.mapDef.grid[y][x])) graphics.fillRect(x * TILE, y * TILE, TILE, TILE);
+        if (this.mapDef.grid[y][x] === T.altar && (x + y) % 3 === 0) {
+          graphics.fillRect(x * TILE + 14, y * TILE + 12, 4, 4);
+        }
       }
     }
-    this.tweens.add({
-      targets: graphics,
-      alpha: { from: 0.75, to: 1 },
-      duration: 950,
-      yoyo: true,
-      repeat: -1,
-    });
-  }
-
-  /**
-   * 建筑徽记：宝可梦中心 = 白底红十字，道具店 = 黄底「道具」招牌。
-   * 画在屋顶之上（depth 3.5+），vendor 瓦片集把屋顶画成什么样都能一眼分清两家店。
-   */
-  private addFacilityBadges() {
-    for (const obj of this.mapDef.objects) {
-      if (obj.kind !== 'door' || obj.building === 'house') continue;
-      const roofY = obj.y - 1;
-      const span = this.roofSpan(obj.x, roofY);
-      if (!span) continue;
-      const isCenter = obj.building === 'center';
-      const centerX = ((span.from + span.to + 1) / 2) * TILE;
-      const centerY = roofY * TILE + TILE / 2;
-      this.add
-        .rectangle(centerX, centerY, TILE + (isCenter ? 0 : 8), TILE - 10, isCenter ? 0xf8f0d8 : 0xf8c848)
-        .setStrokeStyle(3, 0x282828)
-        .setDepth(3.5);
-      if (isCenter) {
-        this.add.rectangle(centerX, centerY, 6, TILE - 18, 0xd84040).setDepth(3.6);
-        this.add.rectangle(centerX, centerY, TILE - 16, 6, 0xd84040).setDepth(3.6);
-      } else {
-        this.add
-          .text(centerX, centerY, '道具', {
-            fontFamily: '"Press Start 2P", "Fusion Pixel 12px", monospace',
-            fontSize: '12px',
-            color: '#282828',
-          })
-          .setOrigin(0.5)
-          .setDepth(3.6);
-      }
-    }
-  }
-
-  /** 门上方那一行屋顶的连续范围（用于把徽记摆到建筑正中） */
-  private roofSpan(doorX: number, row: number): { from: number; to: number } | null {
-    const grid = this.mapDef.grid;
-    if (row < 0 || !grid[row]) return null;
-    const anchor = [doorX, doorX - 1, doorX + 1].find((x) => x >= 0 && grid[row][x] === T.roof);
-    if (anchor === undefined) return null;
-    let from = anchor;
-    while (from - 1 >= 0 && grid[row][from - 1] === T.roof) from -= 1;
-    let to = anchor;
-    while (to + 1 < this.mapDef.width && grid[row][to + 1] === T.roof) to += 1;
-    return { from, to };
   }
 
   private addNpcSprites() {
     for (const obj of this.mapDef.objects) {
       if (obj.kind !== 'npc') continue;
-      const key = npcTextureKey(obj.sprite);
+      const directionalKey = `${npcTextureKey(obj.sprite)}:${obj.facing ?? 'down'}`;
+      const key = this.textures.exists(directionalKey) ? directionalKey : npcTextureKey(obj.sprite);
       const texture = this.textures.exists(key) ? key : npcTextureKey('elder');
-      this.add.image(obj.x * TILE + TILE / 2, obj.y * TILE + TILE / 2, texture).setDepth(2);
+      this.add.image(obj.x * TILE + TILE / 2, obj.y * TILE + TILE, texture).setOrigin(0.5, 1).setDepth(2 + obj.y / 1000);
     }
   }
 
@@ -298,11 +210,11 @@ export class OverworldScene extends Phaser.Scene {
     const anim = `hero-walk-${this.facing}`;
     this.player = this.add.sprite(
       this.tilePos.x * TILE + TILE / 2,
-      this.tilePos.y * TILE + TILE / 2,
+      this.tilePos.y * TILE + TILE,
       'hero',
       0,
     );
-    this.player.setDepth(2);
+    this.player.setOrigin(0.5, 1).setDepth(2 + this.tilePos.y / 1000);
     if (this.anims.exists(anim)) this.player.anims.play(anim, true);
     this.player.anims.stop();
   }
@@ -359,11 +271,12 @@ export class OverworldScene extends Phaser.Scene {
 
     this.moving = true;
     this.tilePos = next;
+    this.player.setDepth(2 + next.y / 1000);
     gameBus.emit(BUS_EVENTS.PLAYER_MOVED, { ...next, mapId: this.mapDef.id, running });
     this.tweens.add({
       targets: this.player,
       x: next.x * TILE + TILE / 2,
-      y: next.y * TILE + TILE / 2,
+      y: next.y * TILE + TILE,
       duration: stepDuration(STEP_MS, running),
       onComplete: () => {
         this.moving = false;

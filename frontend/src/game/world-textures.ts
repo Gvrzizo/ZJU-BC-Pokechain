@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
+import { drawCharacter } from './character-art';
+import type { Facing } from './maps/types';
 import { BIOMES, type BiomeId } from './maps';
-import { NPC_SPRITES, npcLook, type NpcPalette } from './maps/npcs';
+import { NPC_SPRITES, type NpcPalette } from './maps/npcs';
 import { TILE_SEMANTICS, type TileId } from './maps/tiles';
 import { worldTilesetKey, type WorldTilesetSpec } from './world-assets';
 
@@ -617,51 +619,25 @@ export function compositeVendorTiles(
 
 export { NPC_SPRITES, NPC_SPRITE_NAMES, npcLook, type NpcPalette } from './maps/npcs';
 
-/** 32×32 的 NPC 小人（2px 逻辑像素，GBA 观感；不走路、只有迎面朝向） */
-export function makeNpcTexture(scene: Phaser.Scene, key: string, look: NpcPalette): void {
+/** 自绘 NPC 带四个朝向；脚底固定在逻辑格的下沿。 */
+export function makeNpcTexture(scene: Phaser.Scene, key: string, look: NpcPalette, facing: Facing = 'down', role = ''): void {
   if (scene.textures.exists(key)) return;
-  const tex = scene.textures.createCanvas(key, TILE, TILE);
+  const tex = scene.textures.createCanvas(key, 32, 40);
   if (!tex) return;
   const ctx = tex.getContext();
   ctx.imageSmoothingEnabled = false;
-  const U = 2;
-  const u = (x: number, y: number, w: number, h: number, color: string) => {
-    ctx.fillStyle = color;
-    ctx.fillRect(x * U, y * U, w * U, h * U);
-  };
-  const outline = '#282828';
-  // 影子
-  ctx.fillStyle = 'rgba(40,40,40,0.25)';
-  ctx.fillRect(3 * U, 15 * U, 10 * U, U);
-  // 头
-  u(5, 3, 6, 5, look.skin);
-  u(5, 2, 6, 2, look.hair);
-  u(4, 3, 1, 2, look.hair);
-  u(11, 3, 1, 2, look.hair);
-  u(6, 5, 1, 1, outline);
-  u(9, 5, 1, 1, outline);
-  if (look.cap) {
-    u(4, 1, 8, 2, look.cap);
-    u(3, 3, 10, 1, look.cap);
-  }
-  // 身体
-  u(4, 8, 8, 5, look.shirt);
-  u(4, 8, 8, 1, look.accent ?? look.shirt);
-  u(3, 9, 1, 4, look.skin);
-  u(12, 9, 1, 4, look.skin);
-  // 腿与鞋
-  u(5, 13, 2, 2, look.pants);
-  u(9, 13, 2, 2, look.pants);
-  u(5, 15, 2, 1, outline);
-  u(9, 15, 2, 1, outline);
+  drawCharacter(ctx, 0, 0, look, facing, 0, role);
   tex.refresh();
 }
 
-/** 生成全部生物群系的程序化瓦片集与全部 NPC 占位贴图（已存在的 key 跳过） */
+/** 生成全部生物群系的程序化瓦片集与全部 NPC 四向自绘贴图（已存在的 key 跳过） */
 export function makeWorldPlaceholders(scene: Phaser.Scene): void {
   for (const biome of BIOMES) makeWorldTilesTexture(scene, worldTilesetKey(biome), biome);
   for (const [name, look] of Object.entries(NPC_SPRITES)) {
     makeNpcTexture(scene, `world-sprite:${name}`, look);
+    for (const facing of ['down', 'up', 'left', 'right'] as const) {
+      makeNpcTexture(scene, `world-sprite:${name}:${facing}`, look, facing, name);
+    }
   }
 }
 

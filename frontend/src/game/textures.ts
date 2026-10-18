@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { drawCharacter } from './character-art';
 import { MON_SIZE } from './mon-assets';
 import { RUNNING_SPEED_MULTIPLIER } from './running';
 
@@ -200,116 +201,22 @@ export function makeTilesTexture(scene: Phaser.Scene, key = 'tiles'): void {
   tex.refresh();
 }
 
-/** 主角配色（红/蓝宝石主角风：红帽、蓝衣、深色裤） */
-const HERO = {
-  outline: '#282828',
-  skin: '#f8d0a0',
-  skinShade: '#e0ac78',
-  hair: '#4a3420',
-  cap: '#d84040',
-  capShade: '#a82c2c',
-  capLight: '#f07070',
-  shirt: '#3050b0',
-  shirtShade: '#22398a',
-  shirtLight: '#4a74d0',
-  pants: '#384858',
-  shoe: '#282828',
-  bag: '#c8a048',
-  bagShade: '#a07830',
-};
-
-/**
- * 主角 4 方向 3 帧行走图：96x128，行序 [下,上,左,右]，每行 [站立,迈步A,迈步B]。
- * 每帧 32x32，以 2px 为逻辑像素（16×16 网格），贴近 GBA 角色观感。
- */
+/** 自绘主角：四方向三帧，32×40/帧。vendor 的 32×32 帧仍由 BootScene 接受。 */
 export function makeHeroSpritesheet(scene: Phaser.Scene, key = 'hero'): void {
   if (scene.textures.exists(key)) return;
-  const tex = scene.textures.createCanvas(key, TILE * 3, TILE * 4);
+  const tex = scene.textures.createCanvas(key, 96, 160);
   if (!tex) return;
   const ctx = tex.getContext();
   noSmooth(ctx);
-
-  const U = 2; // 逻辑像素
-
-  const drawFrame = (col: number, row: number, step: 0 | 1 | 2) => {
-    const ox = col * TILE;
-    const oy = row * TILE;
-    const mirror = row === 3; // 右向 = 左向镜像
-    const u = (x: number, y: number, w: number, h: number, c: string) => {
-      ctx.fillStyle = c;
-      ctx.fillRect(ox + (mirror ? (16 - x - w) : x) * U, oy + y * U, w * U, h * U);
-    };
-    const back = row === 1;
-    const side = row === 2 || row === 3;
-    const y0 = step === 0 ? 0 : 1; // 行走时整体起伏 2px
-    const leftLift = step === 1 ? 1 : 0;
-    const rightLift = step === 2 ? 1 : 0;
-
-    // 帽子：帽顶 + 帽檐
-    u(4, 1 + y0, 8, 1, HERO.capLight);
-    u(4, 2 + y0, 8, 1, HERO.cap);
-    u(3, 3 + y0, 10, 1, HERO.capShade);
-    // 头（比肩略窄，避免大头方块感）
-    if (back) {
-      u(5, 4 + y0, 6, 4, HERO.hair); // 背面：后脑头发
-      u(5, 7 + y0, 6, 1, HERO.hair);
-    } else if (side) {
-      u(5, 4 + y0, 6, 4, HERO.skin);
-      u(5, 4 + y0, 6, 1, HERO.hair); // 发际
-      u(9, 4 + y0, 2, 4, HERO.hair); // 后脑
-      u(5, 5 + y0, 1, 1, HERO.outline); // 单眼（朝前）
-      u(4, 6 + y0, 1, 1, HERO.skinShade); // 鼻尖
-      u(6, 7 + y0, 2, 1, HERO.skinShade); // 嘴
-    } else {
-      u(5, 4 + y0, 6, 4, HERO.skin);
-      u(5, 4 + y0, 6, 1, HERO.hair); // 刘海
-      u(4, 5 + y0, 1, 2, HERO.hair); // 鬓角
-      u(11, 5 + y0, 1, 2, HERO.hair);
-      u(6, 5 + y0, 1, 1, HERO.outline); // 眼睛
-      u(9, 5 + y0, 1, 1, HERO.outline);
-      u(7, 7 + y0, 2, 1, HERO.skinShade); // 嘴
+  const look = { hair: '#424b50', skin: '#f2c697', cap: '#db6060', shirt: '#477e9c', pants: '#4b596b', accent: '#e9e5cb' };
+  const directions = ['down', 'up', 'left', 'right'] as const;
+  directions.forEach((facing, row) => {
+    for (let col = 0; col < 3; col++) {
+      drawCharacter(ctx, col * 32, row * 40, look, facing, col, 'hero');
+      tex.add(row * 3 + col, 0, col * 32, row * 40, 32, 40);
     }
-    // 上身（肩比头宽）
-    u(4, 8 + y0, 8, 4, HERO.shirt);
-    u(4, 8 + y0, 8, 1, HERO.shirtLight);
-    u(4, 11 + y0, 8, 1, HERO.shirtShade);
-    if (back) {
-      // 背面：背包与肩带
-      u(5, 8 + y0, 6, 3, HERO.bag);
-      u(5, 8 + y0, 6, 1, HERO.bagShade);
-    } else {
-      // 侧挎包肩带
-      u(10, 8 + y0, 1, 3, HERO.bagShade);
-    }
-    // 手臂（迈步时前后摆动，末端露出皮肤）
-    const armL = 8 + y0 + (step === 1 ? 1 : 0);
-    const armR = 8 + y0 + (step === 2 ? 1 : 0);
-    const armLH = 4 - (step === 1 ? 1 : 0);
-    const armRH = 4 - (step === 2 ? 1 : 0);
-    u(3, armL, 1, armLH, HERO.shirtShade);
-    u(12, armR, 1, armRH, HERO.shirtShade);
-    u(3, armL + armLH, 1, 1, HERO.skin);
-    u(12, armR + armRH, 1, 1, HERO.skin);
-    // 腿与鞋
-    u(5, 12 + y0, 2, 2 - leftLift, HERO.pants);
-    u(9, 12 + y0, 2, 2 - rightLift, HERO.pants);
-    u(5, 14 + y0 - leftLift, 2, 1, HERO.shoe);
-    u(9, 14 + y0 - rightLift, 2, 1, HERO.shoe);
-  };
-
-  for (let row = 0; row < 4; row++) {
-    drawFrame(0, row, 0);
-    drawFrame(1, row, 1);
-    drawFrame(2, row, 2);
-  }
+  });
   tex.refresh();
-  // 帧几何：scene.textures.addSpriteSheet 需要在 canvas 之后补帧
-  const t = scene.textures.get(key);
-  for (let i = 0; i < 12; i++) {
-    const col = i % 3;
-    const row = Math.floor(i / 3);
-    t.add(i, 0, col * TILE, row * TILE, TILE, TILE);
-  }
 }
 
 export type Direction = 'down' | 'up' | 'left' | 'right';

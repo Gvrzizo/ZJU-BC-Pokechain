@@ -37,14 +37,29 @@ export class BattleScene extends Phaser.Scene {
   create() {
     this.store = useBattleStore();
 
-    // 战斗背景（简化的 GBA 战斗场地）
+    // 水平色带与阶梯式台座保留整数像素，避免平滑椭圆破坏点阵风格。
     const bg = this.add.graphics();
-    bg.fillStyle(0x58a860, 1).fillRect(0, 0, 960, 640);
-    bg.fillStyle(0x70c878, 1).fillRect(0, 300, 960, 340);
-    bg.fillStyle(0xd8c088, 1).fillEllipse(200, 470, 260, 80); // 我方台座
-    bg.fillStyle(0xc0a870, 1).fillEllipse(200, 478, 260, 24);
-    bg.fillStyle(0xd8c088, 1).fillEllipse(720, 210, 220, 64); // 对方台座
-    bg.fillStyle(0xc0a870, 1).fillEllipse(720, 216, 220, 20);
+    bg.fillStyle(0xd9e7c7).fillRect(0, 0, 960, 640);
+    bg.fillStyle(0xb9d6ab).fillRect(0, 168, 960, 48);
+    bg.fillStyle(0x9ebd95).fillRect(0, 216, 960, 16);
+    bg.fillStyle(0xe6e2bd).fillRect(0, 232, 960, 408);
+    for (let y = 252; y < 640; y += 16) bg.fillStyle(0xdedcb3).fillRect(0, y, 960, 4);
+    const platform = (x: number, y: number, width: number) => {
+      bg.fillStyle(0xa6ad83).fillRect(x - width / 2 + 16, y - 16, width - 32, 48);
+      bg.fillStyle(0x79977a).fillRect(x - width / 2, y, width, 16);
+      bg.fillStyle(0xa8c78b).fillRect(x - width / 2 + 8, y - 12, width - 16, 28);
+      bg.fillStyle(0xc7d8a0).fillRect(x - width / 2 + 32, y - 20, width - 64, 24);
+    };
+    platform(200, 470, 320);
+    platform(720, 210, 256);
+    const statusPanel = (x: number, y: number, width: number) => {
+      bg.fillStyle(0x7d9486).fillRect(x + 4, y + 4, width, 80);
+      bg.fillStyle(0x354f5c).fillRect(x, y, width, 76);
+      bg.fillStyle(0xfaf8e9).fillRect(x + 4, y + 4, width - 8, 68);
+      bg.fillStyle(0xb9ccb3).fillRect(x + 8, y + 64, width - 16, 4);
+    };
+    statusPanel(544, 440, 352);
+    statusPanel(64, 64, 352);
 
     this.myHpBar = this.add.graphics();
     this.foeHpBar = this.add.graphics();
@@ -52,10 +67,10 @@ export class BattleScene extends Phaser.Scene {
     const textStyle = {
       fontFamily: '"Press Start 2P", "Fusion Pixel 12px", monospace',
       fontSize: '12px',
-      color: '#282828',
+      color: '#354f5c',
     };
-    this.myNameText = this.add.text(60, 480, '', textStyle);
-    this.foeNameText = this.add.text(560, 90, '', textStyle);
+    this.myNameText = this.add.text(564, 456, '', textStyle);
+    this.foeNameText = this.add.text(84, 80, '', textStyle);
 
     // 订阅 store：battle:state 到达时重绘
     this.unsubscribe = this.store.$subscribe(() => this.refreshFromState());
@@ -94,8 +109,8 @@ export class BattleScene extends Phaser.Scene {
 
     this.myNameText.setText(`${myMon.name} Lv${myMon.level}`);
     this.foeNameText.setText(`${foeMon.name} Lv${foeMon.level}`);
-    this.drawHpBar(this.myHpBar, 60, 505, 240, myMon.hp, myMon.maxHp);
-    this.drawHpBar(this.foeHpBar, 560, 115, 200, foeMon.hp, foeMon.maxHp);
+    this.drawHpBar(this.myHpBar, 564, 484, 280, myMon.hp, myMon.maxHp);
+    this.drawHpBar(this.foeHpBar, 84, 108, 280, foeMon.hp, foeMon.maxHp);
 
     // HP 下降 → 伤害飘字 + 受击抖动（state 无日志流，按前后帧 HP 差推导）
     if (this.prevHp.mine >= 0 && myMon.hp < this.prevHp.mine && this.mySprite) {
@@ -118,18 +133,19 @@ export class BattleScene extends Phaser.Scene {
     maxHp: number,
   ) {
     const pct = maxHp > 0 ? Phaser.Math.Clamp(hp / maxHp, 0, 1) : 0;
-    const color = pct <= 0.2 ? 0xe04840 : pct <= 0.5 ? 0xf8c848 : 0x48c048;
+    const color = pct <= 0.2 ? 0xd56363 : pct <= 0.5 ? 0xe5bc58 : 0x57b888;
     g.clear();
-    g.fillStyle(0x282828, 1).fillRect(x - 2, y - 2, w + 4, 16);
+    g.fillStyle(0x354f5c, 1).fillRect(x - 2, y - 2, w + 4, 16);
     g.fillStyle(0xf8f0d8, 1).fillRect(x, y, w, 12);
     g.fillStyle(color, 1).fillRect(x, y, Math.floor(w * pct), 12);
+    g.fillStyle(0xffffff, 0.35).fillRect(x, y, Math.floor(w * pct), 4);
   }
 
   private spawnDamageNumber(x: number, y: number, dmg: number) {
     const t = this.add
       .text(x, y, `-${dmg}`, {
         fontFamily: '"Press Start 2P", "Fusion Pixel 12px", monospace',
-        fontSize: '20px',
+        fontSize: '24px',
         color: '#f8f0d8',
         stroke: '#282828',
         strokeThickness: 4,

@@ -129,7 +129,7 @@ function myConfirmed(trade: Trade): boolean {
           {{ trade.status }}
         </span>
       </div>
-      <div class="grid mt-8" style="grid-template-columns: 1fr 1fr; font-size: var(--px-fs-sm)">
+      <div class="grid trade-columns mt-8">
         <div>
           <p><strong>{{ trade.fromId }}</strong>{{ t('trade.fromSide') }}</p>
           <p>{{ assetsSummary(trade.offer) }}</p>
@@ -168,7 +168,7 @@ function myConfirmed(trade: Trade): boolean {
         <label>{{ t('trade.counterparty') }}</label>
         <input v-model="form.toPlayerId" class="px-input" placeholder="u_xxx / 用户名" />
       </div>
-      <div class="grid" style="grid-template-columns: 1fr 1fr">
+      <div class="grid trade-columns">
         <div>
           <h3 style="font-size: var(--px-fs-sm)">{{ t('trade.mine') }}</h3>
           <div class="px-field">
@@ -222,3 +222,8 @@ function myConfirmed(trade: Trade): boolean {
     </PixelDialog>
   </div>
 </template>
+
+<style scoped>
+.trade-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 640px) { .trade-columns { grid-template-columns: minmax(0, 1fr); } }
+</style>

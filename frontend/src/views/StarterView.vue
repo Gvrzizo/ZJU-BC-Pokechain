@@ -209,7 +209,7 @@ function itemName(typeId: string) {
 
 .starter-card--on {
   outline: 3px solid var(--gba-yellow);
-  background: #fff6cf;
+  background: #e0edd7;
 }
 
 .starter-card__name {
@@ -233,5 +233,9 @@ function itemName(typeId: string) {
   margin-top: 4px;
   font-size: var(--px-fs-sm);
   color: var(--gba-green-light);
+}
+@media (max-width: 640px) {
+  .starter-grid { grid-template-columns: minmax(0, 1fr); }
+  .starter-card { padding: 20px; }
 }
 </style>

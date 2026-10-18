@@ -3,11 +3,14 @@ import { computed, KeepAlive } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { logout } from '@/api/auth';
+import PixelIcon from '@/ui/PixelIcon.vue';
 import { useI18n } from '@/composables/useI18n';
 
 const auth = useAuthStore();
 const router = useRouter();
 const { t, otherLocaleLabel, toggleLocale } = useI18n();
+
+const navItems = ['game', 'bag', 'shop', 'pokedex', 'team', 'trade', 'lobby', 'ranked', 'fairness'] as const;
 
 const showNav = computed(() => auth.initialized && auth.isLoggedIn);
 
@@ -30,36 +33,28 @@ async function onLogout() {
     </p>
   </div>
   <template v-else>
-    <nav v-if="showNav" class="topnav">
-      <strong style="color: var(--gba-yellow); font-size: var(--px-fs-lg)">{{
-        t('app.title')
-      }}</strong>
-      <router-link to="/game">{{ t('nav.game') }}</router-link>
-      <router-link to="/bag">{{ t('nav.bag') }}</router-link>
-      <router-link to="/shop">{{ t('nav.shop') }}</router-link>
-      <router-link to="/pokedex">{{ t('nav.pokedex') }}</router-link>
-      <router-link to="/team">{{ t('nav.team') }}</router-link>
-      <router-link to="/trade">{{ t('nav.trade') }}</router-link>
-      <router-link to="/lobby">{{ t('nav.lobby') }}</router-link>
-      <router-link to="/ranked">{{ t('nav.ranked') }}</router-link>
-      <router-link to="/fairness">{{ t('nav.fairness') }}</router-link>
-      <router-link v-if="auth.isAdmin || auth.isArbitrator" to="/admin">{{ t('nav.admin') }}</router-link>
-      <span class="spacer" />
-      <span style="color: var(--gba-cream); font-size: var(--px-fs-sm)">
-        {{ auth.user?.nickname ?? auth.user?.username }}
-        <template v-if="auth.user?.points !== undefined">| {{ auth.user.points }}P</template>
-      </span>
-      <button
-        class="px-btn lang-toggle"
-        type="button"
-        :title="t('app.switchLang')"
-        :aria-label="t('app.switchLang')"
-        @click="toggleLocale()"
-      >
-        {{ otherLocaleLabel() }}
-      </button>
-      <a href="#" @click.prevent="onLogout">{{ t('nav.logout') }}</a>
-    </nav>
+    <header v-if="showNav" class="app-header">
+      <div class="trainer-bar">
+        <router-link to="/game" class="app-brand" aria-label="PokeChain">
+          <span class="brand-ball"><PixelIcon name="ball" :size="32" /></span>
+          <span>{{ t('app.title') }}<small>TRAINER'S ADVENTURE</small></span>
+        </router-link>
+        <div class="trainer-profile">
+          <span class="trainer-name">{{ auth.user?.nickname ?? auth.user?.username }}</span>
+          <span v-if="auth.user?.points !== undefined" class="trainer-points">{{ auth.user.points }}<small>P</small></span>
+          <button class="px-btn lang-toggle" type="button" :title="t('app.switchLang')" :aria-label="t('app.switchLang')" @click="toggleLocale()">
+            {{ otherLocaleLabel() }}
+          </button>
+          <button class="header-logout" type="button" @click="onLogout">{{ t('nav.logout') }}</button>
+        </div>
+      </div>
+      <nav class="topnav" aria-label="游戏导航">
+        <router-link v-for="item in navItems" :key="item" :to="`/${item}`">
+          <PixelIcon :name="item" /><span>{{ t(`nav.${item}`) }}</span>
+        </router-link>
+        <router-link v-if="auth.isAdmin || auth.isArbitrator" to="/admin"><PixelIcon name="admin" /><span>{{ t('nav.admin') }}</span></router-link>
+      </nav>
+    </header>
     <router-view v-slot="{ Component }">
       <!-- 游戏页保活：切走时 Phaser sleep（不重跑 BootScene），切回来直接 resume；
            超过 20 分钟未回由 GameView 自己失效重建（见 views/GameView.vue） -->

@@ -275,6 +275,8 @@ function buildSouthernIsland(): number[][] {
   for (const [x, y] of [[5, 5], [14, 5], [5, 10], [14, 10], [7, 4], [12, 4], [7, 11], [12, 11]] as const) {
     setTile(g, x, y, T.tree);
   }
+  // 连接岛内落点与码头，潮线不会在两者之间留一格水。
+  fillRect(g, 9, 10, 2, 3, T.sand);
   // 南面的栈桥（船）
   for (const y of [12, 13, 14, 15]) {
     setTile(g, 9, y, T.plank);
@@ -295,8 +297,8 @@ export const SOUTHERN_ISLAND: MapDef = {
   intro: '孤岛中央有一片被踩实的空场，空气里有羽毛的味道。',
   encounter: { tiles: ['altar'], rate: 0.5 },
   warps: [
-    { x: 9, y: 15, to: { mapId: 'coast', x: 6, y: 21 }, kind: 'door' },
-    { x: 10, y: 15, to: { mapId: 'coast', x: 7, y: 21 }, kind: 'door' },
+    { x: 9, y: 15, to: { mapId: 'coast', x: 30, y: 21 }, kind: 'door' },
+    { x: 10, y: 15, to: { mapId: 'coast', x: 31, y: 21 }, kind: 'door' },
   ],
   objects: [],
 };
@@ -315,6 +317,7 @@ function buildBirthIsland(): number[][] {
     setTile(g, x, y, T.pillar);
   }
   altar(g, 9, 8, 4);
+  fillRect(g, 8, 10, 2, 3, T.floor);
   // 南面的栈桥（船）
   for (const y of [12, 13, 14, 15]) {
     setTile(g, 8, y, T.plank);

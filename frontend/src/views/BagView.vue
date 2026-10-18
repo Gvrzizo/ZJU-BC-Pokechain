@@ -37,7 +37,7 @@ async function confirmUse() {
       <h2>{{ t('bag.title') }}</h2>
       <p v-if="message" class="mb-8" style="font-size: var(--px-fs-sm); color: var(--gba-blue)">{{ message }}</p>
       <p v-if="store.loading" class="blink">{{ t('common.loading') }}</p>
-      <table v-else style="width: 100%; font-size: var(--px-fs-sm); border-collapse: collapse">
+      <div v-else class="table-scroll"><table style="font-size: var(--px-fs-sm)">
         <thead>
           <tr style="text-align: left; border-bottom: 3px solid var(--gba-ink)">
             <th>{{ t('common.item') }}</th>
@@ -53,7 +53,7 @@ async function confirmUse() {
               <span class="row" style="gap: 6px; flex-wrap: nowrap">
                 <ItemIcon :type-id="item.typeId" :size="24" />
                 <span>{{ itemName(item.typeId) }}</span>
-                <span class="mono text-dim">{{ item.typeId }}</span>
+                
               </span>
             </td>
             <td>×{{ item.quantity }}</td>
@@ -78,7 +78,7 @@ async function confirmUse() {
             </td>
           </tr>
         </tbody>
-      </table>
+      </table></div>
     </div>
 
     <PixelDialog

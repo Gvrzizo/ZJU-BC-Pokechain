@@ -47,10 +47,16 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="page" style="display: flex; justify-content: center; align-items: center">
-    <form class="px-panel" style="width: 380px" @submit.prevent="onSubmit">
-      <h1 style="text-align: center">POKECHAIN</h1>
-      <h2 class="mb-16" style="text-align: center">— 注册 —</h2>
+  <div class="page auth-page">
+    <section class="auth-intro">
+      <img class="auth-art" src="/assets/ui/hoenn-postcard.svg" alt="草木环绕的未白镇，红顶房屋前的小路通向远方" />
+      <span class="eyebrow">POKECHAIN · HOENN ADVENTURE</span>
+      <h1>从未白镇出发。</h1>
+      <p>走进草丛，遇见伙伴。<br />把每一次相遇，写进你的冒险。</p>
+    </section>
+    <form class="px-panel auth-form" @submit.prevent="onSubmit">
+      <div class="text-dim mb-8">TRAINER CARD</div>
+      <h2>领取训练家证</h2>
       <div class="px-field">
         <label>用户名（将作为链上 playerId）</label>
         <input v-model="username" class="px-input" required autocomplete="username" />

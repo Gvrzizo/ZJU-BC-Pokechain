@@ -172,7 +172,7 @@ onMounted(load);
                 <div style="font-size: var(--px-fs-sm)">
                   {{ displayName(entry.typeId, entry.nameZh) }}
                 </div>
-                <div class="mono text-dim">{{ entry.typeId }}</div>
+                
               </div>
             </div>
 
@@ -296,29 +296,33 @@ onMounted(load);
 .shop-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 16px;
 }
 
 .shop-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  background: var(--gba-cream);
-  border: 3px solid var(--gba-ink);
+  gap: 16px;
+  padding: 20px;
+  background: var(--px-surface);
+  border: 2px solid var(--px-line);
+  box-shadow: inset 2px 2px 0 var(--px-highlight);
 }
 
 .shop-card--off {
   opacity: 0.6;
 }
 
+.shop-card > .row:first-child { min-height: 44px; }
+
 .shop-buy {
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .shop-qty {
-  width: 64px;
+  width: 80px;
+  margin-left: auto;
   font-size: var(--px-fs-sm);
 }
 

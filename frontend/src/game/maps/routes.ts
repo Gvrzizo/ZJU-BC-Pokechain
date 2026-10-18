@@ -3,6 +3,7 @@ import {
   border,
   createGrid,
   flowerCluster,
+  fillRect,
   hLine,
   makeRng,
   openEdge,
@@ -195,6 +196,9 @@ function buildForest(): number[][] {
   setTile(g, 17, 22, T.path);
   setTile(g, 18, 22, T.path);
 
+  // 东侧林间环线连接研究员与深草区，返回主路无需原路折返。
+  road(g, [{ x: 17, y: 16 }, { x: 24, y: 16 }, { x: 24, y: 11 }], T.path, 2);
+  road(g, [{ x: 24, y: 11 }, { x: 17, y: 11 }, { x: 17, y: 8 }, { x: 12, y: 8 }], T.path, 2);
   flowerCluster(g, 20, 14, rng, 3);
   flowerCluster(g, 10, 18, rng, 3);
   flowerCluster(g, 7, 6, rng, 2);
@@ -296,6 +300,9 @@ function buildRouteMid(): number[][] {
     setTile(g, 20, y, T.plank);
     setTile(g, 21, y, T.plank);
   }
+  // 桥南步道接入草地探索区；桥头保持与北侧主路相连。
+  road(g, [{ x: 20, y: 22 }, { x: 12, y: 22 }], T.path, 2);
+  fillRect(g, 8, 2, 2, 2, T.path);
   // 北面的遗迹石门：嵌在岩壁里，门口留 2 格地面
   setTile(g, 8, 1, T.door);
   setTile(g, 7, 1, T.rock);
@@ -395,9 +402,9 @@ function buildCave(): number[][] {
   ] as const) {
     setTile(g, x, y, T.rock);
   }
-  // 通道：中央岩体上开一道口，南北两厅连通
-  setTile(g, 14, 9, T.floor);
-  setTile(g, 14, 10, T.floor);
+  // 两厅通过两格宽石道相连，入口与北阶有清晰可辨的安全通路。
+  road(g, [{ x: 1, y: 10 }, { x: 4, y: 10 }, { x: 4, y: 7 }, { x: 14, y: 7 }, { x: 14, y: 2 }], T.floor, 2);
+  road(g, [{ x: 14, y: 7 }, { x: 14, y: 14 }, { x: 10, y: 14 }], T.floor, 2);
   // 西面的洞口与北面的石阶（都嵌在岩壁里，门口留地面）
   setTile(g, 0, 10, T.door);
   setTile(g, 1, 10, T.floor);
@@ -475,7 +482,7 @@ function buildCoast(): number[][] {
     setTile(g, x + 1, 22, T.plank);
   }
   // 海蚀洞口：岩崖里的一处暗门，门口留 2 格沙地
-  blob(g, T.rock, 21, 11, 3.2, 1.6, rng, { onlyOn: 'sand' });
+  fillRect(g, 20, 10, 3, 3, T.rock);
   setTile(g, 21, 12, T.door);
   setTile(g, 20, 12, T.sand);
   setTile(g, 22, 12, T.sand);
@@ -486,6 +493,9 @@ function buildCoast(): number[][] {
   setTile(g, 15, 1, T.stairs);
   setTile(g, 13, 1, T.rock);
   setTile(g, 16, 1, T.rock);
+  // 滨海步道分别连接两座码头，避免低潮线把桥头与陆地切开。
+  road(g, [{ x: 14, y: 9 }, { x: 14, y: 11 }, { x: 6, y: 11 }, { x: 6, y: 14 }], T.path, 2);
+  road(g, [{ x: 14, y: 9 }, { x: 30, y: 9 }, { x: 30, y: 14 }], T.path, 2);
   flowerCluster(g, 8, 8, rng, 3);
   flowerCluster(g, 24, 7, rng, 3);
   return g;

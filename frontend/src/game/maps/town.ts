@@ -1,16 +1,12 @@
 import {
-  blob,
   building,
   border,
   createGrid,
   flowerCluster,
+  fillRect,
   hLine,
   makeRng,
-  openEdge,
   pond,
-  road,
-  setTile,
-  vLine,
 } from './builders';
 import { T } from './tiles';
 import type { MapDef } from './types';
@@ -20,7 +16,7 @@ import type { MapDef } from './types';
  * 镇内没有野生宝可梦（`zoneId: 'town'` 安全区）。北出口通往 101 号道路。
  *
  * 布局按原作的小镇习惯来：中轴主街 + 两条横街，两间店铺面南对着主街（门前 1 格门垫），
- * 民居在南半区对称分布，西南角留一口圆润的水塘；四周 2 格厚的树墙围死，只在北面开口。
+ * 民居在南半区对称分布，西侧留一口圆润的水塘；四周 2 格厚的树墙围死，只在北面开口。
  */
 const W = 32;
 const H = 24;
@@ -30,44 +26,29 @@ function build(): number[][] {
   const g = createGrid(W, H, T.grass);
   border(g, T.tree, 2);
 
-  // 道路：中轴主街（2 格宽）+ 南北两条横街
-  road(g, [{ x: 15, y: 21 }, { x: 15, y: 2 }], T.path, 2);
-  hLine(g, 8, 23, 12, T.path);
-  hLine(g, 8, 23, 13, T.path);
-  hLine(g, 7, 24, 18, T.path);
-  // 店铺门前的小径（门垫 → 横街）
-  vLine(g, 10, 7, 11, T.path);
-  vLine(g, 21, 7, 11, T.path);
-
-  // 北面开口（去 101 号道路）
-  openEdge(g, 'north', 15, 2, T.path);
-  setTile(g, 15, 1, T.path);
-  setTile(g, 16, 1, T.path);
-
-  // 建筑：宝可梦中心 / 道具店（5 宽、两行屋顶）；两栋民居（4 宽）在南半区面对面
+  // 主街连通南北广场；各户都有独立门前支路，NPC 站在路旁。
+  fillRect(g, 15, 0, 2, 22, T.path);
+  fillRect(g, 8, 11, 16, 3, T.path);
+  fillRect(g, 12, 17, 8, 3, T.path);
+  fillRect(g, 6, 18, 20, 2, T.path);
+  fillRect(g, 9, 7, 3, 4, T.path);
+  fillRect(g, 20, 7, 3, 4, T.path);
   building(g, 8, 4, 5, 'roof', 'wall', 2);
   building(g, 19, 4, 5, 'roof', 'wall', 2);
-  building(g, 5, 16, 4, 'roof', 'wall', 1);
-  building(g, 23, 16, 4, 'roof', 'wall', 1);
+  building(g, 4, 15, 5, 'roof', 'wall', 2);
+  building(g, 22, 15, 5, 'roof', 'wall', 2);
 
-  // 西南角的水塘：圆润闭合，岸边留一圈土路色浅滩
-  pond(g, 7, 20, 3.2, 1.8, rng, { tile: 'sand' });
-
-  // 绿化：成团的树丛 + 花簇 + 零星石头
-  blob(g, T.tree, 27, 9, 2.4, 2.2, rng);
-  blob(g, T.tree, 4, 9, 2, 2.2, rng);
-  blob(g, T.tree, 28, 14, 1.8, 1.6, rng);
-  setTile(g, 2, 4, T.tree);
-  setTile(g, 29, 4, T.tree);
-  setTile(g, 3, 14, T.tree);
-  setTile(g, 28, 21, T.tree);
-  flowerCluster(g, 14, 4, rng, 3);
-  flowerCluster(g, 20, 9, rng, 4);
-  flowerCluster(g, 4, 19, rng, 3);
-  flowerCluster(g, 26, 12, rng, 4);
-  flowerCluster(g, 12, 20, rng, 3);
-  setTile(g, 24, 20, T.rock);
-  setTile(g, 11, 15, T.rock);
+  // 水塘限于西侧庭园，与民居门前步道和边界树墙分开。
+  pond(g, 5, 12, 1.7, 1.4, rng, { tile: 'sand', onlyOn: 'grass' });
+  fillRect(g, 3, 4, 3, 3, T.tree);
+  fillRect(g, 26, 4, 3, 3, T.tree);
+  fillRect(g, 26, 10, 3, 3, T.tree);
+  for (const [x, y] of [[13, 4], [17, 4], [9, 9], [23, 9], [11, 15], [20, 15], [5, 21], [24, 21]]) {
+    flowerCluster(g, x, y, rng, 4);
+  }
+  // 南广场两侧保留花圃，中轴与住宅入口不放阻挡物。
+  hLine(g, 11, 13, 21, T.flower);
+  hLine(g, 18, 20, 21, T.flower);
   return g;
 }
 
@@ -149,14 +130,14 @@ export const TOWN: MapDef = {
       facing: 'left',
     },
     {
-      // 妈妈（西侧民居门口，面朝北：从 (6,19) 按空格搭话）：
+      // 妈妈（西侧民居路旁，面朝南：从 (9,19) 按空格搭话）：
       // 一次性赠送跑鞋（POST /users/me/running-shoes，幂等；已有则只说关心的话）。
       kind: 'npc',
-      x: 6,
+      x: 9,
       y: 18,
       sprite: 'mom',
       name: '妈妈',
-      facing: 'up',
+      facing: 'down',
       action: 'talk',
       event: 'running-shoes',
       lines: ['出门啦？等一下，先把跑鞋穿上——按住 Shift 就能跑起来。'],
@@ -182,6 +163,6 @@ export const TOWN: MapDef = {
     { kind: 'sign', x: 14, y: 2 },
     { kind: 'sign', x: 9, y: 7, lines: ['宝可梦中心：全队 HP 恢复，每次 10 积分（全员满血不收费）。'] },
     { kind: 'sign', x: 22, y: 7, lines: ['道具店：精灵球 50 / 超级球 150 / 高级球 400 / 伤药 50 / 进化石 800。'] },
-    { kind: 'sign', x: 12, y: 19, lines: ['南边水塘是镇上的取水处，别把宝可梦放进去。'] },
+    { kind: 'sign', x: 7, y: 13, lines: ['西侧庭园是镇上的取水处。北面是宝可梦中心，向南走可以回家。'] },
   ],
 };

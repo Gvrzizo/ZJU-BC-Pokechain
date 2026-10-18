@@ -356,14 +356,14 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="grid mt-8" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr))">
+    <div class="grid mt-8" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr))">
       <!-- 匹配 -->
       <div class="px-panel">
         <h3 style="font-size: var(--px-fs-sm)">{{ t('ranked.matchTitle') }}</h3>
         <p style="font-size: var(--px-fs-sm)" class="text-dim">{{ t('ranked.teamHint') }}</p>
 
         <!-- 模式：休闲（只争 rating）/ 积分场（按段位收准入积分） -->
-        <div class="row mt-8" style="gap: 6px; align-items: center">
+        <div class="row mt-8" style="gap: 8px; align-items: center">
           <PixelButton
             :variant="mode === 'casual' ? 'primary' : 'default'"
             :disabled="queued || !!pending"
@@ -597,7 +597,7 @@ onBeforeUnmount(() => {
 .team-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   max-height: 260px;
   overflow-y: auto;
 }
@@ -608,16 +608,16 @@ onBeforeUnmount(() => {
   gap: 8px;
   font-size: var(--px-fs-sm);
   text-align: left;
-  padding: 4px 6px;
+  padding: 8px 12px;
   background: var(--gba-cream);
   color: var(--gba-ink);
-  border: 2px solid var(--gba-ink);
+  border: 2px solid var(--px-border);
   cursor: pointer;
 }
 
 .team-row--picked {
-  background: var(--gba-grass);
-  box-shadow: inset 0 0 0 2px var(--gba-ink);
+  background: #dfecd7;
+  box-shadow: inset 4px 0 0 var(--gba-green);
 }
 
 .team-row--locked {
@@ -633,7 +633,7 @@ onBeforeUnmount(() => {
 
 .lb-table th,
 .lb-table td {
-  padding: 4px 6px;
+  padding: 8px 12px;
   border-bottom: 2px solid var(--gba-cream-dark);
   text-align: left;
 }
@@ -651,7 +651,7 @@ onBeforeUnmount(() => {
   display: inline-block;
   width: 8px;
   height: 8px;
-  border: 2px solid var(--gba-ink);
+  border: 2px solid var(--px-border);
   vertical-align: middle;
 }
 
@@ -664,14 +664,14 @@ onBeforeUnmount(() => {
 
 .tier-strip {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .tier-chip {
   font-size: var(--px-fs-sm);
-  padding: 4px 6px;
-  border: 2px solid var(--gba-ink);
+  padding: 8px 12px;
+  border: 2px solid var(--px-border);
   color: var(--gba-ink);
   opacity: 0.65;
 }
@@ -683,7 +683,7 @@ onBeforeUnmount(() => {
 
 /* 匹配确认 / 机器人提示条 */
 .ranked-alert {
-  border: 2px solid var(--gba-ink);
+  border: 2px solid var(--px-border);
   padding: 8px;
   background: var(--gba-cream);
   box-shadow: inset -2px -2px 0 0 rgba(0, 0, 0, 0.2);

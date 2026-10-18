@@ -20,31 +20,34 @@ export class DialogBox {
     viewWidth = 960,
     viewHeight = 640,
   ) {
-    const boxWidth = viewWidth - 96;
-    const boxHeight = 152;
-    const x = 48;
+    const boxWidth = viewWidth - 48;
+    const boxHeight = 144;
+    const x = 24;
     const y = viewHeight - boxHeight - 24;
 
     const shadow = scene.add
       .rectangle(x + 4, y + 4, boxWidth, boxHeight, 0x1c3a1e, 0.45)
       .setOrigin(0, 0);
     const panel = scene.add
-      .rectangle(x, y, boxWidth, boxHeight, 0xf8f0d8, 1)
+      .rectangle(x, y, boxWidth, boxHeight, 0xfaf8e9, 1)
       .setOrigin(0, 0)
-      .setStrokeStyle(4, 0x282828);
+      .setStrokeStyle(4, 0x354f5c);
+
+    const inset = scene.add.rectangle(x + 6, y + 6, boxWidth - 12, boxHeight - 12)
+      .setOrigin(0).setFillStyle(0xfaf8e9).setStrokeStyle(2, 0x9ab4ac);
 
     this.nameTag = scene.add.text(x + 14, y - 13, '', {
       fontFamily: FONT,
       fontSize: '12px',
       color: '#f8f0d8',
-      backgroundColor: '#2f5d34',
+      backgroundColor: '#357966',
       padding: { x: 8, y: 4 },
     });
 
     this.body = scene.add.text(x + 18, y + 18, '', {
       fontFamily: FONT,
       fontSize: '12px',
-      color: '#282828',
+      color: '#354f5c',
       lineSpacing: 8,
       wordWrap: { width: boxWidth - 36, useAdvancedWrap: true },
     });
@@ -57,11 +60,11 @@ export class DialogBox {
     this.hint = scene.add.text(x + 14, y + boxHeight - 26, '空格 / 点击 继续', {
       fontFamily: FONT,
       fontSize: '12px',
-      color: '#6b4a2f',
+      color: '#637a77',
     });
 
     this.container = scene.add
-      .container(0, 0, [shadow, panel, this.nameTag, this.body, this.cursor, this.hint])
+      .container(0, 0, [shadow, panel, inset, this.nameTag, this.body, this.cursor, this.hint])
       .setScrollFactor(0)
       .setDepth(DEPTH)
       .setVisible(false);

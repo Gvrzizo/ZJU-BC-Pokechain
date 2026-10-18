@@ -79,7 +79,7 @@ onBeforeUnmount(() => {
     :style="hudWidth > 0 ? { '--hud-width': `${hudWidth}px` } : undefined"
   >
     <div
-      class="px-panel px-panel--dark hud-card"
+      class="px-panel hud-card"
       :class="{
         'hud-card--legendary': !!legendary,
         'hud-card--right': world.hudAvoidsPlayer,
@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
           你已经收服过它了（同一只传说不会再次出现）
         </div>
       </div>
-      <div class="mono hud-coord text-dim">
+      <div class="hud-coord text-dim">
         ({{ world.position.x }}, {{ world.position.y }})
         <span v-if="pokemon.hasRunningShoes" class="hud-run">
           {{ world.isRunning ? '跑步中' : '按住 Shift 跑步' }}
@@ -126,35 +126,37 @@ onBeforeUnmount(() => {
 
 .hud-card {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  min-width: 200px;
-  max-width: 62%;
-  padding: 6px 10px;
+  top: 16px;
+  left: 16px;
+  min-width: 160px;
+  max-width: min(380px, 62%);
+  padding: 12px 16px;
   font-size: var(--px-fs-sm);
   line-height: var(--px-lh-tight);
   /* 自动避让：只动 transform（合成层平滑滑动，不触发布局、不打断 Phaser 画布） */
   transition: transform 0.28s ease-out;
 }
 
-/* 避让状态：整张卡片平移到右上角（左右各留 8px；--hud-width 是画面宽度，SSR 时退回视口宽） */
+/* 避让状态：整张卡片平移到右上角（左右各留 16px；--hud-width 是画面宽度，SSR 时退回视口宽） */
 .hud-card--right {
-  transform: translateX(calc(var(--hud-width, 100vw) - 100% - 16px));
+  transform: translateX(calc(var(--hud-width, 100vw) - 100% - 32px));
 }
 
 .hud-card--legendary {
-  border-color: var(--gba-yellow);
+  border-color: var(--gba-green);
   background: #3a1e5c;
   color: var(--gba-cream);
 }
 
 .hud-name {
   font-size: var(--px-fs-sm);
-  color: var(--gba-yellow);
+  color: var(--gba-green);
 }
 
+.hud-card--legendary .text-dim, .hud-card--legendary .hud-run { color: #d9cddd; }
+
 .hud-card--legendary .hud-name {
-  color: #ffd8f8;
+  color: #f0d6ee;
 }
 
 .hud-line {
@@ -170,42 +172,48 @@ onBeforeUnmount(() => {
 }
 
 .hud-legendary__warning {
-  color: #ffd8f8;
+  color: #f0d6ee;
   text-shadow: 1px 1px 0 var(--gba-ink);
   animation: legend-pulse 1.4s steps(2) infinite;
 }
 
 .hud-coord {
-  margin-top: 2px;
+  margin-top: 4px;
+  font-size: 12px;
 }
 
 /* 跑鞋提示 / 跑步状态（拿到跑鞋之后才显示） */
 .hud-run {
   margin-left: 6px;
-  color: var(--gba-yellow);
+  color: var(--gba-green);
 }
 
 .hud-banner {
   position: absolute;
-  top: 40px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 8px 18px;
+  padding: 12px 16px;
+  width: max-content;
+  max-width: calc(100% - 48px);
   text-align: center;
   border: 3px solid var(--gba-ink);
-  background: rgba(28, 58, 30, 0.92);
-  color: var(--gba-cream);
+  background: var(--gba-cream);
+  color: var(--gba-ink);
   animation: banner-in 0.4s steps(3) 1;
 }
 
 .hud-banner--legendary {
-  background: rgba(58, 30, 92, 0.94);
-  border-color: var(--gba-yellow);
+  background: #493e65;
+  border-color: #b6a0c0;
 }
+
+.hud-banner--legendary .hud-banner__title { color: #f0d6ee; }
+.hud-banner--legendary .hud-banner__sub { color: #fff5e8; }
 
 .hud-banner__title {
   font-size: var(--px-fs-lg);
-  color: var(--gba-yellow);
+  color: var(--gba-green);
 }
 
 .hud-banner__sub {
@@ -228,5 +236,14 @@ onBeforeUnmount(() => {
   50% {
     opacity: 0.55;
   }
+}
+@media (max-width: 600px) {
+  .hud-card { min-width: 0; padding: 8px 12px; max-width: 72%; }
+  .hud-line, .hud-coord { display: none; }
+  .hud-legendary { font-size: 12px; }
+  .hud-legendary > div:not(:first-child) { display: none; }
+  .hud-banner { bottom: 16px; max-width: 90%; width: max-content; padding: 8px 12px; }
+  .hud-banner__title { font-size: 12px; }
+  .hud-banner__sub { display: none; }
 }
 </style>

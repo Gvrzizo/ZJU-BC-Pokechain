@@ -493,7 +493,7 @@ async function doDispute() {
 
     <!-- 操作区 + 日志 -->
     <div v-else class="mt-8" style="display: flex; gap: 12px; flex-wrap: wrap">
-      <div class="px-panel" style="flex: 1; min-width: 300px">
+      <div class="px-panel" style="flex: 1; min-width: min(100%, 300px)">
         <p v-if="hudMessage" style="font-size: var(--px-fs-sm); color: var(--gba-red)">{{ hudMessage }}</p>
         <template v-if="mode === 'root'">
           <div class="grid" style="grid-template-columns: 1fr 1fr">
@@ -552,7 +552,7 @@ async function doDispute() {
       </div>
 
       <!-- 战斗状态 -->
-      <div class="px-panel" style="flex: 1; min-width: 300px">
+      <div class="px-panel" style="flex: 1; min-width: min(100%, 300px)">
         <h3 style="font-size: var(--px-fs-sm)">战斗状态</h3>
         <div style="min-height: 96px; font-size: var(--px-fs-sm)">
           <template v-if="battleStore.state">
@@ -619,8 +619,9 @@ async function doDispute() {
 
 <style scoped>
 .battle-host {
-  width: 960px;
-  max-width: 100%;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
   aspect-ratio: 3 / 2;
 }
 

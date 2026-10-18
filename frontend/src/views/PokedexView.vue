@@ -51,15 +51,15 @@ function typeLabel(type: string): string {
         {{ t('dex.progress', { owned: ownedCount, total: entries.length || '?' }) }}
       </p>
     </div>
-    <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap">
+    <div class="collection-layout" :class="{ 'collection-layout--detail': selected }">
       <!-- 386 格：sprite 由 SpriteIcon 懒加载（loading=lazy），网格本身不做虚拟滚动 -->
-      <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); flex: 1">
+      <div class="collection-grid">
         <button
           v-for="e in entries"
           :key="e.speciesId"
-          class="px-panel dex-cell"
+          class="px-panel collection-cell dex-cell"
+          :aria-pressed="selected?.speciesId === e.speciesId"
           :class="{ 'dex-cell--owned': isOwned(e) }"
-          style="padding: 8px; cursor: pointer; text-align: center"
           @click="selected = e"
         >
           <SpriteIcon :species-id="e.speciesId" :size="48" style="margin: 0 auto" />
@@ -73,7 +73,7 @@ function typeLabel(type: string): string {
         </p>
       </div>
 
-      <div v-if="selected" class="px-panel" style="width: 300px">
+      <div v-if="selected" class="px-panel collection-detail">
         <h2>
           #{{ String(selected.speciesId).padStart(3, '0') }}
           {{ isOwned(selected) ? monName(selected.speciesId, selected.name) : t('dex.unknown') }}

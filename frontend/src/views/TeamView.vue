@@ -381,13 +381,13 @@ async function confirmUseItem() {
     </div>
     <p v-if="message" class="mb-8" style="font-size: var(--px-fs-sm); color: var(--gba-blue)">{{ message }}</p>
 
-    <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap">
-      <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); flex: 1">
+    <div class="collection-layout" :class="{ 'collection-layout--detail': selected }">
+      <div class="collection-grid">
         <button
           v-for="p in store.myPokemon"
           :key="p.id"
-          class="px-panel"
-          style="padding: 8px; cursor: pointer; text-align: center"
+          class="px-panel collection-cell"
+          :aria-pressed="selected?.id === p.id"
           @click="selected = p"
         >
           <SpriteIcon :species-id="p.speciesId" :size="64" style="margin: 0 auto" />
@@ -407,7 +407,7 @@ async function confirmUseItem() {
         </p>
       </div>
 
-      <div v-if="selected" class="px-panel" style="width: 340px">
+      <div v-if="selected" class="px-panel collection-detail">
         <h2>
           {{ monName(selected.speciesId, selected.name) }}
           <span v-if="selected.shiny" style="color: var(--gba-yellow)">★</span>

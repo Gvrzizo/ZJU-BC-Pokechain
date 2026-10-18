@@ -47,7 +47,7 @@ const total = computed(() => box.value + 6); // 含 3px 像素边框
       decoding="async"
       @error="failed = true"
     />
-    <span v-else class="sprite-icon__no" :style="{ fontSize: Math.max(8, box / 6) + 'px' }">
+    <span v-else class="sprite-icon__no" :style="{ fontSize: 12 + 'px' }">
       #{{ label }}
     </span>
   </div>
@@ -58,8 +58,9 @@ const total = computed(() => box.value + 6); // 含 3px 像素边框
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 3px solid #282828;
-  box-shadow: inset -3px -3px 0 0 rgba(0, 0, 0, 0.25);
+  border: 3px solid transparent;
+  flex: none;
+  background-image: linear-gradient(transparent 85%, #8fa58b26 85%);
   color: #fff;
   text-shadow: 2px 2px 0 #282828;
   font-family: var(--px-font);

@@ -360,7 +360,7 @@ async function submitEdit() {
     <p v-if="notice" class="mb-8" style="font-size: var(--px-fs-sm); color: var(--gba-red)">{{ notice }}</p>
     <p v-if="message" class="mb-8" style="font-size: var(--px-fs-sm); color: var(--gba-blue)">{{ message }}</p>
 
-    <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr))">
+    <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr))">
       <div v-for="r in rooms" :key="r.id" class="px-panel">
         <div class="row" style="justify-content: space-between">
           <strong style="font-size: var(--px-fs-sm)">{{ roomTitle(r) }}</strong>
