@@ -15,7 +15,6 @@ import { BIOMES, type BiomeId } from '../maps';
 import { makeHeroAnims, makeHeroSpritesheet, makePokemonPlaceholder, makeTilesTexture } from '../textures';
 import {
   fetchWorldManifest,
-  tilesetFor,
   worldImageUrl,
   worldSpriteKey,
   worldTilesetKey,
@@ -120,18 +119,19 @@ export class BootScene extends Phaser.Scene {
     this.statusText.setText('GENERATE PLACEHOLDERS...');
     makeTilesTexture(this, 'tiles');
     if (this.textures.exists('hero')) {
-      // vendor hero.png 必须是 96x128（4 方向 x 3 帧，32x32/帧）才能当行走图
+      // 原作人物保持 32×64/帧；兼容旧包 32×32 与占位 32×40。
       const texture = this.textures.get('hero');
       const src = texture.getSourceImage() as HTMLImageElement;
-      if (src.width === 96 && src.height === 128) {
+      const frameHeight = src.height / 4;
+      if (src.width === 96 && [32, 40, 64].includes(frameHeight)) {
         // world manifest 里若已按 spritesheet 载入，帧已经切好了，不必再补
         if (texture.frameTotal <= 1) {
           for (let i = 0; i < 12; i++) {
-            texture.add(i, 0, (i % 3) * 32, Math.floor(i / 3) * 32, 32, 32);
+            texture.add(i, 0, (i % 3) * 32, Math.floor(i / 3) * frameHeight, 32, frameHeight);
           }
         }
       } else {
-        console.warn('[assets] hero.png 尺寸非 96x128，使用占位行走图');
+        console.warn('[assets] hero.png 帧几何无效，使用占位行走图');
         this.textures.remove('hero');
         assets.markPlaceholder('hero');
       }
@@ -168,14 +168,14 @@ export class BootScene extends Phaser.Scene {
     for (const [index, tileset] of manifest.tilesets.entries()) {
       images.push({
         key: `world-vendor-tiles:${index}`,
-        url: worldImageUrl(tileset.image),
+        url: worldImageUrl(tileset.image) + (tileset.sha256 ? `?v=${tileset.sha256.slice(0, 12)}` : ''),
         sha256: tileset.sha256,
       });
     }
     for (const sprite of manifest.sprites) {
       images.push({
         key: worldSpriteKey(sprite.name),
-        url: worldImageUrl(sprite.image),
+        url: worldImageUrl(sprite.image) + (sprite.sha256 ? `?v=${sprite.sha256.slice(0, 12)}` : ''),
         sha256: sprite.sha256,
       });
     }
@@ -187,17 +187,11 @@ export class BootScene extends Phaser.Scene {
       if (ok) assets.markVendor(image.key);
     }
 
-    // world 素材包给了主角行走图：用它替换占位/旧图（帧几何仍是 3 列 4 行 32x32）
+    // world 素材包给了主角行走图：用它替换占位/旧图（3 列 4 行，按资源实际帧高切片）
     if (manifest.sprites.some((s) => s.name === 'hero') && this.textures.exists(worldSpriteKey('hero'))) {
       if (this.textures.exists('hero')) this.textures.remove('hero');
       this.textures.renameTexture(worldSpriteKey('hero'), 'hero');
-      const texture = this.textures.get('hero');
-      // 单帧图片（load.image）补成 3 列 4 行的行走帧，与 hero.png 的约定一致
-      if (texture.frameTotal <= 1) {
-        for (let i = 0; i < 12; i++) {
-          texture.add(i, 0, (i % 3) * 32, Math.floor(i / 3) * 32, 32, 32);
-        }
-      }
+      // 帧由 create() 按图片实际几何统一切割，不再硬编码 32px 高。
     }
   }
 
@@ -212,7 +206,10 @@ export class BootScene extends Phaser.Scene {
       const biomes: BiomeId[] = tileset.biomes.length > 0 ? tileset.biomes : BIOMES.filter((b) => this.usesVendorTiles(b, tileset.image));
       for (const biome of biomes) {
         const applied = compositeVendorTiles(this, worldTilesetKey(biome), vendorKey, tileset);
-        if (applied > 0) assets.markVendor(worldTilesetKey(biome));
+        if (applied > 0) {
+          assets.markVendor(worldTilesetKey(biome));
+          if (manifest.version >= 2) this.registry.set(`world-native:${biome}`, { key: vendorKey, spec: tileset });
+        }
         else assets.markPlaceholder(worldTilesetKey(biome));
       }
     });

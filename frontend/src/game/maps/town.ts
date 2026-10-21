@@ -12,7 +12,7 @@ import { T } from './tiles';
 import type { MapDef } from './types';
 
 /**
- * 未白镇（起始镇，32×24）：宝可梦中心（红顶 + 十字）+ 道具店 + 两栋民居 + 水塘，
+ * 未白镇（起始镇，32×24）：宝可梦中心（原作红顶）+ 道具店 + 两栋原作民居 + 水塘，
  * 镇内没有野生宝可梦（`zoneId: 'town'` 安全区）。北出口通往 101 号道路。
  *
  * 布局按原作的小镇习惯来：中轴主街 + 两条横街，两间店铺面南对着主街（门前 1 格门垫），
@@ -33,10 +33,12 @@ function build(): number[][] {
   fillRect(g, 6, 18, 20, 2, T.path);
   fillRect(g, 9, 7, 3, 4, T.path);
   fillRect(g, 20, 7, 3, 4, T.path);
-  building(g, 8, 4, 5, 'roof', 'wall', 2);
-  building(g, 19, 4, 5, 'roof', 'wall', 2);
-  building(g, 4, 15, 5, 'roof', 'wall', 2);
-  building(g, 22, 15, 5, 'roof', 'wall', 2);
+  building(g, 9, 3, 4, 'roof', 'wall', 3);
+  building(g, 20, 3, 4, 'roof', 'wall', 3);
+  building(g, 5, 13, 5, 'roof', 'wall', 4);
+  g[17][7] = T.wall; g[17][6] = T.door;
+  building(g, 23, 13, 5, 'roof', 'wall', 4);
+  g[17][25] = T.wall; g[17][24] = T.door;
 
   // 水塘限于西侧庭园，与民居门前步道和边界树墙分开。
   pond(g, 5, 12, 1.7, 1.4, rng, { tile: 'sand', onlyOn: 'grass' });

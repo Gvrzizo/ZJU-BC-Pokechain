@@ -26,7 +26,7 @@ const ITEM_MAP = {
   'tm-thunderbolt': 'tm-electric', 'tm-flamethrower': 'tm-fire', 'tm-surf': 'tm-water',
   'sky-key': 'jade-orb', 'ocean-key': 'blue-orb', 'magma-key': 'red-orb',
   'ruins-key': 'secret-key', 'island-key': 'soul-dew', 'birth-key': 'liberty-pass',
-  'running-shoes': '', // 无官方图，前端回退占位图标
+  // running-shoes 使用入库的 GPT Image 补充素材，见 frontend/art/prompts.json。
 };
 
 const withCries = !process.argv.includes('--with-cries=false');

@@ -21,11 +21,15 @@ git clone <仓库地址> Pokechain && cd Pokechain
 # ① 宝可梦 sprite/叫声/道具图标（约 8MB，下载自 PokeAPI 官方仓库）
 node scripts/fetch-assets.mjs
 
-# ② 世界地图瓦片/NPC/主角（从 GBA 绿宝石素材解码合成，约 236KB）
+# ② 世界地图瓦片/NPC/主角（固定版本 GBA 绿宝石素材，5 张图集 + 51 张独立图片）
 python3 frontend/tools/build-world-assets.py
 ```
 
-**为什么素材不在仓库里**：宝可梦形象/地图素材属任天堂版权，仅用于课程演示，按约定不进 git。两个脚本可重跑（幂等，已存在的文件会跳过）。**跳过素材也能跑**——前端会回退到程序化生成的占位像素图，只是丑。
+**为什么素材不在仓库里**：宝可梦形象/地图素材属任天堂版权，仅用于课程演示，按约定不进 git。两个脚本可重跑：PokeAPI 下载跳过已有文件；世界脚本复用下载缓存并重新生成图集。**跳过素材也能跑**——前端会回退到程序化生成的占位像素图，只是丑。
+
+世界资源固定上游提交，下载缓存位于 `~/.cache/pokechain-world/<revision>/`。已有同版本 pokeemerald 源码可运行 `python3 frontend/tools/build-world-assets.py --source /path/to/pokeemerald`，避免重复下载。输出路径始终是项目的 `frontend/public/assets/vendor/world/`。
+
+GPT Image 生成的跑鞋、登录/注册插画及原始输出已入库（`frontend/public/assets/generated/`、`frontend/art/`），不需要额外 API key 或重新生成。素材来源与完整提示词见 `docs/visual-design.md`、`frontend/art/prompts.json`。
 
 ## 2. 启动（演示模式，默认）
 
@@ -67,6 +71,10 @@ FABRIC_MOCK=false docker compose up -d --build
 | 游戏页素材是色块 | 素材脚本没跑或没跑全；跑完后**强制刷新浏览器缓存**（Ctrl+Shift+R） |
 | 想跑测试 | `cd backend && npm ci && npm test`（前端/链码同理，见 AGENTS.md 命令表） |
 
-## 6. 给 Agent 的读者
+## 6. 地图美术检查
+
+启动 `cd frontend && npm run dev`，打开 `http://localhost:5173/tools/world-preview.html`，可选择地图或查看全部 15 张图。预览与 Phaser 共用原作拼接逻辑，方便确认岸线、建筑、人物和特殊地形；正式游戏的遮罩/HUD/交互需在 `/game` 检查。此工具仅用于开发，不是新的业务路由。
+
+## 7. 给 Agent 的读者
 
 如果你的 AI Agent（Kimi Code / Claude Code / Cursor 等）要帮你搭建或二次开发：仓库根目录的 `AGENTS.md` 就是给 Agent 读的完整指南（架构决策、命令、纪律），直接让它"先读 AGENTS.md"即可。环境复刻的 Agent 速查清单见该文件的「Agent 环境复刻」一节。

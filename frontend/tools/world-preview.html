@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>PokeChain 原作素材预览</title>
+<style>
+body { margin: 24px; background: #253940; color: #f8f0d8; font: 16px system-ui; }
+header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+select, button { font: inherit; padding: 8px; }
+canvas { image-rendering: pixelated; display: block; }
+canvas[hidden] { display: none; }
+#gallery { display: flex; flex-wrap: wrap; gap: 16px; }
+figure { margin: 0; } figcaption { margin: 8px 0; }
+#gallery canvas { width: 384px; height: auto; }
+</style>
+<header><h1>原作素材预览</h1><label>地图 <select id="map"></select></label><button id="all">全部地图</button><span id="status">载入中</span></header>
+<canvas id="world"></canvas><div id="gallery"></div>
+<script type="module">
+import { MAPS } from '../src/game/maps/index.ts';
+import { mapBlits, paintMap } from '../src/game/native-map.ts';
+import { fetchWorldManifest, tilesetFor, worldImageUrl } from '../src/game/world-assets.ts';
+const manifest = await fetchWorldManifest();
+if (!manifest) throw new Error('请先运行 build-world-assets.py');
+const images = new Map();
+await Promise.all([...manifest.tilesets, ...manifest.sprites].map(async spec => {
+  const image = new Image(); image.src = worldImageUrl(spec.image);
+  await image.decode(); images.set(spec.image, image);
+}));
+const select = document.querySelector('#map');
+for (const map of Object.values(MAPS)) select.add(new Option(map.name, map.id));
+function render(canvas, map) {
+  canvas.width = map.width * 32; canvas.height = map.height * 32;
+  const spec = tilesetFor(manifest, map.biome), sources = { native: images.get(spec.image) };
+  const ctx = canvas.getContext('2d');
+  for (const name of ['center', 'shop', 'house']) sources[`building-${name}`] = images.get(manifest.sprites.find(s => s.name === `building-${name}`).image);
+  paintMap(ctx, mapBlits(map, spec, new Set(['center','shop','house'])), sources);
+  for (const npc of map.objects.filter(o => o.kind === 'npc')) {
+    const spec = manifest.sprites.find(s => s.name === `${npc.sprite}:${npc.facing ?? 'down'}`);
+    const img = images.get(spec.image); ctx.drawImage(img, npc.x * 32, (npc.y + 1) * 32 - img.height);
+  }
+  const hero = images.get(manifest.sprites.find(s => s.name === 'hero').image);
+  ctx.drawImage(hero, 0, 0, 32, 64, map.spawn.x * 32, map.spawn.y * 32 - 32, 32, 64);
+}
+function show() {
+  document.querySelector('#gallery').replaceChildren();
+  const canvas = document.querySelector('#world'); canvas.hidden = false;
+  render(canvas, MAPS[select.value]);
+}
+select.onchange = show;
+document.querySelector('#all').onclick = () => {
+  document.querySelector('#world').hidden = true;
+  const gallery = document.querySelector('#gallery'); gallery.replaceChildren();
+  for (const map of Object.values(MAPS)) {
+    const figure = document.createElement('figure'), label = document.createElement('figcaption'), canvas = document.createElement('canvas');
+    label.textContent = `${map.name} · ${map.width}×${map.height}`; render(canvas, map);
+    figure.append(label, canvas); gallery.append(figure);
+  }
+};
+show(); document.querySelector('#status').textContent = `${Object.keys(MAPS).length} 张地图 · 原始像素 ×2`;
+</script>
+</html>

@@ -18,7 +18,7 @@ describe('未白镇「妈妈」NPC（赠送跑鞋）', () => {
       sprite: 'mom',
       action: 'talk',
       event: 'running-shoes',
-      facing: 'up',
+      facing: 'down',
     });
     expect(NPC_SPRITE_NAMES).toContain('mom');
     expect(mom!.lines.length).toBeGreaterThan(0);

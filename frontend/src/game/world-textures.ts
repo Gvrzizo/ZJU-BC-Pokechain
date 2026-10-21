@@ -608,6 +608,7 @@ export function compositeVendorTiles(
     if (slot < 0 || index === undefined || index < 0 || index >= columns * rows) continue;
     const sx = (index % columns) * tileSize;
     const sy = Math.floor(index / columns) * tileSize;
+    ctx.clearRect(slot * tileSize, 0, tileSize, tileSize);
     ctx.drawImage(vendorImage as CanvasImageSource, sx, sy, tileSize, tileSize, slot * tileSize, 0, tileSize, tileSize);
     applied += 1;
   }
@@ -634,6 +635,7 @@ export function makeNpcTexture(scene: Phaser.Scene, key: string, look: NpcPalett
 export function makeWorldPlaceholders(scene: Phaser.Scene): void {
   for (const biome of BIOMES) makeWorldTilesTexture(scene, worldTilesetKey(biome), biome);
   for (const [name, look] of Object.entries(NPC_SPRITES)) {
+    if (scene.textures.exists(`world-sprite:${name}`)) continue;
     makeNpcTexture(scene, `world-sprite:${name}`, look);
     for (const facing of ['down', 'up', 'left', 'right'] as const) {
       makeNpcTexture(scene, `world-sprite:${name}:${facing}`, look, facing, name);

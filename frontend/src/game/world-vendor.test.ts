@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -24,7 +25,7 @@ function pngSize(path: string): { width: number; height: number } {
 }
 
 describe.skipIf(!available)('vendor world 素材包', () => {
-  const raw = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as Record<string, unknown>;
+  const raw = (available ? JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) : {}) as Record<string, unknown>;
   const manifest = parseWorldManifest(raw) as WorldManifest;
 
   it('清单能按契约解析，且瓦片尺寸是 32×32', () => {
@@ -42,12 +43,16 @@ describe.skipIf(!available)('vendor world 素材包', () => {
   it('每张瓦片集的图都存在，格子数与 tiles 索引都在范围内', () => {
     for (const tileset of manifest.tilesets) {
       const { width, height } = pngSize(`${ASSET_DIR}${tileset.image}`);
-      expect(height).toBe(32);
+      expect(height % 32).toBe(0);
       const columns = width / 32;
       expect(Number.isInteger(columns)).toBe(true);
       const indices = Object.values(tileset.tiles) as number[];
       expect(indices.length).toBeGreaterThan(0);
-      for (const index of indices) expect(index).toBeLessThan(columns);
+      expect(tileset.columns).toBe(columns);
+      for (const index of [...indices, ...Object.values(tileset.autotiles ?? {}).flat()]) {
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(index).toBeLessThan(columns * height / 32);
+      }
     }
   });
 
@@ -58,9 +63,10 @@ describe.skipIf(!available)('vendor world 素材包', () => {
     }
   });
 
-  it('清单里的回退语义顺序与 maps/tiles.ts 的 TILE_SEMANTICS 一致', () => {
-    const fallback = (raw as { proceduralFallback?: { semanticNames?: string[] } }).proceduralFallback;
-    expect(fallback?.semanticNames).toEqual([...TILE_SEMANTICS]);
+  it('每张原作图像都有匹配的内容摘要，避免旧缓存覆盖新素材', () => {
+    for (const entry of [...manifest.tilesets, ...manifest.sprites]) {
+      expect(createHash('sha256').update(readFileSync(`${ASSET_DIR}${entry.image}`)).digest('hex')).toBe(entry.sha256);
+    }
   });
 
   it('起点镇（town）与野外（grass）能拿到地面/建筑语义', () => {
@@ -76,19 +82,24 @@ describe.skipIf(!available)('vendor world 素材包', () => {
     }
   });
 
-  it('主角行走图是 3 列 × 4 行 32×32，NPC 是单帧 32×32', () => {
+  it('主角与四向 NPC 完整保留原作比例，建筑保留整栋占地', () => {
     const heroes = manifest.sprites.filter((s) => s.name.startsWith('hero'));
     expect(heroes.map((s) => s.name)).toContain('hero');
     for (const hero of heroes) {
-      expect(pngSize(`${ASSET_DIR}${hero.image}`)).toEqual({ width: 96, height: 128 });
-      expect([hero.frameWidth, hero.frameHeight]).toEqual([32, 32]);
+      expect(pngSize(`${ASSET_DIR}${hero.image}`)).toEqual({ width: 96, height: 256 });
+      expect([hero.frameWidth, hero.frameHeight]).toEqual([32, 64]);
     }
 
-    const npcs = manifest.sprites.filter((s) => !s.name.startsWith('hero'));
-    expect(npcs.length).toBeGreaterThanOrEqual(8);
+    const npcs = manifest.sprites.filter((s) => !s.name.startsWith('hero') && !s.name.startsWith('building-') && !s.name.startsWith('battle-'));
+    expect(npcs.map(s => s.name)).toEqual(expect.arrayContaining(['mom:down', 'mom:up', 'mom:left', 'mom:right']));
+    for (const name of ['center', 'shop', 'house']) {
+      const sprite = manifest.sprites.find(s => s.name === `building-${name}`)!;
+      const side = name === 'house' ? 160 : 128;
+      expect(pngSize(`${ASSET_DIR}${sprite.image}`)).toEqual({ width: side, height: side });
+    }
     for (const sprite of npcs) {
-      expect(pngSize(`${ASSET_DIR}${sprite.image}`)).toEqual({ width: 32, height: 32 });
-      expect([sprite.frameWidth, sprite.frameHeight]).toEqual([32, 32]);
+      expect(pngSize(`${ASSET_DIR}${sprite.image}`)).toEqual({ width: 32, height: 64 });
+      expect([sprite.frameWidth, sprite.frameHeight]).toEqual([32, 64]);
     }
   });
 });

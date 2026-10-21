@@ -21,7 +21,7 @@ BootScene 启动时会：
 3. 拉取 **world 素材包** `public/assets/vendor/world/manifest.json`（多地图瓦片集 + NPC 小人，见下「世界素材」）；缺失或解析失败时全部回退程序化瓦片；
 4. 缺失的资源用 Phaser Canvas 程序化生成占位像素贴图（瓦片 32×32，主角 4 方向 × 3 帧行走图；宝可梦 = 底色 + 眼睛 + 编号的 96×96 sprite）。
 
-仓库已内置第三世代（红/蓝宝石，GBA 风）全国图鉴 #1–386 的正面/背面 sprite 与叫声；世界地图的瓦片/NPC
+运行素材脚本后，本地包含第三世代（红/蓝宝石，GBA 风）全国图鉴 #1–386 的正面/背面 sprite 与叫声；世界地图的瓦片/NPC
 另有从 GBA 原作反编译工程解码出来的素材包（见下「世界素材」的 `world/` 一节，由 `tools/build-world-assets.py` 生成），
 缺失时全部回退到程序化生成的 GBA 风占位图。文件名即约定，放入 `public/assets/vendor/` 同名文件即可覆盖（无需改代码）：
 
@@ -36,74 +36,51 @@ BootScene 启动时会：
 
 素材同时登记到后端 `/assets/register` 并出现在 manifest 中时，前端会自动做完整性校验。
 
-### 世界素材（多地图：瓦片集 + NPC）
+### 世界素材（原作优先）
 
-多地图世界（`src/game/maps/`，15 张图：未白镇 / 7 块野外 / 7 张传说区内部图）的瓦片按**语义**索引，素材包放在
-`public/assets/vendor/world/`，入口是 `manifest.json`（契约见 `src/game/world-assets.ts`）：
+`src/game/maps/` 有 15 张图、14 种 biome；`public/assets/vendor/world/manifest.json` v2 提供语义映射、原作邻接块和 sha256。`BootScene` 校验后注册原作图集，`native-map.ts` 直接裁切拼接，`world-art.ts` 缓存地图纹理。原作不存在或校验失败才回退程序化地形/人物。NPC 四向原作优先，护士因上游缺少行走帧而保留正面站姿。
+
+```bash
+# 从项目根目录运行（需要 Python 3 + Pillow）
+python3 frontend/tools/build-world-assets.py
+# 已有同版本 pokeemerald 源码时可离线读取：
+python3 frontend/tools/build-world-assets.py --source /path/to/pokeemerald
+# 前端 dev 启动后：/tools/world-preview.html 预览全部地图
+```
+
+上游固定为 [pret/pokeemerald](https://github.com/pret/pokeemerald) 提交 `731ad5bfd6e6f265508d0efcca0ba42f9dcf5881`；原文件缓存于 `~/.cache/pokechain-world/<revision>/`。输出目录与 cwd 无关，原作资源不入 git。metatile 两层 8×8 子块按主/副瓦片库、调色板、翻转和透明色还原，再以最近邻 2 倍放大。水/岩浆使用原作动画首帧。
+
+| 输出 | 规格/覆盖 | 内容 |
+|---|---|---|
+| `nature-v2.png` | 每行 16 格、每格 32×32；grass forest mid north coast island birth | 原作通用地形 + 橙华地形 |
+| `town-v2.png` | 同上；town | 原作城镇、道路、树木 |
+| `cave-v2.png` | 同上；cave ruins seafloor | 岩壁、洞窟地面、石柱、梯子 |
+| `tower-v2.png` | 同上；tower | 天空之柱地板/台阶，原作柱前景与塔地板组合 |
+| `volcano-v2.png` | 同上；volcano magma | 红岩、灰地、岩浆 |
+| `sprites/hero-v2.png`、`hero-may-v2.png` | 96×256，3 列×4 行，每帧 32×64 | 原始 16×32 完整放大，不抽行；下/上/左/右各三帧 |
+| `sprites/<name>-<facing>-v2.png`、`<name>-v2.png` | 32×64；9 类 NPC、每类 5 张 | nurse / clerk / elder / kid / scientist / hiker / sailor / bug-catcher / mom |
+| `sprites/building-*-v2.png` | 中心/商店 128×128，民居 160×160 | 原作完整建筑，按门锚点与碰撞格对齐 |
+| `sprites/battle-grass-v2.png` | 240×112 | 原作草地战斗背景，游戏中 4 倍显示 |
+
+总计 5 张图集、51 张独立图片。`tiles` 值为行优先的瓦片索引（不是单行列号），`columns: 16`；`autotiles` 给出 3×3 原作过渡块，按象限拼接。图集主体保留原作完整 metatile ID；塔内追加了两格原作图层组合。旧 v1 manifest 和 32×32 主角仍兼容。
 
 ```jsonc
 {
-  "version": 1,
+  "version": 2,
   "tileSize": 32,
-  "tilesets": [
-    {
-      "biome": "forest",            // BIOMES 之一（也接受 "biomes": ["cave","tower"]）
-      "image": "tiles/forest.png",  // 相对 world/ 的路径；也接受 /assets/… 绝对路径或外链
-      "sha256": "…",                // 可选：写了就校验，不符则整张瓦片集回退程序化
-      "columns": 8,                 // 可选：瓦片集列数（列号 = index）
-      "tiles": { "grass": 0, "tallGrass": 1, "tree": 6, "path": 3 }  // 语义名 → 列号
-      // 也接受 "tileOrder": ["grass", "tallGrass", …]（下标即列号）
-    }
-  ],
-  "sprites": [
-    { "name": "nurse", "image": "sprites/nurse.png", "frameWidth": 32, "frameHeight": 32 },
-    { "name": "hero", "image": "sprites/hero.png" }   // 可选：覆盖主角行走图（3 列 × 4 行 32×32）
-  ]
+  "tilesets": [{
+    "biomes": ["town"], "image": "town-v2.png", "columns": 16,
+    "sha256": "实际文件哈希",
+    "tiles": { "grass": 1, "path": 473 },
+    "autotiles": { "path": [464,465,466,472,473,474,480,481,482] }
+  }],
+  "sprites": [{ "name": "hero", "image": "sprites/hero-v2.png", "frameWidth": 32, "frameHeight": 64 }]
 }
 ```
 
-- 语义瓦片名（23 个，顺序即程序化瓦片集的列号）：`grass tallGrass flower path sand ash gravel tree rock water
-  deepWater plank wall roof floor carpet counter door stairs sign lava altar pillar`；名字大小写/连字符写法都接受
-  （`tallGrass` = `tall_grass` = `tall-grass`）。
-- **叠加而非替换**：BootScene 先按生物群系生成整套程序化瓦片集，再把 vendor 图按语义映射**贴到对应格子上**。
-  素材只画了一部分也不会错位，缺失的语义保持程序化；整个 manifest 缺失时全程序化。
-- 生物群系（14 个）：`town grass forest mid cave coast north volcano tower seafloor magma ruins island birth`，
-  每个群系一套配色（`src/game/world-textures.ts` 的 `BIOME_COLORS`）。
-- NPC 小人：`sprites` 里的名字与地图数据 `npc.sprite` 对应，内置占位名有
-  `nurse clerk elder kid scientist hiker sailor bug-catcher`（`src/game/maps/npcs.ts`）。
+### GPT Image 补充素材
 
-#### 已下载的 GBA 原作素材包（`world/`）
-
-`public/assets/vendor/world/` 里的素材由 `tools/build-world-assets.py` 从
-[pret/pokeemerald](https://github.com/pret/pokeemerald)（GBA《宝可梦 绿宝石》反编译工程）**解码生成**：
-原作瓦片集是「索引色 PNG + JASC 调色板 + `metatiles.bin`」的二进制格式，浏览器不能直接用，脚本
-把 metatile（16×16，四个 8×8 子块、上层按 palette index 0 + 洋红占位色抠透明后叠在下层）解码成 RGBA，
-再整数 2× 放大成 32×32（= 前端 `TILE`），人物行走图同理。
-
-```bash
-cd frontend
-pip install pillow
-python3 tools/build-world-assets.py     # 产出/刷新 public/assets/vendor/world/（含 manifest.json）
-```
-
-| 文件 | 规格 | 覆盖的生物群系 | 内容（列号见 manifest 的 `semantics`） |
-|---|---|---|---|
-| `nature.png` | 960×32（30 格） | grass forest mid north coast island birth | 草地 / 深草 / 花丛 / 土路 / 路沿 / 海滩沙 / 沙漠沙 / 泥地 / 树 ×4 / 岩壁 ×2 / 浅水 / 深水 / 水边 ×3 / 池塘圆角 ×3 / 洞口 / 路牌 / 台阶坎 ×6 |
-| `town.png` | 2272×32（71 格） | town | 宝可梦中心（红顶 + P.C. 招牌）/ 友好商店（蓝顶 + MART 招牌）/ 民居屋顶墙面 / 门 / 门垫 / 路牌 / 室内地板·柜台·货架·楼梯·地毯·绿植·治疗机 |
-| `cave.png` | 928×32（29 格） | cave ruins seafloor | 洞窟地面 ×5 / 岩壁 ×7 / 岩块 ×9 / 洞窟石门 / 楼梯（原作梯子）×4 / 路牌 / 水 |
-| `interior.png` | 800×32（25 格） | —（暂无室内 biome，留给后续室内地图） | 木地板 ×9 / 墙 ×3 / 窗 / 柜台 ×2 / 货架 ×2 / 楼梯 / 地毯 / 绿植 ×3 / 治疗机 / 门 ×2 |
-| `sky-pillar.png` | 576×32（18 格） | tower | 天空之柱：石砖地面 ×4 / 岩壁 ×4 / 石柱 ×2 / 上行石阶 / 拱门 / 深坑 / 碎石 ×4 |
-| `lava.png` | 544×32（17 格） | volcano magma | 火山岩 ×7 / 火山灰 ×2 / 岩浆 + 岩浆边 ×5 / 石台 / 洞口 / 路牌 |
-| `sprites/hero.png` `sprites/hero-may.png` | 96×128（3 列 × 4 行 32×32） | — | 红/蓝宝石版男女主角行走图（行序 下/上/左/右，列序 站立/迈步A/迈步B），可直接替换 `hero` 贴图 |
-| `sprites/<name>.png` | 32×32 | — | 引擎 NPC 贴图：`nurse clerk elder kid scientist hiker sailor bug-catcher`（原作第 0 帧「面朝下站立」压到 32×32） |
-| `npc/<name>.png` | 9 帧 × 32×64 | — | 18 个原作 NPC 行走图（男孩/女孩/男女老少/护士/店员/研究员/水手/博士/主角…），帧序 `face-south north west, walk-south a/b, walk-north a/b, walk-west a/b`，**东向 = 西向水平镜像**；留给支持走动的引擎 |
-
-- **索引方式**：每张图**单行**排列，列号 = 该 PNG 里第 n 个 32×32 瓦片；`tiles` 给引擎语义 → 列号，
-  `semantics` 给全部格子的 `{index, x, y, source:{tileset, metatile}}`（像素坐标便于自定义加载器）。
-- 人物素材是原作 16×32 帧 2× 放大（32×64），为塞进引擎的 32×32 人物格做了等间距抽行压缩；
-  `npc/` 里保留的是无损 2× 版本。
-- 原作素材版权归 **任天堂 / GAME FREAK / The Pokémon Company** 所有，同样只在课程演示范围内使用；
-  该目录在 `.gitignore` 内（版权素材不入库），干净 clone 后跑一次生成脚本即可恢复。
+跑鞋使用 `public/assets/generated/items/running-shoes.png`（32×32、透明底、24 色），登录/注册共用 `generated/ui/hoenn-welcome.png`（384×256、64 色）。这些产物与原始生成文件已入库，干净 clone 无需重新调用 GPT Image。完整提示词和处理记录见 [art/prompts.json](art/prompts.json)，视觉约定见 [visual-design.md](../docs/visual-design.md)。生成后仅最近邻缩放/限色，正常路径不使用之前的自绘跑鞋或 SVG 欢迎插画。
 
 ### 道具图标（items/）
 
@@ -259,7 +236,7 @@ src/
   stores/      pinia：auth（JWT 持久化）、assets（manifest/占位状态）、pokemon、battle（WS 驱动实时态）、zone（区域等级带）、world（当前地图/坐标/横幅）
   locales/     zh.ts / en.ts 词典（386 宝可梦 + 43 技能 + 12 道具 + 25 性格 + UI 文案）
   composables/ useI18n（t/monName/moveName/itemName/natureName，语言存 localStorage，默认中文）
-  game/        Phaser：scenes/BootScene、OverworldScene（多地图引擎）、BattleScene；maps/（地图数据 + 瓦片语义 + 传送查询）、gates.ts（传说区钥匙）、dialog.ts + ui/DialogBox.ts（对话框）、world-assets.ts / world-textures.ts（world 素材契约与程序化瓦片）、world-art.ts（邻接地形/完整建筑）、character-art.ts（四向人物）、net/BattleSocket.ts、textures.ts、mon-assets.ts、cries.ts、bus.ts
+  game/        Phaser：scenes/BootScene、OverworldScene（多地图引擎）、BattleScene；maps/（地图数据 + 瓦片语义 + 传送查询）、gates.ts（传说区钥匙）、dialog.ts + ui/DialogBox.ts（对话框）、world-assets.ts / world-textures.ts（world 素材契约与程序化瓦片）、native-map.ts / world-art.ts（原作地形/完整建筑拼接）、character-art.ts（缺图人物回退）、net/BattleSocket.ts、textures.ts、mon-assets.ts、cries.ts、bus.ts
   ui/          像素风组件：PixelButton、PixelDialog、HpBar、SpriteIcon、ItemIcon + ItemArtwork（道具图标 + 自绘回退）、PixelIcon（导航图标）
   components/  CaptureOverlay、WorldHud、WagerPicker、ItemActionRow
   views/       14 个路由页面（含登录/注册）
@@ -270,8 +247,6 @@ public/
   fonts/       自托管像素字体（Press Start 2P + Fusion Pixel）+ OFL 许可证，来源见「字体」一节
 ```
 
-## 丰缘视觉改造（2026-10-18）
+## 丰缘视觉改造（2026-10-21）
 
-视觉规范与本轮验证状态见 [visual-design.md](../docs/visual-design.md)。`world-art.ts` 处理相邻地形和完整建筑，`character-art.ts` 共用四向人物绘制；主角自绘帧为 32×40，vendor 帧仍接受 32×32。导航使用 `PixelIcon`，道具缺图使用 `ItemArtwork`，自绘登录场景位于 `public/assets/ui/`。全站共享主题、响应式卡片、焦点和间距规则。
-
-按用户要求，本轮未运行任何测试、构建、类型检查或浏览器验证；测试数量未重新实测。
+原作资源优先，GPT Image 补充专用素材，完整说明见 [visual-design.md](../docs/visual-design.md)。本轮前端实测 190 单测 / 32 文件通过，vue-tsc + Vite 构建通过，并完成地图/页面浏览器检查。nginx 同时监听 IPv4/IPv6，world manifest 禁用缓存、图片带内容哈希更新。

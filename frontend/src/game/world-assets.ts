@@ -2,11 +2,11 @@ import { TILE_SEMANTICS, type TileId } from './maps/tiles';
 import type { BiomeId } from './maps/types';
 
 /**
- * world 素材契约（另一代理产出的 `public/assets/vendor/world/` 素材包）：
+ * world 素材契约（`build-world-assets.py` 生成的 `public/assets/vendor/world/` 素材包）：
  *
  * ```jsonc
  * {
- *   "version": 1,
+ *   "version": 2,
  *   "tileSize": 32,
  *   "tilesets": [
  *     {
@@ -14,13 +14,13 @@ import type { BiomeId } from './maps/types';
  *       "image": "tiles/forest.png",    // 相对 world/ 的路径（也接受 /assets/... 绝对路径）
  *       "sha256": "…",                  // 可选：与后端 manifest 条目对得上时前端会校验
  *       "columns": 8,                   // 可选：瓦片集列数（缺省按图宽推断）
- *       "tiles": { "grass": 0, "tallGrass": 1, "tree": 4, "path": 6 }   // 语义名 → 列号
- *       // 也接受 "tileOrder": ["grass", "tallGrass", "tree", ...]（下标即列号）
+ *       "tiles": { "grass": 0, "tallGrass": 1, "tree": 4, "path": 6 }   // 语义名 → 行优先瓦片索引
+ *       // 也接受 "tileOrder": ["grass", "tallGrass", "tree", ...]（下标即瓦片索引）
  *     }
  *   ],
  *   "sprites": [
- *     { "name": "nurse", "image": "sprites/nurse.png", "frameWidth": 32, "frameHeight": 32 },
- *     { "name": "hero", "image": "sprites/hero.png", "frameWidth": 32, "frameHeight": 32 }
+ *     { "name": "nurse", "image": "sprites/nurse.png", "frameWidth": 32, "frameHeight": 64 },
+ *     { "name": "hero", "image": "sprites/hero.png", "frameWidth": 32, "frameHeight": 64 }
  *   ]
  * }
  * ```
@@ -33,15 +33,17 @@ import type { BiomeId } from './maps/types';
 export const WORLD_ASSET_DIR = '/assets/vendor/world';
 export const WORLD_MANIFEST_URL = `${WORLD_ASSET_DIR}/manifest.json`;
 export const WORLD_TILE_SIZE = 32;
-export const WORLD_MANIFEST_VERSION = 1;
+export const WORLD_MANIFEST_VERSION = 2;
 
 export interface WorldTilesetSpec {
   biomes: BiomeId[];
   image: string;
   sha256?: string;
   columns?: number;
-  /** 语义名 → 列号 */
+  /** 语义名 → 行优先瓦片索引 */
   tiles: Partial<Record<TileId, number>>;
+  /** 原作 3×3 邻接过渡块（左上至右下），运行时按 8px 象限拼接 */
+  autotiles?: Partial<Record<TileId, number[]>>;
 }
 
 export interface WorldSpriteSpec {
@@ -141,7 +143,7 @@ export function parseTilesetSpec(raw: unknown): WorldTilesetSpec | null {
   const tiles: Partial<Record<TileId, number>> = {};
   const tilesRaw = entry.tiles;
   if (Array.isArray(tilesRaw)) {
-    // [{name:'grass', index:0}, ...] 或 ['grass','tallGrass', ...]（下标即列号）
+    // [{name:'grass', index:0}, ...] 或 ['grass','tallGrass', ...]（下标即瓦片索引）
     tilesRaw.forEach((item, index) => {
       const name = asString(item) ?? asString(asRecord(item)?.name);
       const explicit = asRecord(item)?.index ?? asRecord(item)?.col;
@@ -166,7 +168,14 @@ export function parseTilesetSpec(raw: unknown): WorldTilesetSpec | null {
   });
 
   if (Object.keys(tiles).length === 0) return null;
+  const autotiles: Partial<Record<TileId, number[]>> = {};
+  for (const [name, values] of Object.entries(asRecord(entry.autotiles) ?? {})) {
+    const semantic = semanticOf(name);
+    if (semantic && Array.isArray(values) && values.length === 9 &&
+        values.every((v) => Number.isInteger(v) && v >= 0)) autotiles[semantic] = values;
+  }
   return {
+    autotiles,
     biomes: biomes.length > 0 ? biomes : [],
     image,
     sha256: asString(entry.sha256),
@@ -184,8 +193,8 @@ export function parseSpriteSpec(raw: unknown): WorldSpriteSpec | null {
   return {
     name,
     image,
-    frameWidth: Math.floor(asNumber(entry.frameWidth) ?? WORLD_TILE_SIZE),
-    frameHeight: Math.floor(asNumber(entry.frameHeight) ?? WORLD_TILE_SIZE),
+    frameWidth: Math.max(1, Math.floor(asNumber(entry.frameWidth) ?? WORLD_TILE_SIZE)),
+    frameHeight: Math.max(1, Math.floor(asNumber(entry.frameHeight) ?? WORLD_TILE_SIZE)),
     sha256: asString(entry.sha256),
   };
 }
@@ -214,7 +223,7 @@ export async function fetchWorldManifest(
   url: string = WORLD_MANIFEST_URL,
 ): Promise<WorldManifest | null> {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { cache: 'no-cache' });
     if (!res.ok) return null;
     return parseWorldManifest(await res.json());
   } catch {

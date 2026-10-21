@@ -37,7 +37,7 @@ async function onSubmit() {
 <template>
   <div class="page auth-page">
     <section class="auth-intro">
-      <img class="auth-art" src="/assets/ui/hoenn-postcard.svg" alt="草木环绕的未白镇，红顶房屋前的小路通向远方" />
+      <img class="auth-art" src="/assets/generated/ui/hoenn-welcome.png" alt="丰缘风格的像素山海与村庄，木守宫在小路上望向红顶宝可梦中心" />
       <span class="eyebrow">POKECHAIN · HOENN ADVENTURE</span>
       <h1>从未白镇出发。</h1>
       <p>走进草丛，遇见伙伴。<br />把每一次相遇，写进你的冒险。</p>

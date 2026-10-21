@@ -15,7 +15,7 @@ import {
 } from './world-assets';
 
 /**
- * world 素材契约解析（另一代理产出的 `public/assets/vendor/world/manifest.json`）：
+ * world 素材契约解析（构建脚本产出的 `public/assets/vendor/world/manifest.json`）：
  * 容错解析 + 缺失回退（解析不出来就全程序化瓦片，不会让游戏起不来）。
  */
 describe('瓦片集清单解析', () => {
@@ -142,5 +142,15 @@ describe('key 与路径', () => {
     expect(tileIndexFor(manifest, 'forest', 'lava')).toBeNull();
     expect(tileIndexFor(manifest, 'town', 'grass')).toBeNull();
     expect(tileIndexFor(null, 'forest', 'grass')).toBeNull();
+  });
+});
+
+
+describe('原作过渡块与人物几何', () => {
+  it('只接受九格非负整数过渡块，64px 高的原作人物帧不被压缩', () => {
+    const spec = parseTilesetSpec({ image: 'native.png', tiles: { grass: 1 },
+      autotiles: { path: [0,1,2,3,4,5,6,7,8], water: [0,1], grass: [-1,0,1,2,3,4,5,6,7] } });
+    expect(spec?.autotiles).toEqual({ path: [0,1,2,3,4,5,6,7,8] });
+    expect(parseSpriteSpec({ name: 'hero', image: 'hero.png', frameWidth: 32, frameHeight: 64 })?.frameHeight).toBe(64);
   });
 });

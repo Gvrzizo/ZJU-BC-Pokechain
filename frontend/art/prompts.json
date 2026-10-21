@@ -1,0 +1,20 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-10-21",
+  "assets": [
+    {
+      "asset": "running-shoes",
+      "prompt": "Use case: stylized-concept\nAsset type: a single production inventory sprite for a Pokémon Ruby/Sapphire/Emerald styled GBA game, specifically the running shoes key item that has no suitable original bag icon.\nPrimary request: ONE pair of red running shoes with white laces, ivory soles, a little navy collar and cyan ankle detail, viewed in the classic small 3/4 bag-item perspective, one foreground shoe and its mate slightly behind. Refined, immediately readable 2003 GBA Pokémon item pixel art, not an emoji or flat block diagram.\nStyle: meticulous true low-resolution pixel art on a 32 by 32 logical grid, rendered as perfectly uniform square pixels at 32x nearest-neighbor scale (1024x1024 output). The actual opaque sprite occupies approximately 26x23 logical pixels centered in the grid. Hand-placed pixel clusters, 1 logical pixel dark blue-gray outline, 3 shade steps per material, small bright highlights, controlled rich GBA palette of about 16 colors. Each logical pixel MUST be a solid 32x32 square with zero antialiasing. Both shoes overlap naturally as one compact sprite.\nBackground: fully transparent alpha, generous transparent padding.\nConstraints: no ground, no cast shadow beyond sprite, no labels, no letters, no border, no gradient, no blur, no 3D rendering, no tiny sub-pixel noise, no decorative sparkle. Match the exact visual vocabulary and craft of Generation III bag item sprites.",
+      "source": "source/running-shoes.png",
+      "output": "../public/assets/generated/items/running-shoes.png",
+      "normalization": "ImageMagick point sampling to 32x32, binary alpha, 24 colors; no vector redraw"
+    },
+    {
+      "asset": "hoenn-welcome",
+      "prompt": "Use case: illustration-story\nAsset type: landscape welcome-screen artwork for PokeChain, a Chinese university Pokémon-style game built around the visual world of Pokémon Ruby/Sapphire/Emerald.\nCreate a meticulously crafted TRUE PIXEL ART landscape of a tranquil Hoenn village in early morning, as a beautiful Game Boy Advance title-screen illustration. Landscape 3:2. A small red-roofed Pokémon center with blue windows on the right middle ground, two modest pale ochre houses, a winding warm sandy path beginning in the foreground and leading to the village, richly clustered rounded green tree canopies, dark leaf shadows, grass tufts, small pink and white flowers, a little luminous blue stream on the left and distant blue-green mountains beneath soft cream clouds. Small but recognizable green Treecko near the foreground path looking toward the village. No people needed.\nArt direction: authentic 2003 Generation III GBA Pokémon background art. Design at a 384x256 logical resolution and upscale with nearest neighbor. Every visible mark must be a hard-edged square pixel cluster with restrained 1-3 pixel stepped highlights and intricate controlled dithering only where needed. Greens #286850 #58a860 #98c878, sand #e8d898, water #4898c0, roof red #c85858, warm ivory #f8f0d8, deep desaturated blue-green outlines. Warm, clear, charming and rich in precisely placed detail. Limited cohesive palette. Slightly elevated side view with a distant horizon, not a top-down map, not an isometric mobile game.\nNo text, letters, logos, UI, frame, watermark, blur, smooth gradients, vector graphics, 3D rendering, modern glossy effects or enormous coarse block shapes. Make it feel like an exceptionally well-drawn original cartridge title screen.",
+      "source": "source/hoenn-welcome.png",
+      "output": "../public/assets/generated/ui/hoenn-welcome.png",
+      "normalization": "ImageMagick point sampling to 384x256, 64 colors; no vector redraw"
+    }
+  ]
+}

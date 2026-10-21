@@ -35,7 +35,7 @@ function buildSkyPillar1F(): number[][] {
   border(g, T.wall, 2);
   // 中央走道（2 格宽）铺碎石，两侧成对的石柱对称排开
   fillRect(g, 9, 3, 2, 13, T.gravel);
-  for (let y = 4; y <= 12; y += 2) {
+  for (let y = 4; y <= 13; y += 3) {
     pillarPair(g, 10, y, 3);
     pillarPair(g, 10, y, 6);
   }

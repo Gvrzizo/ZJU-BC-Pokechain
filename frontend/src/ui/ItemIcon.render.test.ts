@@ -27,3 +27,11 @@ describe('ItemIcon 渲染', () => {
     expect(html).toContain('title="TM Surf"');
   });
 });
+
+
+it('跑鞋直接使用入库的 GPT Image 像素素材，不请求不存在的 vendor 图片', async () => {
+  const html = await render('running-shoes', 32);
+  expect(html).toContain('src="/assets/generated/items/running-shoes.png"');
+  expect(html).not.toContain('/assets/vendor/items/running-shoes.png');
+  expect(html).not.toContain('<svg');
+});

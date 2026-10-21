@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { worldSpriteKey } from '../world-assets';
 import { useBattleStore } from '@/stores/battle';
 import {
   MON_BATTLE_FOE_SIZE,
@@ -27,8 +28,8 @@ export class BattleScene extends Phaser.Scene {
   private unsubscribe?: () => void;
 
   // 台座布局
-  private static MY_POS = { x: 200, y: 430 };
-  private static FOE_POS = { x: 720, y: 180 };
+  private static MY_POS = { x: 200, y: 352 };
+  private static FOE_POS = { x: 720, y: 216 };
 
   constructor() {
     super('BattleScene');
@@ -37,26 +38,22 @@ export class BattleScene extends Phaser.Scene {
   create() {
     this.store = useBattleStore();
 
-    // 水平色带与阶梯式台座保留整数像素，避免平滑椭圆破坏点阵风格。
     const bg = this.add.graphics();
-    bg.fillStyle(0xd9e7c7).fillRect(0, 0, 960, 640);
-    bg.fillStyle(0xb9d6ab).fillRect(0, 168, 960, 48);
-    bg.fillStyle(0x9ebd95).fillRect(0, 216, 960, 16);
-    bg.fillStyle(0xe6e2bd).fillRect(0, 232, 960, 408);
-    for (let y = 252; y < 640; y += 16) bg.fillStyle(0xdedcb3).fillRect(0, y, 960, 4);
-    const platform = (x: number, y: number, width: number) => {
-      bg.fillStyle(0xa6ad83).fillRect(x - width / 2 + 16, y - 16, width - 32, 48);
-      bg.fillStyle(0x79977a).fillRect(x - width / 2, y, width, 16);
-      bg.fillStyle(0xa8c78b).fillRect(x - width / 2 + 8, y - 12, width - 16, 28);
-      bg.fillStyle(0xc7d8a0).fillRect(x - width / 2 + 32, y - 20, width - 64, 24);
-    };
-    platform(200, 470, 320);
-    platform(720, 210, 256);
+    bg.fillStyle(0xe6e2bd).fillRect(0, 0, 960, 640);
+    const terrain = worldSpriteKey('battle-grass');
+    if (this.textures.exists(terrain)) {
+      this.add.image(0, 0, terrain).setOrigin(0).setScale(4);
+    } else {
+      bg.fillStyle(0xd9e7c7).fillRect(0, 0, 960, 448);
+      bg.fillStyle(0xa8c78b).fillRect(48, 408, 320, 40).fillRect(592, 216, 256, 40);
+    }
+    // Panels sit above the battlefield image; the background retains original GBA pixels at exactly 4×.
+    const panels = this.add.graphics();
     const statusPanel = (x: number, y: number, width: number) => {
-      bg.fillStyle(0x7d9486).fillRect(x + 4, y + 4, width, 80);
-      bg.fillStyle(0x354f5c).fillRect(x, y, width, 76);
-      bg.fillStyle(0xfaf8e9).fillRect(x + 4, y + 4, width - 8, 68);
-      bg.fillStyle(0xb9ccb3).fillRect(x + 8, y + 64, width - 16, 4);
+      panels.fillStyle(0x7d9486).fillRect(x + 4, y + 4, width, 80);
+      panels.fillStyle(0x354f5c).fillRect(x, y, width, 76);
+      panels.fillStyle(0xfaf8e9).fillRect(x + 4, y + 4, width - 8, 68);
+      panels.fillStyle(0xb9ccb3).fillRect(x + 8, y + 64, width - 16, 4);
     };
     statusPanel(544, 440, 352);
     statusPanel(64, 64, 352);

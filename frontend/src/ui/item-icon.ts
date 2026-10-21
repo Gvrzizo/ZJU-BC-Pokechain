@@ -2,7 +2,7 @@
  * 道具图标约定（public/assets/vendor/items/）。
  * 纯字符串 / 尺寸计算，不依赖 Vue 与 Phaser，供 ItemIcon.vue 与其他视图复用。
  *
- * 素材来源：PokeAPI sprites 仓库，仅课程演示用途，详见 frontend/README.md。
+ * 普通道具来自 PokeAPI sprites；跑鞋使用 GPT Image 生成图，来源见 frontend/README.md。
  */
 
 /** 仓库内置图标原生边长（PokeAPI 道具图 30×30）；替换素材后按图片实际宽度自适应 */
@@ -15,6 +15,7 @@ const ITEM_ICON_BASE = '/assets/vendor/items';
 
 /** typeId → 静态图标 URL（文件名即 typeId，见 frontend/README.md 素材表） */
 export function itemIconUrl(typeId: string): string {
+  if (typeId === 'running-shoes') return '/assets/generated/items/running-shoes.png';
   return `${ITEM_ICON_BASE}/${encodeURIComponent(typeId)}.png`;
 }
 
