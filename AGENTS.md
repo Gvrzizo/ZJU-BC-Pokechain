@@ -25,7 +25,7 @@ docker compose up -d --build && ./scripts/seed-demo.sh
 ```
 注意：`frontend/public/assets/vendor/`（版权素材）、`network/organizations`、`network/bin` 不在 git 内；跳过素材也能跑（前端回退程序化占位图）。人类读者的完整版见 `docs/setup.md`。
 
-**本轮验证（2026-10-25）**：重新摆放镇/草原/森林/海岸/孤岛树木，纠正此前把树底连接块叠成第三行的错误；完整大树为 2×2、小树为 1×2，使用显式位置和同一份碰撞占地，取消残格补半截树冠。实测链码 100 单测（8 套）、后端 378 单测（32 套）、前端 200 单测（33 个文件）全绿，另有 4 项离线 Python 切片回归测试全绿，前端构建通过；本地前端容器已重建并浏览器复核树木布局。此前 2026-10-21 已验证三端构建、端到端 25/25；2026-10-18 的免测试例外仅属于此前改造。视觉约定与生成提示词见 `docs/visual-design.md`、`frontend/art/prompts.json`。
+**本轮验证（2026-10-25）**：重新摆放镇/草原/森林/海岸/孤岛树木，纠正此前把树底连接块叠成第三行的错误；完整大树为 2×2、小树为 1×2，使用显式位置和同一份碰撞占地，取消残格补半截树冠。实测链码 101 单测（8 套）、后端 379 单测（32 套）、前端 200 单测（33 个文件）全绿，另有 4 项离线 Python 切片回归测试全绿，前端构建通过；本地前端容器已重建并浏览器复核树木布局。此前 2026-10-21 已验证三端构建、端到端 25/25；2026-10-18 的免测试例外仅属于此前改造。视觉约定与生成提示词见 `docs/visual-design.md`、`frontend/art/prompts.json`。
 
 **更新纪律（强制）**：任何改动合并前，必须同步更新本 `AGENTS.md` 的相关段落——结构/命令/**测试数**/架构决策四项，
 以及受影响模块的清单与页面列表；**子代理任务完成后由主代理核对**本文件是否与代码一致（实测跑一遍三套 `npm test` 并更新计数）。
@@ -36,9 +36,9 @@ docker compose up -d --build && ./scripts/seed-demo.sh
 
 ```bash
 # 链码
-cd chaincode/pokemon-cc && npm test && npm run build      # 100 单测（8 套）+ tsc
+cd chaincode/pokemon-cc && npm test && npm run build      # 101 单测（8 套）+ tsc
 # 后端
-cd backend && npm run build && npm test                   # nest build + 378 单测（32 套，内存 mock，免外部服务）
+cd backend && npm run build && npm test                   # nest build + 379 单测（32 套，内存 mock，免外部服务）
 cd backend && npm run seed                                # 演示数据（需先 build；PG/Redis 可达，mock 模式）；npm run seed:dev 免构建
 # 前端
 cd frontend && npm run build && npm test                  # vue-tsc + vite + 200 单测（vitest，33 个测试文件）

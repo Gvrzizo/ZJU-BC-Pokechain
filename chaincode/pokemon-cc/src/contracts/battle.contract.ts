@@ -385,6 +385,13 @@ export class BattleContract extends Contract {
         fail('BAD_STATE', `battle ${id} is ${battle.status}, expected ACTIVE or RESULT_SUBMITTED`);
       }
       const winnerId = opponentOf(battle, loserId);
+      // 认输同样是「结果」：写入 winner 与确定性 resultHash（真链结算页/排行榜/e2e 都读 result.winnerId）；
+      // 已有 SubmitResult 的 serverSig/resultHash 时只补 winner，不覆盖服务器签名。
+      battle.result.winnerId = winnerId;
+      if (!battle.result.serverSubmitted) {
+        battle.result.resultHash = sha256hex(`forfeit|${battle.id}|${loserId}|${reason}`);
+        battle.result.serverSubmitted = true;
+      }
       await settle(ctx, battle, winnerId, nowISO);
       battle.status = 'SETTLED';
       battle.arbiterNote = `FORFEIT: ${reason}`;

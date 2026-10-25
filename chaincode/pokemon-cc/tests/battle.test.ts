@@ -193,17 +193,38 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     expect((await w.getPlayer('u_gary')).wins).toBe(1);
   });
 
-  test('Forfeit：system 宣判，对方立即获胜结算', async () => {
+  test('Forfeit：system 宣判，对方立即获胜结算，并写入 result.winnerId/resultHash/serverSubmitted', async () => {
     await createBattle(w);
     await activateBattle(w);
     const done = JSON.parse(await w.run(() => w.battle.Forfeit(w.systemCtx(), 'b_1', 'u_gary', 'disconnect', T3, 'idem-f1')));
     expect(done.status).toBe('SETTLED');
+    // C6：认输也要写结果，否则真链结算页/排行榜读到空 winner
+    expect(done.result).toMatchObject({ winnerId: 'u_ash', serverSubmitted: true });
+    expect(done.result.resultHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(done.result.resultHash).toBe(hash(`forfeit|b_1|u_gary|disconnect`));
+    expect(done.arbiterNote).toBe('FORFEIT: disconnect');
     expect((await w.getPokemon('p_2')).ownerId).toBe('u_ash');
     expect((await w.getPlayer('u_ash')).points).toBe(1050);
     expect((await w.getPlayer('u_ash')).wins).toBe(1);
     expect((await w.getPlayer('u_gary')).losses).toBe(1);
     expect(w.eventNames()).toContain('BattleSettled');
     await expectCode(w.run(() => w.battle.Forfeit(w.ctxAs('u_ash'), 'b_1', 'u_gary', 'x', T3, 'idem-f2')), 'FORBIDDEN');
+  });
+
+  test('Forfeit 在 RESULT_SUBMITTED 时只补 winner，不覆盖已提交的 serverSig/resultHash', async () => {
+    await createBattle(w);
+    await activateBattle(w);
+    await submitResult(w, 'u_ash');
+    const submitted = await w.getBattle('b_1');
+    expect(submitted.status).toBe('RESULT_SUBMITTED');
+    const done = JSON.parse(await w.run(() => w.battle.Forfeit(w.systemCtx(), 'b_1', 'u_gary', 'disconnect', T4, 'idem-f3')));
+    expect(done.status).toBe('SETTLED');
+    expect(done.result.winnerId).toBe('u_ash');
+    expect(done.result.resultHash).toBe(submitted.result.resultHash);
+    expect(done.result.resultHash).toBe(RESULT_HASH);
+    expect(done.result.serverSig).toBe(SIG);
+    expect(done.result.serverSubmitted).toBe(true);
+    expect((await w.getPokemon('p_2')).ownerId).toBe('u_ash');
   });
 
   test('Dispute→Arbitrate（赢家结局）：仅 Org2 arbitrator 可仲裁', async () => {

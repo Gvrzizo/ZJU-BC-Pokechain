@@ -96,14 +96,28 @@ describe('Battle wager settlement & arbitration (mock chain)', () => {
     expect(again.status).toBe('SETTLED');
   });
 
-  it('Forfeit settles immediately with the other player as winner', async () => {
+  it('Forfeit settles immediately with the other player as winner（C6：写入 result.winnerId/resultHash）', async () => {
     const { contract } = makeChain();
     await registerPlayers(contract, 'ash', 'gary');
     await createActiveBattle(contract, 'b_forfeit');
     const settled = await contract.forfeitBattle(SYSTEM_IDENTITY, 'b_forfeit', 'ash', 'forfeit');
     expect(settled.status).toBe('SETTLED');
     expect(settled.result.winnerId).toBe('gary');
+    // 真链结算页/排行榜/e2e 都读 result.winnerId：认输也必须写结果
+    expect(settled.result.serverSubmitted).toBe(true);
+    expect(settled.result.resultHash).toMatch(/^[0-9a-f]{64}$/);
     expect((await contract.getPlayer('gary')).points).toBe(1050);
+    expect((await contract.getPlayer('gary')).wins).toBe(1);
+  });
+
+  it('Forfeit after SubmitResult keeps the submitted resultHash/serverSig, only winner is recorded', async () => {
+    const { contract } = makeChain();
+    await registerPlayers(contract, 'ash', 'gary');
+    await createActiveBattle(contract, 'b_forfeit_sub');
+    await contract.submitBattleResult(SYSTEM_IDENTITY, 'b_forfeit_sub', 'gary', 'r'.repeat(64), 'sig');
+    const settled = await contract.forfeitBattle(SYSTEM_IDENTITY, 'b_forfeit_sub', 'ash', 'forfeit');
+    expect(settled.status).toBe('SETTLED');
+    expect(settled.result).toMatchObject({ winnerId: 'gary', resultHash: 'r'.repeat(64), serverSig: 'sig', serverSubmitted: true });
     expect((await contract.getPlayer('gary')).wins).toBe(1);
   });
 
