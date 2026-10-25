@@ -1,6 +1,6 @@
 import { http } from './http';
 import type { ZoneId } from '@/stores/zone';
-import type { CaptureResult, WildEncounter } from '@/types';
+import type { CaptureResult, CaptureZonesResponse, WildEncounter } from '@/types';
 
 /**
  * 付费诱饵档位（与后端 `backend/src/pokemon/capture-derive.ts` 的 LURE_TIERS 对齐）：
@@ -25,6 +25,15 @@ export const LURE_TIERS: LureOption[] = [
 export interface WildEncounterResult extends WildEncounter {
   zone: { id: ZoneId; name: string; minLevel: number; maxLevel: number; maxStage: number };
   lure: { tier: number; cost: number; levelBonus: number; shinyMultiplier: number };
+}
+
+/**
+ * 区域表（docs/backend-api.md §2）：普通区 7 + 传说区 6 + 缺省区/旧别名。
+ * 前端不再镜像 `backend/src/game-data/encounter.data.ts`，启动时拉取一次即可。
+ */
+export async function getZones(): Promise<CaptureZonesResponse> {
+  const { data } = await http.get<CaptureZonesResponse>('/capture/zones');
+  return data;
 }
 
 export async function encounter(

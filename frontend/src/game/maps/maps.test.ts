@@ -18,6 +18,10 @@ import {
 } from './index';
 import { NPC_SPRITE_NAMES } from './npcs';
 import { zoneById } from '@/stores/zone';
+import { seedZonesForTest } from '@/stores/zone.fixture';
+
+// 区域表由后端 GET /capture/zones 提供（前端不再镜像）；地图测试不联网，先灌入与后端一致的响应快照
+seedZonesForTest();
 
 const DIRS = [
   { x: 0, y: -1 },

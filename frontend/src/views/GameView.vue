@@ -16,6 +16,7 @@ import { gameBus, BUS_EVENTS } from '@/game/bus';
 import { RUNNING_SPEED_MULTIPLIER, setRunningShoes } from '@/game/running';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useWorldStore } from '@/stores/world';
+import { useZoneStore } from '@/stores/zone';
 import CaptureOverlay from '@/components/CaptureOverlay.vue';
 import WorldHud from '@/components/WorldHud.vue';
 
@@ -25,9 +26,17 @@ const capturing = ref(false);
 const runHint = ref('');
 const pokemonStore = usePokemonStore();
 const world = useWorldStore();
+const zoneStore = useZoneStore();
 const router = useRouter();
 let game: Phaser.Game | null = null;
 let hintTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 区域表（等级带/阶段门槛/传说门控）的唯一事实来源是后端 `GET /capture/zones`：
+ * 进游戏页就在后台拉一次，**不 await**，Phaser 首帧不被网络阻塞；失败时
+ * `stores/zone.ts` 保留 town + 最小缺省区占位，遇敌请求仍带正确的区域 id。
+ */
+void zoneStore.load();
 
 /**
  * 保活（App.vue 的 `KeepAlive :include="['GameView']"`）：离开 /game 时组件不销毁，

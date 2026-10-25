@@ -3,7 +3,11 @@ import { createSSRApp, h } from 'vue';
 import { renderToString } from '@vue/server-renderer';
 import { createPinia } from 'pinia';
 import { useZoneStore } from '@/stores/zone';
+import { seedZonesForTest } from '@/stores/zone.fixture';
 import CaptureOverlay from './CaptureOverlay.vue';
+
+// 准备界面显示的区域名/等级带来自后端 GET /capture/zones（前端不再镜像）；SSR 测试不联网，先灌入响应快照
+seedZonesForTest();
 
 // 准备界面只看本地队伍缓存：SSR 下把两个拉取接口打桩为空，避免真发请求
 vi.mock('@/api/pokemon', () => ({ getMyPokemon: async () => [], getPokedex: async () => [] }));

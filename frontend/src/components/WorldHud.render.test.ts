@@ -5,8 +5,12 @@ import { createPinia } from 'pinia';
 import type { MapId } from '@/game/maps';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useWorldStore } from '@/stores/world';
+import { seedZonesForTest } from '@/stores/zone.fixture';
 import type { Pokemon } from '@/types';
 import WorldHud from './WorldHud.vue';
+
+// 区域表由后端 GET /capture/zones 提供（前端不再镜像）；SSR 测试不联网，先灌入响应快照
+seedZonesForTest();
 
 /** 世界 HUD：区域名 + 等级带常驻，传说区特殊配色与提示，跨图横幅，靠左上时自动避让 */
 async function render(

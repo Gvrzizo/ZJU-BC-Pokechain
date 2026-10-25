@@ -12,6 +12,8 @@ export interface User {
   points?: number;
   wins?: number;
   losses?: number;
+  /** 注册时间（GET /users/me 的 createdAt；链上 Player.createdAt 的落库副本） */
+  createdAt?: string;
   /** 是否已领新手御三家（GET /users/me；undefined = 未知，不触发 /starter 引导） */
   hasStarter?: boolean;
 }
@@ -111,6 +113,8 @@ export interface Item {
   metadataHash?: string;
   status: 'IDLE' | 'LOCKED_TRADE' | 'LOCKED_BATTLE';
   lockRef?: string;
+  /** 铸造/拆分时间（链上 ItemState.createdAt，堆叠合并按它判定最早堆叠） */
+  createdAt?: string;
 }
 
 export interface PokedexEntry {
@@ -131,9 +135,11 @@ export interface WildEncounter {
     nameZh?: string;
     level: number;
     previewSpriteUri?: string;
-    /** 官方种族捕获率（3–255），无队伍降级路径（快速捕捉）用它显示成功率 */
+    /** 官方种族捕获率（3–255），保留给审计/调试；成功率以服务端 captureChances 为准 */
     catchRate?: number;
   };
+  /** 快速捕捉（无队伍降级路径）的球成功率：服务端按满血投球算好，前端不再复算公式 */
+  captureChances?: WildBallOption[];
   commitHash: string;
   clientSeed?: string;
 }
@@ -142,6 +148,39 @@ export interface CaptureResult {
   success: boolean;
   shakes: number;
   pokemon?: Pokemon;
+}
+
+/**
+ * `GET /capture/zones` 的区域表条目（docs/backend-api.md §2「区域与栖息地野生池」）。
+ * 等级带/阶段门槛/栖息地/传说门控的唯一事实来源是后端 `game-data/encounter.data.ts`；
+ * 前端不再镜像整张表，只在启动时拉取一次（`stores/zone.ts::loadZones`）。
+ */
+export interface CaptureZoneInfo {
+  id: string;
+  /** 中文展示名（HUD / CaptureOverlay / 图鉴「出现区域」） */
+  name: string;
+  minLevel: number;
+  maxLevel: number;
+  /** 进化阶段门槛（`stage ≤ maxStage`）；传说区池显式指定，门槛不参与过滤 */
+  maxStage: number;
+  /** 栖息地属性集（传说区为 []） */
+  habitats: string[];
+  legendary: boolean;
+  /** 进入该区所需的钥匙 typeId（普通区为 null） */
+  keyTypeId: string | null;
+  /** 钥匙中文名（与 keyTypeId 同源） */
+  keyNameZh: string | null;
+  /** 是否允许付费诱饵（传说区 false，后端会拒 `LURE_NOT_ALLOWED`） */
+  lureAllowed: boolean;
+  /** 该区加权野生池的种族数 */
+  poolSize: number;
+}
+
+/** `GET /capture/zones` 响应：缺省区 + 旧三区别名 + 13 个区（前端另有 town 安全区伪区域） */
+export interface CaptureZonesResponse {
+  default: string;
+  aliases: Record<string, string>;
+  zones: CaptureZoneInfo[];
 }
 
 /** PvE 野怪战斗（docs/backend-api.md §2：POST /wild/start → POST /wild/:id/action） */
