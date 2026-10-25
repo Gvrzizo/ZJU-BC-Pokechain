@@ -15,16 +15,25 @@ export class BattleSocket {
 
   connect(battleId: string): void {
     this.battleId = battleId;
-    const auth = useAuthStore();
     const store = useBattleStore();
 
     this.socket = io('/battle', {
       path: '/socket.io',
-      auth: { token: auth.accessToken },
+      // H16：每次（重）连都取当前 token；闭包里的旧 token 会让过期后的重连永远 401
+      auth: (cb) => cb({ token: useAuthStore().accessToken }),
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 8000,
       transports: ['websocket', 'polling'],
+    });
+
+    this.socket.on('connect_error', (err: Error) => {
+      // 鉴权失败不重试（否则每 8 秒一次 401）：提示用户重新登录
+      if (/unauthorized|jwt|token|auth/i.test(err?.message ?? '')) {
+        store.setError('UNAUTHORIZED', err.message);
+        store.setReconnecting(false);
+        this.socket?.disconnect();
+      }
     });
 
     this.socket.on('connect', () => {
@@ -101,16 +110,25 @@ export class LobbySocket {
   private socket: Socket | null = null;
 
   connect(): void {
-    const auth = useAuthStore();
     const store = useBattleStore();
 
     this.socket = io('/battle', {
       path: '/socket.io',
-      auth: { token: auth.accessToken },
+      // H16：每次（重）连都取当前 token；闭包里的旧 token 会让过期后的重连永远 401
+      auth: (cb) => cb({ token: useAuthStore().accessToken }),
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 8000,
       transports: ['websocket', 'polling'],
+    });
+
+    this.socket.on('connect_error', (err: Error) => {
+      // 鉴权失败不重试（否则每 8 秒一次 401）：提示用户重新登录
+      if (/unauthorized|jwt|token|auth/i.test(err?.message ?? '')) {
+        store.setError('UNAUTHORIZED', err.message);
+        store.setReconnecting(false);
+        this.socket?.disconnect();
+      }
     });
 
     this.socket.on('connect', () => store.setLobbyConnected(true));

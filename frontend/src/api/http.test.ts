@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import axios, { type AxiosRequestConfig } from 'axios';
 import { createPinia, setActivePinia } from 'pinia';
-import { attachInterceptors, API_BASE } from './http';
+import { attachInterceptors, API_BASE, REFRESH_TIMEOUT_MS, refreshAccessToken } from './http';
 import { useAuthStore } from '@/stores/auth';
 
 function makeClient(capture: { config?: AxiosRequestConfig }) {
@@ -59,5 +59,24 @@ describe('http 拦截器', () => {
     await client.post('/b', {});
     const n2 = (c2.config!.headers as Record<string, string>)['X-Nonce'];
     expect(n1).not.toBe(n2);
+  });
+
+  it('refresh 请求带 5s 超时（H17：首屏不会因 refresh 挂起卡死）', async () => {
+    useAuthStore().setTokens('old-access', 'old-refresh');
+    const post = vi.spyOn(axios, 'post').mockResolvedValue({
+      data: { accessToken: 'new-access', refreshToken: 'new-refresh' },
+    } as never);
+    try {
+      await expect(refreshAccessToken()).resolves.toBe('new-access');
+      expect(post).toHaveBeenCalledWith(
+        `${API_BASE}/auth/refresh`,
+        { refreshToken: 'old-refresh' },
+        { timeout: REFRESH_TIMEOUT_MS },
+      );
+      expect(REFRESH_TIMEOUT_MS).toBe(5000);
+      expect(useAuthStore().accessToken).toBe('new-access');
+    } finally {
+      post.mockRestore();
+    }
   });
 });

@@ -428,7 +428,7 @@ p = min(1, a / 255)                                                   // 大师�
 - `stats` 用与 `GET /pokemon/:id` 相同的口径（种族值 + IV + EV + 等级 + 性格，见 §2「能力值计算」）；`qty` 是押注数量、`held` 是该堆叠当前持有量（`0` = 已不在链上）。`wagerDetail*` / `teamDetail*` 的宝可梦一项**只有公开字段**（`id/name/speciesId/nameZh/level/shiny/bond/stats/unavailable`）——`name` 是链上名字（改名后即玩家昵称），`stats` 是最终六项能力值，**IV/EV/性格不出现在任何房间响应里**。
 
 ### WebSocket（Socket.IO，命名空间 `/battle`，JWT 鉴权）
-- 客户端→服务端：`battle:join {battleId}`、`battle:action {battleId, seq, action}`
+- 客户端→服务端：`battle:join {battleId}`、`battle:action {battleId, seq, action}`。`battle:join` 先回 `battle:state`（带 `you`），若当前有未结算回合再补发 `battle:turn {awaitingPlayerIds, deadline}`——刷新/重连后立即恢复出招按钮与倒计时（H15）；鉴权用动态 token（每次重连取当前 accessToken，H16）。
 - `action` 用**资产 id** 而非引擎槽位：`{type:'move', moveId:'thunderbolt'}`、`{type:'switch', targetPokemonId:'p_xxx'}`、`{type:'run'}`；服务端按对局 state 解析成引擎槽位（引擎原生 `moveIndex`/`toIndex` 仍接受，内部/测试用，与 id 形式二选一）。`item` 类型暂不支持：服务端直接拒绝 `ITEM_NOT_SUPPORTED`，**不消耗回合**（避免旧行为里道具动作吞掉一次行动）。
 - `battle:error` 常见 code：`BAD_ACTION`（action.type 缺失/未知）、`UNKNOWN_MOVE`（技能不属于出战宝可梦）、`UNKNOWN_POKEMON`（换宠目标不在队伍）、`INVALID_MOVE_INDEX` / `INVALID_SWITCH_INDEX`、`SWITCH_TO_ACTIVE` / `SWITCH_TO_FAINTED` / `MUST_SWITCH`、`ACTION_ALREADY_SUBMITTED`、`ITEM_NOT_SUPPORTED`、`BATTLE_FINISHED`、`BATTLE_NOT_LIVE`、`NOT_PARTY`、`UNAUTHORIZED`；前端 `BATTLE_ERROR_TEXT` 映射为中文提示，未收录的 code 原样展示。
 - 服务端→客户端：`battle:state {fullState}`（每回合广播，服务端权威）、`battle:turn {awaitingPlayerId, deadline}`、`battle:entry {awaitingPlayerIds, deadline, graceMs}`（入场宽限期内的等待方）、`battle:end {winnerId, resultHash, txId}`、`battle:error {code}`、`battle:activated {roomId, battleId}`（押注双确认、战斗激活后向双方 `user:<playerId>` 房间推送——**先确认方没有携带 battleId 的 REST 响应，靠该推送自动进入 `/battle/:id`**；大厅视图需长连 `/battle` 监听）、`battle:room-kicked {roomId, hostId, playerId}`（房主请离后推给被请离者 `user:<playerId>` 房间；大厅视图同时用 5s 轮询兜底发现被请离，见 §5 房间体验扩展）
@@ -476,7 +476,7 @@ p = min(1, a / 255)                                                   // 大师�
 
 ## 9. 安全基线
 
-helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2、JWT 短时效、nonce 防重放、限流、日志脱敏（不记密码/私钥/seed 明文——serverSeed 仅在 reveal 前存内存/KMS，reveal 后上链公开）。
+helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2、JWT 短时效、nonce 防重放、限流、日志脱敏（不记密码/私钥/seed 明文——serverSeed 仅在 reveal 前存内存/KMS，reveal 后上链公开）。前端会话：refresh 请求固定 5s 超时（H17，避免首屏守卫挂起）、Socket.IO 每次（重）连用回调取当前 accessToken 且鉴权失败停止重连（H16）、交易确认按 username 比较 `fromId/toId`（H14，UUID 比较会导致确认状态错误）。
 
 ## 10. 积分经济
 

@@ -25,6 +25,8 @@ export interface ActiveBattle {
   entryTimer?: NodeJS.Timeout;
   entryDeadline: number;
   turnTimer?: NodeJS.Timeout;
+  /** 当前待结算回合（重连/刷新后由网关补发 battle:turn，H15） */
+  turn?: { awaitingPlayerIds: string[]; deadline: number };
   disconnectTimers: Map<string, NodeJS.Timeout>;
   finalized: boolean;
 }
@@ -201,9 +203,17 @@ export class BattleManagerService {
     if (!state.A.acted && !battle.engine.finished) awaiting.push(battle.playerA);
     if (!state.B.acted && !battle.engine.finished) awaiting.push(battle.playerB);
     const deadline = Date.now() + this.turnTimeoutMs;
+    battle.turn = { awaitingPlayerIds: awaiting, deadline };
     battle.turnTimer = setTimeout(() => void this.onTurnTimeout(battle), this.turnTimeoutMs);
     battle.turnTimer.unref?.();
     this.events.emit('turn', battle.battleId, { awaitingPlayerIds: awaiting, deadline });
+  }
+
+  /** 当前待结算回合（H15：battle:join 时补发，刷新后仍能看到该谁出招与剩余时间）。 */
+  currentTurn(battleId: string): { awaitingPlayerIds: string[]; deadline: number } | undefined {
+    const battle = this.active.get(battleId);
+    if (!battle || battle.finalized || battle.engine.finished) return undefined;
+    return battle.turn;
   }
 
   private async onTurnTimeout(battle: ActiveBattle): Promise<void> {
