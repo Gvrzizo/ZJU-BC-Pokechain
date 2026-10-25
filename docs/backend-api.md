@@ -35,10 +35,10 @@ Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + r
 | POST | `/wild/:id/action` | `{action:{type:'move',moveId}\|{type:'ball',ballItemId}\|{type:'switch',targetPokemonId}\|{type:'run'}}` → 推进一个回合并返回新状态。规则见下文「野怪战斗」。已结束/超时的会话只返回终态（幂等，不再消耗球） |
 | GET | `/wild/:id` | 当前会话状态（重进战斗界面用；仅会话所有者可读） |
 | POST | `/capture/attempt` | **快速捕捉（兼容路径，e2e-smoke.sh 依赖）**：`{eventId, ballItemId}` → ① 校验球归属并 `ConsumeItem` ② 提交 `RevealAndVerify` ③ 按捕捉公式判定 ④ 成功则 `MintFromCapture`，失败返回 `{success:false, shakes:n}`。成功额外返回 `catchReward`（+20 积分，见 §10）。全程幂等（idemKey=eventId+'-attempt-'+n）。**等价于满血投球**：`p = captureProbability(1,1,catchRate,ballBonus)`；同一 eventId 的野怪战斗已结束时拒绝（`WILD_BATTLE_FINISHED`） |
-| POST | `/pokemon/:id/train` | **特训（只加努力值）**：链码 `AddPoints(-cost)` + `ApplyGrowth(evs += cost×4)`；**不改 exp/level**（等级只靠战斗经验与神奇糖果、个体值只靠王冠类道具，见下「集中升级路径」）。已满 510 EV 抛 `EV_MAXED`（不扣积分） |
-| POST | `/pokemon/:id/evolve` | 进化：**不带 `stoneItemId` = 等级进化**（EVOLUTIONS 里纯等级分支且等级达标，不消耗道具）；**带 = 进化石进化**（消耗 1 个对应石头）。两种路径都 `ApplyGrowth(speciesId 变更)` 并按新种族学习表补学技能。返回更新后的详情（含新进化链）。改过名的宝可梦进化后保留昵称 |
+| POST | `/pokemon/:id/train` | **特训（只加努力值）**：链码 `AddPoints(-cost)` + `ApplyGrowth(evs += cost×4)`；**不改 exp/level**（等级只靠战斗经验与神奇糖果、个体值只靠王冠类道具，见下「集中升级路径」）。已满 510 EV 抛 `EV_MAXED`（不扣积分）；交易/对战锁定中 `ASSET_LOCKED`(409)（**先拒绝，不扣积分**，H7） |
+| POST | `/pokemon/:id/evolve` | 进化：**不带 `stoneItemId` = 等级进化**（EVOLUTIONS 里纯等级分支且等级达标，不消耗道具）；**带 = 进化石进化**（消耗 1 个对应石头）。两种路径都 `ApplyGrowth(speciesId 变更)` 并按新种族学习表补学技能。返回更新后的详情（含新进化链）。改过名的宝可梦进化后保留昵称；交易/对战锁定中 `ASSET_LOCKED`(409)（**石头不消耗**，H7） |
 | POST | `/pokemon/:id/rename` | `{name}` **改名（昵称）**：第一次免费，之后每次 **50 积分**（`AddPoints(-50, reason='rename:<pokemonId>:<ordinal>')`）+ 链上 `ApplyGrowth({name})`。昵称 1-12 个字符（trim + 折叠空白后按码点计，中英文均可），拒绝控制字符与 `<>&"'`；非本人（含已放生）`NOT_OWNER`(403)、交易/对战锁定中 `ASSET_LOCKED`(409)、格式非法 `INVALID_NAME`(400)、余额不足 `INSUFFICIENT_POINTS`(400)。返回 `{name, renameCount, charged}`，见下「改名」 |
-| POST | `/pokemon/:id/release` | `Release`（前端二次确认）；成功后 +等级×1 积分（reason=`reward:release:<pokemonId>`，见 §10），并清掉该宝可梦的伤势键 |
+| POST | `/pokemon/:id/release` | `Release`（前端二次确认）；成功后 +等级×1 积分（reason=`reward:release:<pokemonId>`，见 §10），并清掉该宝可梦的伤势键；交易/对战锁定中 `ASSET_LOCKED`(409)，不发放奖励 |
 | POST | `/pokemon/center/heal` | **宝可梦中心**：全队回满，每次 **10 积分**（`AddPoints(-10, reason='heal:center')`）。只治疗本人 `IDLE` 的宝可梦；全员满血时**不扣费**（`charged=false`）。返回 `{cost, charged, points, healed:[{pokemonId,speciesId,name,before,after,maxHp}]}`（见下「伤势持久化」） |
 
 **技能获取（2026-10-25 收紧）**：只有两条路径——**升级学习表**（`applyExp` 跨过学习等级时自动学会，见下「升级与进化」）与**技能机 TM**（`POST /items/:id/use` 的 `tm` 分支，消耗 1 个 TM）。原先的 `POST /pokemon/:id/moves/learn`（免费学任意技能）已下线，链上 `ApplyGrowth` 也只接受 system 证书，玩家无法绕过 TM/学习表改技能。
@@ -259,6 +259,8 @@ p = min(1, a / 255)                                                   // 大师�
 | admin 投放 | 任意（演示/补偿） | `POST /admin/items/mint` |
 
 **道具使用效果（`backend/src/items/items.service.ts`，全部 `ConsumeItem` + `ApplyGrowth`）**
+
+> **锁定校验（H7，2026-10-25）**：所有效果道具的目标宝可梦都必须**本人所有且 `status=IDLE`**；交易/对战锁定中统一 409 `ASSET_LOCKED`，且在 `ConsumeItem`/`AddPoints` **之前**拒绝——道具与积分不会被白白消耗。
 
 | typeId | 入参 | 效果 | 错误码 |
 |---|---|---|---|
