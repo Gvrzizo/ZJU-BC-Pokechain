@@ -88,6 +88,12 @@ async function fixture(chain: MockChainAdapter): Promise<void> {
       nowISO: BASE_ISO,
       idemKey: `fixture-fund-${playerId}`,
     });
+    // 与链上 H10 解耦：fixture 账号视为已过 72h 转账锁（锁专项由 transfer-lock.spec.ts 覆盖）。
+    await chain.clearTransferLock(ADMIN_IDENTITY, {
+      playerId,
+      nowISO: BASE_ISO,
+      idemKey: `fixture-unlock-${playerId}`,
+    });
   }
 }
 

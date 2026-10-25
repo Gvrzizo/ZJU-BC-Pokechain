@@ -46,6 +46,9 @@ export class ContractService {
   transferPoints(as: ChainIdentity, fromId: string, toId: string, amount: number, m?: TxMeta) {
     return this.chain.transferPoints(as, { fromId, toId, amount, ...this.meta(m) });
   }
+  clearTransferLock(as: ChainIdentity, playerId: string, m?: TxMeta): Promise<PlayerState> {
+    return this.chain.clearTransferLock(as, { playerId, ...this.meta(m) });
+  }
 
   commitRandom(
     as: ChainIdentity,

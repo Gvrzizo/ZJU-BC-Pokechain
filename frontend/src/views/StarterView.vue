@@ -107,7 +107,7 @@ function itemName(typeId: string) {
 
       <template v-if="!claimed">
         <p style="font-size: var(--px-fs-sm); text-align: center">
-          欢迎，训练家！注册即得 <strong>1000 积分</strong>，再挑一只御三家，
+          欢迎，训练家！注册即得 <strong>400 积分</strong>，再挑一只御三家，
           外加 <strong>精灵球 ×5 + 伤药 ×2</strong>。御三家只能选一次，个体值/性格/闪光全部来自链上
           承诺-揭示随机数（可在公平性页面复核）。
         </p>

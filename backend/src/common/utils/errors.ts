@@ -58,6 +58,8 @@ export const CHAIN_HTTP_STATUS: Readonly<Record<string, HttpStatus>> = {
   WILD_SESSION_NOT_FOUND: HttpStatus.NOT_FOUND,
   // ---- 状态机 / 锁定 / 重复 ----
   ASSET_LOCKED: HttpStatus.CONFLICT,
+  /** H10：注册后 72h 转账锁 / 交易支付积分被锁。 */
+  TRANSFER_LOCKED: HttpStatus.CONFLICT,
   BAD_STATE: HttpStatus.CONFLICT,
   INVALID_BATTLE_STATE: HttpStatus.CONFLICT,
   INVALID_RANDOM_STATE: HttpStatus.CONFLICT,

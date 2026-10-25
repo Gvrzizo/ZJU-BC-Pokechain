@@ -9,6 +9,14 @@ export type BattleStatus = 'CREATED' | 'ACTIVE' | 'RESULT_SUBMITTED' | 'DISPUTED
 
 /** 排位分：注册即 1000，仅 system 经 PlayerContract.UpdateRating 变更（0-99999）。 */
 export const RATING_DEFAULT = 1000;
+
+/**
+ * 注册积分与转账锁（H10 经济重平衡）：新账号初始 400P，注册后 72h 内不能把积分转出
+ * （TransferPoints，以及交易里由本人支付的 offer/request 积分）。目的是堵"多开小号→主号转账"。
+ * 演示账号由 seed 以 admin 身份 `ClearTransferLock` 解锁；旧记录缺 transferLockUntil = 无锁。
+ */
+export const INITIAL_POINTS = 400;
+export const TRANSFER_LOCK_MS = 72 * 3600 * 1000;
 export const RATING_MAX = 99999;
 
 export interface Player {
@@ -22,6 +30,8 @@ export interface Player {
   losses: number;
   rating: number;
   createdAt: string;
+  /** ISO 时间戳：此前禁止转出积分；缺省/空串 = 无锁（旧记录兼容）。 */
+  transferLockUntil?: string;
 }
 
 export interface Ivs {

@@ -71,6 +71,10 @@ async function fixture(world: World): Promise<void> {
     await world.run(() =>
       world.player.AddPoints(world.systemCtx(), playerId, String(1000 - current), 'fixture-fund', BASE_ISO, `fixture-fund-${playerId}`),
     );
+    // 与链上 H10 解耦：fixture 账号视为已过 72h 转账锁（锁专项由 player.test.ts 覆盖）。
+    await world.run(() =>
+      world.player.ClearTransferLock(world.adminCtx(), playerId, BASE_ISO, `fixture-unlock-${playerId}`),
+    );
   }
 }
 

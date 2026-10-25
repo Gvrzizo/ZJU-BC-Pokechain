@@ -38,6 +38,9 @@ const BOND_MIN_DELTA = 1;
 const BOND_MAX_DELTA = 50;
 const BOND_UP_MAX_IDS = 100;
 const RATING_DEFAULT = 1000;
+/** 注册积分与 72h 转账锁（H10；与链码 model.INITIAL_POINTS/TRANSFER_LOCK_MS 一致）。 */
+const INITIAL_POINTS = 400;
+const TRANSFER_LOCK_MS = 72 * 3600 * 1000;
 /** 交易 TTL 上限（与链码 trade.contract.ts 一致：7 天）。 */
 const TRADE_TTL_MAX_MS = 7 * 24 * 3600 * 1000;
 const RATING_MAX = 99999;
@@ -72,6 +75,14 @@ function withPokemonDefaults(pokemon: PokemonState): PokemonState {
   if (!pokemon.evs) pokemon.evs = zeroEvs();
   if (typeof pokemon.bond !== 'number') pokemon.bond = BOND_DEFAULT;
   return pokemon;
+}
+
+/** 72h 转账锁（H10）：nowISO < transferLockUntil 时禁止转出积分（镜像链码 state.assertTransferUnlocked）。 */
+function assertTransferUnlocked(player: PlayerState, nowISO: string): void {
+  const until = player.transferLockUntil;
+  if (until && Date.parse(nowISO) < Date.parse(until)) {
+    throw new CodedError('TRANSFER_LOCKED', `player ${player.playerId} cannot transfer points before ${until}`);
+  }
 }
 
 /** rating 字段上线前的旧记录按默认值读回（镜像链码 loadPlayer 的兼容处理）。 */
@@ -119,6 +130,7 @@ export const PERSISTED_METHODS = [
   'getPlayer',
   'addPoints',
   'transferPoints',
+  'clearTransferLock',
   'updateRating',
   // RandomContract
   'commitRandom',
@@ -329,11 +341,12 @@ export class MockChainAdapter extends ChainAdapter {
         mspId: as.mspId,
         nickname: args.nickname,
         role: 'player',
-        points: 1000,
+        points: INITIAL_POINTS,
         wins: 0,
         losses: 0,
         rating: RATING_DEFAULT,
         createdAt: nowISO,
+        transferLockUntil: new Date(Date.parse(nowISO) + TRANSFER_LOCK_MS).toISOString(),
       };
       this.put(key, player);
       this.emit('PlayerRegistered', { playerId: player.playerId, nickname: player.nickname });
@@ -424,10 +437,30 @@ export class MockChainAdapter extends ChainAdapter {
       if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
         throw new CodedError('INVALID_PARAM', 'amount must be a positive integer');
       }
+      const from = this.mustGet<PlayerState>(`player:${args.fromId}`, 'PLAYER_NOT_FOUND', `player ${args.fromId}`);
+      assertTransferUnlocked(from, nowISO);
       this.mustGet<PlayerState>(`player:${args.toId}`, 'PLAYER_NOT_FOUND', `player ${args.toId}`);
       this.changePoints(args.fromId, -args.amount, 'transfer-out');
       this.changePoints(args.toId, args.amount, 'transfer-in');
       return { fromId: args.fromId, toId: args.toId, amount: args.amount };
+    });
+  }
+
+  /** 解除 72h 转账锁：仅 admin/system（seed 解锁演示账号用；后端不暴露 HTTP API）。 */
+  async clearTransferLock(
+    as: ChainIdentity,
+    args: { playerId: string } & TxMeta,
+  ): Promise<PlayerState> {
+    const { nowISO, idemKey } = this.meta(args);
+    return this.idempotent(idemKey, nowISO, () => {
+      if (as.role !== 'admin' && as.role !== 'system') {
+        throw new CodedError('FORBIDDEN', 'only admin/system can clear the transfer lock');
+      }
+      const player = this.mustGet<PlayerState>(`player:${args.playerId}`, 'PLAYER_NOT_FOUND', `player ${args.playerId}`);
+      player.transferLockUntil = '';
+      this.put(`player:${player.playerId}`, player);
+      this.emit('TransferLockCleared', { playerId: player.playerId });
+      return player;
     });
   }
 
@@ -1002,6 +1035,8 @@ export class MockChainAdapter extends ChainAdapter {
       if (to.points < args.request.points) {
         throw new CodedError('INSUFFICIENT_POINTS', `player ${args.toId} balance ${to.points} cannot cover ${args.request.points}`);
       }
+      if (args.offer.points > 0) assertTransferUnlocked(from, nowISO);
+      if (args.request.points > 0) assertTransferUnlocked(to, nowISO);
       // 先全量预检（失败不留半锁），再只锁发起方 offer
       for (const id of args.request.pokemonIds) this.assertPokemonTradable(id, args.toId);
       for (const id of args.request.itemIds) this.assertItemTradable(id, args.toId);
@@ -1058,7 +1093,7 @@ export class MockChainAdapter extends ChainAdapter {
       this.emit('TradeConfirmed', { id: trade.id, playerId: args.playerId });
 
       if (trade.confirmations.from && trade.confirmations.to) {
-        this.executeTrade(trade);
+        this.executeTrade(trade, nowISO);
       } else {
         this.put(`trade:${trade.id}`, trade);
       }
@@ -1067,11 +1102,13 @@ export class MockChainAdapter extends ChainAdapter {
   }
 
   /** Atomic execution: every check failure throws and rolls the whole transaction back. */
-  private executeTrade(trade: TradeState): void {
+  private executeTrade(trade: TradeState, nowISO: string): void {
     const snapshot = new Map(this.state);
     try {
       const from = this.mustGet<PlayerState>(`player:${trade.fromId}`, 'PLAYER_NOT_FOUND', `player ${trade.fromId}`);
       const to = this.mustGet<PlayerState>(`player:${trade.toId}`, 'PLAYER_NOT_FOUND', `player ${trade.toId}`);
+      if (trade.offer.points > 0) assertTransferUnlocked(from, nowISO);
+      if (trade.request.points > 0) assertTransferUnlocked(to, nowISO);
       if (trade.offer.points > 0 && from.points < trade.offer.points) {
         throw new CodedError('INSUFFICIENT_POINTS', `from ${trade.fromId} cannot cover offer points`);
       }

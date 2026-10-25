@@ -46,6 +46,8 @@ export interface PlayerState {
   /** 排位分：注册即 1000，仅 system 经 PlayerContract.UpdateRating 变更（0-99999）。 */
   rating: number;
   createdAt: string;
+  /** ISO 时间戳：此前禁止转出积分（H10 注册 72h 锁）；缺省/空串 = 无锁（旧记录兼容）。 */
+  transferLockUntil?: string;
 }
 
 export type PokemonStatus = 'IDLE' | 'LOCKED_TRADE' | 'LOCKED_BATTLE' | 'RELEASED';

@@ -84,7 +84,7 @@ async function onSubmit() {
         {{ loading ? '...' : '注册并进入' }}
       </PixelButton>
       <p class="mt-16" style="font-size: var(--px-fs-sm); text-align: center">
-        注册即送 1000 积分 + 新手礼包：御三家三选一，附赠精灵球×5、伤药×2。
+        注册即送 400 积分 + 新手礼包：御三家三选一，附赠精灵球×5、伤药×2。
       </p>
       <p class="mt-16" style="font-size: var(--px-fs-sm); text-align: center">
         已有账号？<router-link to="/login">登录</router-link>

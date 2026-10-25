@@ -2,9 +2,10 @@ import { Context, Contract, Returns, Transaction } from 'fabric-contract-api';
 import { assertISO, fail, requireNonEmpty, safeInt } from '../common/assert';
 import { getMspId, requireRole, ROLES } from '../common/cid';
 import { withIdempotency } from '../common/idempotency';
-import { Player, RATING_DEFAULT, RATING_MAX } from '../common/model';
+import { INITIAL_POINTS, Player, RATING_DEFAULT, RATING_MAX, TRANSFER_LOCK_MS } from '../common/model';
 import {
   assertCallerIsPlayer,
+  assertTransferUnlocked,
   creditPoints,
   debitPoints,
   emit,
@@ -12,8 +13,6 @@ import {
   loadPlayer,
   savePlayer,
 } from '../common/state';
-
-const INITIAL_POINTS = 1000;
 
 export class PlayerContract extends Contract {
   constructor() {
@@ -48,6 +47,7 @@ export class PlayerContract extends Contract {
         losses: 0,
         rating: RATING_DEFAULT,
         createdAt: nowISO,
+        transferLockUntil: new Date(Date.parse(nowISO) + TRANSFER_LOCK_MS).toISOString(),
       };
       await savePlayer(ctx, player);
       emit(ctx, 'PlayerRegistered', { playerId, mspId: player.mspId, nickname });
@@ -127,6 +127,7 @@ export class PlayerContract extends Contract {
       const value = safeInt(amount, 'amount', { min: 1 });
       const from = await loadPlayer(ctx, fromId);
       assertCallerIsPlayer(ctx, from);
+      assertTransferUnlocked(from, nowISO);
       const to = await loadPlayer(ctx, toId);
       debitPoints(from, value);
       creditPoints(to, value);
@@ -134,6 +135,29 @@ export class PlayerContract extends Contract {
       await savePlayer(ctx, to);
       emit(ctx, 'PointsChanged', { fromId, toId, amount: value, reason: 'transfer' });
       return JSON.stringify({ fromId, toId, amount: value, fromBalance: from.points, toBalance: to.points });
+    });
+  }
+
+  /**
+   * 解除 72h 转账锁（H10）：admin/system 专用。seed 用它解锁演示账号；
+   * 正常注册用户不接受此入口的公开调用（后端不暴露 HTTP API）。
+   */
+  @Transaction()
+  public async ClearTransferLock(
+    ctx: Context,
+    playerId: string,
+    nowISO: string,
+    idemKey: string,
+  ): Promise<string> {
+    return withIdempotency(ctx, idemKey, nowISO, async () => {
+      requireRole(ctx, 'admin', 'system');
+      requireNonEmpty(playerId, 'playerId');
+      assertISO(nowISO, 'nowISO');
+      const player = await loadPlayer(ctx, playerId);
+      player.transferLockUntil = '';
+      await savePlayer(ctx, player);
+      emit(ctx, 'TransferLockCleared', { playerId });
+      return JSON.stringify(player);
     });
   }
 

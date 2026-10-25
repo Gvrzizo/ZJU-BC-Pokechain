@@ -7,6 +7,7 @@ import { AssetBundle, BOND_RESET_ON_TRANSFER, Trade } from '../common/model';
 import { collectQuery, selectorQuery } from '../common/query';
 import {
   assertCallerIsPlayer,
+  assertTransferUnlocked,
   emit,
   exists,
   loadItem,
@@ -61,9 +62,12 @@ async function unlockTradeAssets(ctx: Context, trade: Trade): Promise<void> {
  * 双方确认后的原子执行：交换宝可梦/道具 owner、划转积分
  * （from 收 request.points、付 offer.points）。任何校验失败整体抛错回滚。
  */
-async function executeTrade(ctx: Context, trade: Trade): Promise<void> {
+async function executeTrade(ctx: Context, trade: Trade, nowISO: string): Promise<void> {
   const from = await loadPlayer(ctx, trade.fromId);
   const to = await loadPlayer(ctx, trade.toId);
+  // 执行时重新校验 72h 转账锁（创建后锁可能仍未到期）
+  if (trade.offer.points > 0) assertTransferUnlocked(from, nowISO);
+  if (trade.request.points > 0) assertTransferUnlocked(to, nowISO);
   if (from.points < trade.offer.points) {
     fail('INSUFFICIENT_POINTS', `from ${trade.fromId} has ${from.points}, needs ${trade.offer.points}`);
   }
@@ -189,6 +193,9 @@ export class TradeContract extends Contract {
       if (to.points < request.points) {
         fail('INSUFFICIENT_POINTS', `to ${toId} has ${to.points}, needs ${request.points}`);
       }
+      // 72h 转账锁：谁支付积分就校验谁（H10）
+      if (offer.points > 0) assertTransferUnlocked(from, nowISO);
+      if (request.points > 0) assertTransferUnlocked(to, nowISO);
       // 只锁发起方自己的 offer；积分不动，仅在执行时划转
       for (const p of offerAssets.pokemons) {
         p.status = 'LOCKED_TRADE';
@@ -245,7 +252,7 @@ export class TradeContract extends Contract {
       trade.confirmations[side] = true;
       emit(ctx, 'TradeConfirmed', { id, side, playerId });
       if (trade.confirmations.from && trade.confirmations.to) {
-        await executeTrade(ctx, trade);
+        await executeTrade(ctx, trade, nowISO);
         trade.status = 'EXECUTED';
         emit(ctx, 'TradeExecuted', { id, fromId: trade.fromId, toId: trade.toId });
       }

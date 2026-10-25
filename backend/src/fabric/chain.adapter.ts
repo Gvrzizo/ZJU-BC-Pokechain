@@ -43,6 +43,11 @@ export abstract class ChainAdapter {
     as: ChainIdentity,
     args: { playerId: string; delta: number; reason: string } & TxMeta,
   ): Promise<PlayerState>;
+  /** PlayerContract.ClearTransferLock：仅 admin/system，解除 72h 转账锁（H10）。 */
+  abstract clearTransferLock(
+    as: ChainIdentity,
+    args: { playerId: string } & TxMeta,
+  ): Promise<PlayerState>;
   /** PlayerContract.UpdateRating：仅 system，0-99999（chaincode-api.md §2.1）。 */
   abstract updateRating(
     as: ChainIdentity,
