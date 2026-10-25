@@ -94,6 +94,9 @@ services:
     build: ./backend
     container_name: pokechain-backend
     restart: unless-stopped
+    # node 作为 PID 1 会忽略 SIGTERM（内核对无信号处理器的 init 不执行默认终止动作），
+    # 导致 docker stop / 关机时要等满 10 秒宽限期强杀；用 tini 作 PID 1 转发信号即可立即退出
+    init: true
     # backend/.env 存在时加载（本文件 environment 段的默认值优先级更高，会覆盖同名变量）
     env_file:
       - path: ./backend/.env
