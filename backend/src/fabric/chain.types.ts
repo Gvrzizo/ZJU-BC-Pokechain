@@ -200,6 +200,61 @@ export interface ChainEventPayload {
   [key: string]: unknown;
 }
 
+// ---- 已知关键事件的强类型视图（P2-2b）----
+// 链码与 Mock 共用这些 payload 类型；未收录的事件仍可按 string + ChainEventPayload 订阅。
+// 字段大多可选是刻意的：真链历史/Mock 旧记录可能缺字段，消费方必须容忍。
+
+/** 积分变化：加/扣分、转账、交易、押注托管、arena 结算都会发（chaincode-api.md §2.1）。 */
+export interface PointsChangedEvent extends ChainEventPayload {
+  playerId?: string;
+  fromId?: string;
+  toId?: string;
+  delta?: number;
+  /** 链码字段名 balance，Mock 历史字段名 points；两个都出现时以 balance 为准。 */
+  balance?: number;
+  points?: number;
+  amount?: number;
+  reason?: string;
+}
+
+/** 对局结算（ConfirmResult 双确认、SettleBattle、Forfeit、Arbitrate、CancelBattle）。 */
+export interface BattleSettledChainEvent extends ChainEventPayload {
+  id: string;
+  winnerId: string;
+  playerA?: string;
+  playerB?: string;
+  outcome?: string;
+  via?: string;
+}
+
+/** 道具堆叠归一（ItemContract.MergeStacks / 交易、押注结算时的自动合并）。 */
+export interface ItemMergedEvent extends ChainEventPayload {
+  ownerId: string;
+  typeId: string;
+  id: string;
+  quantity: number;
+  merged: string[];
+}
+
+/** 玩家注册（排行榜首次建索引依赖它）。 */
+export interface PlayerRegisteredEvent extends ChainEventPayload {
+  playerId: string;
+  nickname?: string;
+  mspId?: string;
+}
+
+export interface ChainEventMap {
+  PointsChanged: PointsChangedEvent;
+  BattleSettled: BattleSettledChainEvent;
+  ItemMerged: ItemMergedEvent;
+  PlayerRegistered: PlayerRegisteredEvent;
+}
+
+export type ChainEventName = keyof ChainEventMap;
+
+/** 判别联合：`event.name` 收窄后 `event.payload` 自动变成对应强类型。 */
+export type ChainEvent<K extends ChainEventName = ChainEventName> = { name: K; payload: ChainEventMap[K] };
+
 export type ChainEventListener = (name: string, payload: ChainEventPayload) => void;
 
 export interface GrowthPatch {
