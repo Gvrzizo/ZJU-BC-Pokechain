@@ -7,6 +7,40 @@
 
 ---
 
+## ★ 执行进度（2026-10-25 更新，后续会话从这里继续）
+
+> 本文件是执行清单；下面记录**实际进度**，未完成的包保持原文不变，按 §0.2 继续。
+
+- **分支**：`fix/review-p0` 已 `--no-ff` 合并回 `main`（合并提交 `b30a9d7`）；**未推送远端**（`origin/main` 仍是合并前）。
+- **当前测试基线（实测）**：链码 **101**（8 套）+ tsc、后端 **385**（33 套）、前端 **200**（33 文件）；`git status` 干净。
+- **已完成**：P0-1（C1）、P0-2（C2/C3）、P0-3（C5）、P0-5（C6）、P0-6（H1/H2）。
+- **未开始**：P0-4（C4 真链部署，按要求后置）、P1-1 ~ P1-7、P2-1 ~ P2-3。
+- **下一步**：按 §1 顺序先做 **P1-1（H3/H4：PvP 经验 + 排行榜事件）**；C4 与经济仍按产品决策决定何时插入。
+
+### 已完成包的语义变化（后续包必须先知道）
+
+1. **身份**：链码「本人」= 证书 `hf.EnrollmentID` == `playerId`，mspId 不再参与；`RegisterPlayer` 仅 `admin|system`。链码测试 harness 用 `World.ctxAs(playerId)`，缺属性用 `World.ctx(mspId)` 验证拒绝。
+2. **铸造/养成**：`MintFromCapture` / `RevealAndVerify` / `ApplyGrowth` 三条写入 **system-only**；`POST /pokemon/:id/moves/learn` 已删除，技能只来自升级学习表 + TM（TM 写链走 `SYSTEM_IDENTITY`）。→ **P1-3 只剩 H7（锁定资产先消耗）**。
+3. **交易锁**：`CreateTrade` 只锁 `offer`；`request` 在双确认执行时才校验归属/`IDLE` 并交换；`unlockTradeAssets` 仍双端解锁（旧交易兼容）；`ttlSeconds` 上限 7 天（DTO + 链码）。→ 后续涉及交易的测试/前端**不要**再假设 `request` 被锁。
+4. **对战结果**：`Forfeit` 现在会写 `result.winnerId` + 确定性 `resultHash` + `serverSubmitted`（已有 `SubmitResult` 签名时不覆盖）。→ **P1-1（H4）只需补 `BattleSettled.playerA/B` 与 `PointsChanged`**。
+5. **详情与队伍**：`GET /pokemon/:id` 仅本人（非本人/不存在统一 404）；房间与排位的队伍校验统一 `assertTeamSize + assertTeamUnique`（`INVALID_TEAM_SIZE` / `DUPLICATE_TEAM`）。
+6. **真链 e2e 未重跑**：C4 未做（评审环境的 ccaas 服务已停），P0-4 完成后按 §5.3 验证；不要在未验证前宣称真链通过。
+
+### 提交对照
+
+| 批次 | 提交 | 说明 |
+|---|---|---|
+| 前置 | `e0dc8f2` | 消除 PvP 伤势用例对 90% 命中率的随机抖动（否则三套测试会间歇红） |
+| P0-1 | `8521ccb` | `hf.EnrollmentID` 校验 + `RegisterPlayer` 收紧 + harness/负向用例 |
+| P0-2 | `d3d87d9` | 铸造/揭示/养成 system-only；免费学技能入口下线；TM 写链改 system |
+| P0-3 | `33f7b89` | 交易只锁 offer + 执行期校验 + TTL 上限；Mock 先预检后锁 |
+| P0-5 | `075467e` | `Forfeit` 写 winner/resultHash |
+| P0-6 | `0782069` | 详情 BOLA 404 + 队伍去重 `DUPLICATE_TEAM` |
+| 文档 | `dc20e3c` | 收录评审报告与本指导 |
+
+---
+
+
 ## 0. 开始前必读
 
 ### 0.1 必读文件
@@ -33,13 +67,14 @@
   - 为了让测试过而放宽链码权限/删断言；
   - 把 `CERT_ENC_KEY`、私钥、serverSeed 写进日志或提交；
   - 提交 `node_modules/`、`dist/`、`network/organizations/`、`frontend/public/assets/vendor/`、`backend/.fabric-certs/`；
-  - 把 Mock 模式删掉（它是课程演示和 367 个测试的基础）。
+  - 把 Mock 模式删掉（它是课程演示和全部后端单测的基础）。
 
 ### 0.3 环境基线
 
 - 端口：前端 8080、后端 3000、PG 5432、Redis 6379；Fabric peer 7051/9051、CA 7054/8054。
 - 默认应用栈：`docker compose up -d --build`，`FABRIC_MOCK=true`。
 - 基线测试：链码 88、后端 367、前端 200；Mock e2e 25/25。
+- **当前（2026-10-25 P0 批次后）**：链码 101、后端 385、前端 200（见文首「执行进度」）。
 - 真链：见 §4；评审已证明“修 4 处后可 25/25”，但也证明“开箱即用不成立”。
 
 ### 0.4 当前评审环境说明
@@ -54,24 +89,24 @@
 
 > 依赖关系：C1 必须最先；C2/C3 依赖 C1 的测试 harness；C5/C6 可并行；C4 可在 C1-C3 之后；P1 在 P0 全绿后开始。
 
-| 批次 | ID | 工作包 | 严重度 | 预估 | 依赖 |
-|---|---|---|---|---|---|
-| P0-1 | C1 | 链码身份：`hf.EnrollmentID` 校验 | Critical | 0.5-1d | 无 |
-| P0-2 | C2/C3 | 铸造/揭示/养成权限收紧 | Critical | 1d | P0-1 |
-| P0-3 | C5 | 交易只锁发起方资产 + TTL 上限 | Critical | 0.5-1d | P0-1 |
-| P0-4 | C4 | 真链 CA/系统身份/链码部署 | Critical（部署） | 1-2d | P0-2 |
-| P0-5 | C6 | `Forfeit` 写入 winner/result | High | 0.5h | 无 |
-| P0-6 | H1/H2 | 宝可梦详情 BOLA + 队伍去重 | High | 0.5d | 无 |
-| P1-1 | H3/H4 | PvP 经验 + 排行榜事件 | High | 1d | P0-5 |
-| P1-2 | H5 | 房间启动失败补偿（含 `CancelBattle`） | High | 1-1.5d | P0-5 |
-| P1-3 | H6/H7 | 免费学技能 + 锁定资产先消耗 | High | 1d | P0-2 |
-| P1-4 | H8 | 链上错误码 → HTTP 映射 | High | 0.5d | 无 |
-| P1-5 | H9 | 首球 reveal 改为结算后 reveal | High | 1-2d | P0-2 |
-| P1-6 | H14-H17 | 前端交易/战斗重连/刷新 | High | 1d | P1-1/P1-2 |
-| P1-7 | H19 | `SERVER_SIGNING_KEY` 持久化 | Medium | 0.5d | 无 |
-| P2-1 | H10-H13 | 经济重平衡（注册/钥匙/竞技场/大师球/价格） | High（经济） | 2-3d | P1 全绿 |
-| P2-2 | — | Mock/链码对拍、事件类型、@Global、BondModule | 架构 | 2-3d | P0/P1 |
-| P2-3 | H18/H20 | 前端边角、admin 真链身份 | Medium | 0.5-1d | P1 |
+| 批次 | ID | 工作包 | 严重度 | 预估 | 依赖 | 状态 |
+|---|---|---|---|---|---|---|
+| P0-1 | C1 | 链码身份：`hf.EnrollmentID` 校验 | Critical | 0.5-1d | 无 | ✅ `8521ccb` |
+| P0-2 | C2/C3 | 铸造/揭示/养成权限收紧 | Critical | 1d | P0-1 | ✅ `d3d87d9` |
+| P0-3 | C5 | 交易只锁发起方资产 + TTL 上限 | Critical | 0.5-1d | P0-1 | ✅ `33f7b89` |
+| P0-4 | C4 | 真链 CA/系统身份/链码部署 | Critical（部署） | 1-2d | P0-2 | ⏳ 后置（产品决策） |
+| P0-5 | C6 | `Forfeit` 写入 winner/result | High | 0.5h | 无 | ✅ `075467e` |
+| P0-6 | H1/H2 | 宝可梦详情 BOLA + 队伍去重 | High | 0.5d | 无 | ✅ `0782069` |
+| P1-1 | H3/H4 | PvP 经验 + 排行榜事件 | High | 1d | P0-5 | ⏳ 下一步 |
+| P1-2 | H5 | 房间启动失败补偿（含 `CancelBattle`） | High | 1-1.5d | P0-5 | ⏳ |
+| P1-3 | H6/H7 | 免费学技能 + 锁定资产先消耗 | High | 1d | P0-2 | ⏳ H6 已随 P0-2 完成，仅剩 H7 |
+| P1-4 | H8 | 链上错误码 → HTTP 映射 | High | 0.5d | 无 | ⏳ |
+| P1-5 | H9 | 首球 reveal 改为结算后 reveal | High | 1-2d | P0-2 | ⏳ |
+| P1-6 | H14-H17 | 前端交易/战斗重连/刷新 | High | 1d | P1-1/P1-2 | ⏳ |
+| P1-7 | H19 | `SERVER_SIGNING_KEY` 持久化 | Medium | 0.5d | 无 | ⏳ |
+| P2-1 | H10-H13 | 经济重平衡（注册/钥匙/竞技场/大师球/价格） | High（经济） | 2-3d | P1 全绿 | ⏳ 后置（经济） |
+| P2-2 | — | Mock/链码对拍、事件类型、@Global、BondModule | 架构 | 2-3d | P0/P1 | ⏳ |
+| P2-3 | H18/H20 | 前端边角、admin 真链身份 | Medium | 0.5-1d | P1 | ⏳ |
 
 **建议第一天只做 P0-1、P0-5、P0-6**，先建立“身份 + 负向测试 + 两个小修”的节奏；不要一上来改 C4 部署。
 
@@ -964,6 +999,8 @@ BASE_URL=http://localhost:3100 ./scripts/e2e-smoke.sh
 期望：`SMOKE PASS — 25 项断言全部通过`；账本高度增长；`GetPlayer`/`GetBattle` 可查。
 
 ### 5.4 Definition of Done
+
+> 进度（2026-10-25）：P0 安全批次 5/6 完成（C4 后置），Mock e2e 与真链 e2e 尚未重跑；P1/P2 全部未开始。
 
 - [ ] P0-1 ~ P0-6 全部完成，负向测试覆盖。
 - [ ] 三套测试全绿；测试计数更新到 `AGENTS.md`（不要照抄旧值）。
