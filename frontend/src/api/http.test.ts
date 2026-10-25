@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import axios, { type AxiosRequestConfig } from 'axios';
 import { createPinia, setActivePinia } from 'pinia';
-import { attachInterceptors, API_BASE, REFRESH_TIMEOUT_MS, refreshAccessToken } from './http';
+import {
+  attachInterceptors,
+  API_BASE,
+  REFRESH_LOCK_KEY,
+  REFRESH_TIMEOUT_MS,
+  refreshAccessToken,
+  refreshAccessTokenCrossTab,
+} from './http';
 import { useAuthStore } from '@/stores/auth';
+import { createNonce } from '@/utils/nonce';
 
 function makeClient(capture: { config?: AxiosRequestConfig }) {
   const client = axios.create({ baseURL: API_BASE });
@@ -75,6 +83,51 @@ describe('http 拦截器', () => {
       );
       expect(REFRESH_TIMEOUT_MS).toBe(5000);
       expect(useAuthStore().accessToken).toBe('new-access');
+    } finally {
+      post.mockRestore();
+    }
+  });
+
+  it('H18：crypto.randomUUID 不可用时退回 getRandomValues（非安全上下文不报错）', () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues: (arr: Uint8Array) => {
+        for (let i = 0; i < arr.length; i += 1) arr[i] = i + 1;
+        return arr;
+      },
+    });
+    try {
+      expect(createNonce()).toBe('0102030405060708090a0b0c0d0e0f10');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('P2-3：refresh 锁在本标签持有时会正常 refresh 并释放锁', async () => {
+    useAuthStore().setTokens('old-access', 'old-refresh');
+    const post = vi.spyOn(axios, 'post').mockResolvedValue({
+      data: { accessToken: 'new-access', refreshToken: 'new-refresh' },
+    } as never);
+    try {
+      await expect(refreshAccessTokenCrossTab()).resolves.toBe('new-access');
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(localStorage.getItem(REFRESH_LOCK_KEY)).toBeNull();
+    } finally {
+      post.mockRestore();
+    }
+  });
+
+  it('P2-3：另一标签页持锁时等待其写入的新 token，不并发 refresh', async () => {
+    useAuthStore().setTokens('old-access', 'old-refresh');
+    localStorage.setItem(REFRESH_LOCK_KEY, String(Date.now()));
+    const post = vi.spyOn(axios, 'post');
+    try {
+      const pending = refreshAccessTokenCrossTab();
+      setTimeout(() => {
+        useAuthStore().setTokens('new-access', 'new-refresh');
+        localStorage.removeItem(REFRESH_LOCK_KEY);
+      }, 50);
+      await expect(pending).resolves.toBe('new-access');
+      expect(post).not.toHaveBeenCalled();
     } finally {
       post.mockRestore();
     }
