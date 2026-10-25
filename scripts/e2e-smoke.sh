@@ -4,7 +4,7 @@
 #   健康检查 → 注册 A/B（随机后缀，X-Nonce/X-Timestamp 防重放头）→ 登录
 #   → admin 登录并给 A mint 精灵球 / 给 B 加积分（admin 不可用则容忍并降级）
 #   → A 遇敌并捕捉（最多 3 个 encounter）→ 断言 A 宝可梦列表 +1
-#   → A→B 交易（offer 宝可梦，request 50 积分）→ B confirm → A confirm → 断言归属与积分
+#   → A→B 交易（新账号 72h 转账锁断言 + offer 宝可梦、0 积分）→ B confirm → A confirm → 断言归属
 #   → A 再捕一只 → A 开房 + B 加入 → 双方押注确认（escrow）
 #   → B forfeit（战斗实时操作走 WS，冒烟以 REST 认输代替）→ 断言 SETTLED 且 A 赢得押注
 #   → GET /fairness/ev_battle_<id> 并用 openssl 复核 sha256(serverSeed)==commitHash
@@ -184,21 +184,22 @@ jq -e --arg id "$POKEMON_ID" 'map(.id) | index($id) != null' <<<"$BODY" >/dev/nu
   || fail "列表中未找到 ${POKEMON_ID}"
 ok "断言通过：A 宝可梦列表 ${N0} → ${N1}（+1）"
 
-# ---- 7) 交易：A offer 宝可梦，request 50 积分；B→A 双方 confirm ----
-step "7. A→B 交易（offer 宝可梦，request 积分）"
+# ---- 7) 交易：新账号 72h 转账锁断言；A offer 宝可梦、0 积分；B→A 双方 confirm ----
+step "7. A→B 交易（H10 转账锁 + offer 宝可梦，0 积分）"
 PB0="$(points_of "$TOKEN_B")"
 PA0="$(points_of "$TOKEN_A")"
-REQ_POINTS=50
-if (( PB0 < 50 )); then
-  REQ_POINTS=$PB0
-  warn "B 积分不足 50（=${PB0}），request 降级为 ${REQ_POINTS} 积分"
-fi
 call POST /trades "$TOKEN_A" \
-  "{\"toPlayerId\":\"${B_NAME}\",\"offer\":{\"pokemonIds\":[\"${POKEMON_ID}\"],\"itemIds\":[],\"points\":0},\"request\":{\"pokemonIds\":[],\"itemIds\":[],\"points\":${REQ_POINTS}},\"ttlSeconds\":600}"
+  "{\"toPlayerId\":\"${B_NAME}\",\"offer\":{\"pokemonIds\":[],\"itemIds\":[],\"points\":10},\"request\":{\"pokemonIds\":[],\"itemIds\":[],\"points\":0},\"ttlSeconds\":600}"
+[[ "$HTTP_CODE" == "409" ]] || fail "新账号 72h 转账锁应返回 409，实际 ${HTTP_CODE}"
+[[ "$(jqget '.code')" == "TRANSFER_LOCKED" ]] || fail "应返回 TRANSFER_LOCKED，实际 $(jqget '.code')"
+ok "断言通过：新账号 72h 转账锁生效（TRANSFER_LOCKED）"
+
+call POST /trades "$TOKEN_A" \
+  "{\"toPlayerId\":\"${B_NAME}\",\"offer\":{\"pokemonIds\":[\"${POKEMON_ID}\"],\"itemIds\":[],\"points\":0},\"request\":{\"pokemonIds\":[],\"itemIds\":[],\"points\":0},\"ttlSeconds\":600}"
 expect2xx "创建交易失败"
 TRADE_ID="$(jqget '.id')"
 [[ "$(jqget '.status')" == "OPEN" ]] || fail "交易状态应为 OPEN"
-ok "交易已创建 ${TRADE_ID}（request ${REQ_POINTS}P）"
+ok "交易已创建 ${TRADE_ID}（0P 资产交换）"
 
 call POST "/trades/${TRADE_ID}/confirm" "$TOKEN_B"
 expect2xx "B 确认交易失败"
@@ -217,9 +218,9 @@ ok "断言通过：宝可梦归属 A → B"
 
 PA1="$(points_of "$TOKEN_A")"
 PB1="$(points_of "$TOKEN_B")"
-[[ "$PA1" == "$((PA0 + REQ_POINTS))" ]] || fail "A 积分应为 $((PA0 + REQ_POINTS))，实际 ${PA1}"
-[[ "$PB1" == "$((PB0 - REQ_POINTS))" ]] || fail "B 积分应为 $((PB0 - REQ_POINTS))，实际 ${PB1}"
-ok "断言通过：积分 A ${PA0}→${PA1}，B ${PB0}→${PB1}"
+[[ "$PA1" == "$PA0" ]] || fail "0P 交易后 A 积分应保持 ${PA0}，实际 ${PA1}"
+[[ "$PB1" == "$PB0" ]] || fail "0P 交易后 B 积分应保持 ${PB0}，实际 ${PB1}"
+ok "断言通过：0P 交易积分不变 A ${PA0}→${PA1}，B ${PB0}→${PB1}"
 
 # ---- 8) A 再捕一只（A 的出战队伍；B 用交易所得出战）----
 step "8. A 捕捉第二只宝可梦（战斗队伍用）"
@@ -299,7 +300,7 @@ printf '\033[32m═════════════════════�
 cat <<EOF
   用户:   A=${A_NAME}  B=${B_NAME}
   捕捉:   ${POKEMON_ID}（已交易给 B）/ ${POKEMON_ID2}
-  交易:   ${TRADE_ID}（EXECUTED，${REQ_POINTS}P）
+  交易:   ${TRADE_ID}（EXECUTED，0P）
   对战:   ${BATTLE_ID}（SETTLED，B 认输，A 赢得 ${WAGER}P 押注）
   公平性: ev_battle_${BATTLE_ID}（commit-reveal 复核通过）
 EOF

@@ -12,6 +12,8 @@ interface Persisted {
 
 /** 会话只初始化一次（首次导航或并发调用都复用同一个 Promise） */
 let bootstrapping: Promise<void> | null = null;
+/** 跨标签页同步只绑一次（P2-3：另一个标签 refresh/登出后本页立即跟上） */
+let crossTabBound = false;
 
 function loadPersisted(): Persisted {
   try {
@@ -40,6 +42,7 @@ export const useAuthStore = defineStore('auth', {
      */
     async initialize(): Promise<void> {
       if (this.initialized) return;
+      this.bindCrossTab();
       if (!bootstrapping) {
         // 注意：.finally 挂在 IIFE 之后注册，保证清空发生在赋值完成之后
         bootstrapping = (async () => {
@@ -55,6 +58,25 @@ export const useAuthStore = defineStore('auth', {
         });
       }
       return bootstrapping;
+    },
+    /**
+     * 监听 localStorage 的 auth 记录：另一个标签页登录/refresh/登出时，
+     * 本页 store 同步更新，避免用旧 refresh token 再去轮换一次（多标签竞态，P2-3）。
+     */
+    bindCrossTab(): void {
+      if (crossTabBound || typeof window === 'undefined') return;
+      crossTabBound = true;
+      window.addEventListener('storage', (event) => {
+        if (event.key !== LS_KEY) return;
+        try {
+          const next = event.newValue ? (JSON.parse(event.newValue) as Persisted) : null;
+          this.accessToken = next?.accessToken ?? '';
+          this.refreshToken = next?.refreshToken ?? '';
+          this.user = next?.user ?? null;
+        } catch {
+          /* 忽略损坏数据 */
+        }
+      });
     },
     setTokens(accessToken: string, refreshToken: string) {
       this.accessToken = accessToken;

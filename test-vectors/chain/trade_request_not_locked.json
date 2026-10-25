@@ -1,0 +1,49 @@
+{
+  "name": "trade_request_not_locked",
+  "description": "C5：交易只锁发起方 offer，request 资产保持 IDLE；双确认后执行交换",
+  "steps": [
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_req", "ownerId": "bob" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "createTrade",
+      "as": "alice",
+      "args": {
+        "id": "t_req",
+        "fromId": "alice",
+        "toId": "bob",
+        "offer": { "pokemonIds": [], "itemIds": [], "points": 50 },
+        "request": { "pokemonIds": ["p_req"], "itemIds": [], "points": 0 }
+      },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "pokemonStatus", "id": "p_req", "equals": "IDLE" },
+        { "kind": "pokemonOwner", "id": "p_req", "equals": "bob" },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 1000 },
+        { "kind": "playerPoints", "playerId": "alice", "equals": 1000 }
+      ]
+    },
+    {
+      "op": "confirmTrade",
+      "as": "alice",
+      "args": { "id": "t_req", "playerId": "alice" },
+      "expect": { "ok": true },
+      "state": [{ "kind": "tradeStatus", "id": "t_req", "equals": "OPEN" }]
+    },
+    {
+      "op": "confirmTrade",
+      "as": "bob",
+      "args": { "id": "t_req", "playerId": "bob" },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "tradeStatus", "id": "t_req", "equals": "EXECUTED" },
+        { "kind": "pokemonOwner", "id": "p_req", "equals": "alice" },
+        { "kind": "pokemonStatus", "id": "p_req", "equals": "IDLE" },
+        { "kind": "playerPoints", "playerId": "alice", "equals": 950 },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 1050 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "battle_forfeit_settles",
+  "description": "C6：Forfeit 写入 winner/resultHash、结算资产与押注积分",
+  "steps": [
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_battle_a", "ownerId": "alice" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_battle_b", "ownerId": "bob" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "createBattle",
+      "args": {
+        "id": "bf",
+        "playerA": "alice",
+        "playerB": "bob",
+        "wagerA": { "pokemonIds": ["p_battle_a"], "items": [], "points": 100 },
+        "wagerB": { "pokemonIds": ["p_battle_b"], "items": [], "points": 100 }
+      },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "playerPoints", "playerId": "alice", "equals": 900 },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 900 },
+        { "kind": "pokemonStatus", "id": "p_battle_a", "equals": "LOCKED_BATTLE" }
+      ]
+    },
+    {
+      "op": "activateBattle",
+      "args": { "id": "bf" },
+      "expect": { "ok": true },
+      "state": [{ "kind": "battleStatus", "id": "bf", "equals": "ACTIVE" }]
+    },
+    {
+      "op": "forfeitBattle",
+      "args": { "id": "bf", "loserId": "bob", "reason": "timeout" },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "battleStatus", "id": "bf", "equals": "SETTLED" },
+        { "kind": "battleWinner", "id": "bf", "equals": "alice" },
+        { "kind": "battleResultHash", "id": "bf", "equals": "5100fd322fa09817ee60fa96602e4c5afa329bf378f2e596535f20c919dc9dd1" },
+        { "kind": "battleArbiterNote", "id": "bf", "equals": "FORFEIT: timeout" },
+        { "kind": "playerPoints", "playerId": "alice", "equals": 1100 },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 900 },
+        { "kind": "pokemonOwner", "id": "p_battle_a", "equals": "alice" },
+        { "kind": "pokemonOwner", "id": "p_battle_b", "equals": "alice" },
+        { "kind": "pokemonStatus", "id": "p_battle_a", "equals": "IDLE" }
+      ]
+    }
+  ]
+}

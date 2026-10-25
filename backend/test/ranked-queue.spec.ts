@@ -438,11 +438,12 @@ describe('机器人对手（docs/backend-api.md §11）', () => {
     const outcome = await stack.ranked.outcome(battleId);
     expect(outcome.bot).toBe(true);
     expect(outcome.ranked).toBe(true);
-    expect((await stack.contract.getPlayer('ash')).rating).toBe(1008); // 16 × 0.5
-    expect((await stack.contract.getPlayer(BOT_PLAYER_ID)).rating).toBe(992);
+    // H12：机器人场 rating 增益为 0（零风险场不再推进段位）
+    expect((await stack.contract.getPlayer('ash')).rating).toBe(1000);
+    expect((await stack.contract.getPlayer(BOT_PLAYER_ID)).rating).toBe(1000);
     expect(outcome.ratings).toEqual([
-      { playerId: 'ash', before: 1000, after: 1008, delta: 8 },
-      { playerId: BOT_PLAYER_ID, before: 1000, after: 992, delta: -8 },
+      { playerId: 'ash', before: 1000, after: 1000, delta: 0 },
+      { playerId: BOT_PLAYER_ID, before: 1000, after: 1000, delta: 0 },
     ]);
     // 羁绊 +2 → +1（2 × 0.5 向下取整）
     expect(outcome.bonds).toEqual([
@@ -468,7 +469,7 @@ describe('机器人对手（docs/backend-api.md §11）', () => {
 
     await stack.rewards.settle(battleId);
     await stack.rewards.sweep();
-    expect((await stack.contract.getPlayer('ash')).rating).toBe(1008);
+    expect((await stack.contract.getPlayer('ash')).rating).toBe(1000);
     expect((await stack.contract.getPokemon(pa.id)).bond).toBe(51);
     expect((await stack.contract.getPokemon(pa.id)).exp).toBe(15);
   });
@@ -593,23 +594,23 @@ describe('积分场（arena，docs/backend-api.md §10/§11）', () => {
     expect(record).toMatchObject({ mode: 'arena', arena: { entryA: 20, entryB: 20 } });
   });
 
-  it('胜者拿双方准入 + 系统补贴（准入 50% 向下取整），败者不退', async () => {
+  it('胜者拿双方准入、不增发补贴（H12），败者不退', async () => {
     const stack = await makeStack();
     const { pa, pb } = await seedTeams(stack.chain, stack.contract);
     const battleId = await startArena(stack, pa.id, pb.id);
     const outcome = await settleArena(stack, battleId, 'ash');
 
     expect(outcome.arena).toMatchObject({ entryA: 20, entryB: 20 });
-    expect(outcome.arena?.plan).toMatchObject({ subsidy: 10, subsidyTo: 'ash' });
+    expect(outcome.arena?.plan).toMatchObject({ subsidy: 0, subsidyTo: null });
     expect(outcome.arena?.plan?.subsidyBlocked).toBeUndefined();
     expect(outcome.arena?.plan?.payouts).toEqual([
-      { playerId: 'ash', points: 50, reason: `arena:reward:${battleId}`, idemKey: `${battleId}-arena-reward` },
+      { playerId: 'ash', points: 40, reason: `arena:reward:${battleId}`, idemKey: `${battleId}-arena-reward` },
     ]);
-    // 1000 - 20（准入）+ 40（双方准入）+ 10（补贴）
-    expect((await stack.contract.getPlayer('ash')).points).toBe(1030);
+    // 1000 - 20（准入）+ 40（双方准入，零和转移、无系统增发）
+    expect((await stack.contract.getPlayer('ash')).points).toBe(1020);
     expect((await stack.contract.getPlayer('gary')).points).toBe(980);
-    // 补贴计数 +1
-    expect(await stack.redis.client.scard(subsidyDailyKey('ash', utcDate()))).toBe(1);
+    // 不再占用补贴名额
+    expect(await stack.redis.client.scard(subsidyDailyKey('ash', utcDate()))).toBe(0);
   });
 
   it('平局退还各自准入（不发补贴）', async () => {
@@ -628,7 +629,7 @@ describe('积分场（arena，docs/backend-api.md §10/§11）', () => {
     expect(await stack.redis.client.scard(subsidyDailyKey('ash', utcDate()))).toBe(0);
   });
 
-  it('补贴防刷：每天最多 3 次（第 4 次不发）', async () => {
+  it('积分场不增发（H12）：即使补贴计数已满也不再发系统积分', async () => {
     const stack = await makeStack();
     const { pa, pb } = await seedTeams(stack.chain, stack.contract);
     for (const id of ['b_old_1', 'b_old_2', 'b_old_3']) {
@@ -637,11 +638,12 @@ describe('积分场（arena，docs/backend-api.md §10/§11）', () => {
     const battleId = await startArena(stack, pa.id, pb.id);
     const outcome = await settleArena(stack, battleId, 'ash');
 
-    expect(outcome.arena?.plan).toMatchObject({ subsidy: 0, subsidyBlocked: 'DAILY_LIMIT' });
+    expect(outcome.arena?.plan).toMatchObject({ subsidy: 0 });
+    expect(outcome.arena?.plan?.subsidyBlocked).toBeUndefined();
     expect((await stack.contract.getPlayer('ash')).points).toBe(1020); // 只有双方准入
   });
 
-  it('补贴防刷：对手 rating 差 > 400 不发（双方段位不同则准入额各按自己段位）', async () => {
+  it('跨段位积分场：准入额各按自己段位，胜者仍只拿双方准入', async () => {
     const stack = await makeStack();
     const { pa, pb } = await seedTeams(stack.chain, stack.contract);
     await stack.contract.updateRating(SYSTEM_IDENTITY, 'gary', 1450, 'test');
@@ -658,7 +660,7 @@ describe('积分场（arena，docs/backend-api.md §10/§11）', () => {
     const outcome = await settleArena(stack, battleId, 'ash');
 
     expect(outcome.arena).toMatchObject({ entryA: 20, entryB: 100 });
-    expect(outcome.arena?.plan).toMatchObject({ subsidy: 0, subsidyBlocked: 'RATING_GAP' });
+    expect(outcome.arena?.plan).toMatchObject({ subsidy: 0 });
     // 青铜 20 + 黄金 100 = 120；胜者 ash：1000 - 20 + 120
     expect((await stack.contract.getPlayer('ash')).points).toBe(1100);
     expect((await stack.contract.getPlayer('gary')).points).toBe(900);

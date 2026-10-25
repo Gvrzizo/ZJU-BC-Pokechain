@@ -1,4 +1,5 @@
 import { http } from './http';
+import { createNonce } from '@/utils/nonce';
 import type { Item } from '@/types';
 
 /** 商店商品项（GET /shop）：非卖品同样列出，available=false 且 price=null（如大师球） */
@@ -55,7 +56,7 @@ export async function getShop(): Promise<ShopCatalog> {
 export async function buyItem(
   typeId: string,
   qty: number,
-  idemKey: string = crypto.randomUUID(),
+  idemKey: string = createNonce(),
 ): Promise<BuyResult> {
   const { data } = await http.post<BuyResult>('/shop/buy', { typeId, qty, idemKey });
   return data;
@@ -65,7 +66,7 @@ export async function buyItem(
 export async function sellItem(
   itemId: string,
   qty: number,
-  idemKey: string = crypto.randomUUID(),
+  idemKey: string = createNonce(),
 ): Promise<SellResult> {
   const { data } = await http.post<SellResult>('/shop/sell', { itemId, qty, idemKey });
   return data;

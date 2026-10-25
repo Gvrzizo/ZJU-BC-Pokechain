@@ -114,6 +114,10 @@ async function main(): Promise<void> {
       await contract.registerPlayer(ADMIN_IDENTITY, acc.username, acc.nickname, {
         idemKey: `register-${acc.username}`,
       });
+      // H10：注册后 72h 禁止转出积分；演示账号由 seed 以 admin 身份解锁，保证课堂演示可立即交易。
+      await contract.clearTransferLock(ADMIN_IDENTITY, acc.username, {
+        idemKey: `unlock-${acc.username}-${SEED_VERSION}`,
+      });
     }
     await contract.grantRole(ADMIN_IDENTITY, 'arbiter', 'arbitrator', { idemKey: 'grant-arbiter' });
     console.log('granted on-chain role arbitrator to arbiter');

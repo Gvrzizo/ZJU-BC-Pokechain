@@ -8,7 +8,7 @@ import { BATTLE_WIN_EXP_GAIN, PokemonService } from '../pokemon/pokemon.service'
 import { BondService } from './bond.service';
 import { RankedService } from './ranked.service';
 import { eloUpdate, RankedOutcome, scaleElo } from './elo';
-import { BOT_REWARD_SCALE, utcDate } from './bot';
+import { BOT_RATING_SCALE, BOT_REWARD_SCALE, utcDate } from './bot';
 import {
   arenaEntryRefunds,
   arenaPayouts,
@@ -149,7 +149,13 @@ export class BattleRewardService implements OnModuleInit, OnModuleDestroy {
 
       if (rankedRecord) {
         try {
-          ratings = await this.applyRankedRatings(rankedRecord, playerA, playerB, winnerId, scale);
+          ratings = await this.applyRankedRatings(
+            rankedRecord,
+            playerA,
+            playerB,
+            winnerId,
+            rankedRecord.bot ? BOT_RATING_SCALE : 1,
+          );
         } catch (err) {
           ratingError = (err as Error).message;
           this.logger.warn(`ranked rating update failed for ${battleId}: ${ratingError}`);

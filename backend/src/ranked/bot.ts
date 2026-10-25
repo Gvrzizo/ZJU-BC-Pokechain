@@ -13,7 +13,8 @@ import { getSpecies, WILD_TABLE } from '../game-data/species.data';
  * - 队伍按玩家队伍平均等级 ±2 生成 3 只，种族从野生池随机，**只在内存里存在、不上链**；
  * - 出招由服务端代打：从该对局的 RandomCommit 派生流（偏移 100000 起，与引擎顺序游标
  *   互不干扰）随机挑一个合法技能，普通伤害招优先；
- * - **所有奖励减半**：ELO ×0.5（四舍五入）、羁绊 ×0.5、经验 ×0.5，且每人每天最多 5 场。
+ * - **羁绊/经验减半**、且每人每天最多 5 场；**rating 增益为 0**（H12：机器人场零风险，
+ *   给分会让玩家 20 天零风险到大师，改由真人场决定段位）。
  */
 export const BOT_PLAYER_ID = 'BOT';
 export const BOT_NICKNAME = '训练家机器人';
@@ -25,8 +26,10 @@ export const BOT_LEVEL_SPREAD = 2;
 export const BOT_DAILY_LIMIT = 5;
 /** 排队满 60 秒才出现机器人选项 */
 export const BOT_OFFER_AFTER_MS = 60_000;
-/** 机器人场的奖励系数（ELO / 羁绊 / 经验一律减半，四舍五入） */
+/** 机器人场的羁绊/经验系数（减半，四舍五入） */
 export const BOT_REWARD_SCALE = 0.5;
+/** 机器人场的 rating 系数：0 = 不改变排位分（H12）。 */
+export const BOT_RATING_SCALE = 0;
 /** 机器人接受出招前的思考时间（演示观感；出招本身来自派生流） */
 export const BOT_MOVE_DELAY_MS = 700;
 /** 机器人出招用的派生流偏移区：base + turn × block，避开引擎从 0 递增的顺序游标 */

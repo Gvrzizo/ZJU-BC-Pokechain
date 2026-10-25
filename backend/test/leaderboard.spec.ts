@@ -1,4 +1,5 @@
 import { Subject } from 'rxjs';
+import { filter } from 'rxjs/operators';
 import { LeaderboardController } from '../src/leaderboard/leaderboard.controller';
 import { ChainEvent } from '../src/fabric/chain-events.service';
 import { makeRedis } from './helpers';
@@ -16,6 +17,8 @@ function makeController(points: Record<string, number>) {
   };
   const controller = new LeaderboardController(redis, contract as never, {
     stream$: subject.asObservable(),
+    onEvent: (name: string, handler: (payload: Record<string, unknown>) => void) =>
+      subject.pipe(filter((event) => event.name === name)).subscribe((event) => handler(event.payload)),
   } as never);
   controller.onModuleInit();
   return { controller, subject, contract };

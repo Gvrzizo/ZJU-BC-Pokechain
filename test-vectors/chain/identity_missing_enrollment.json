@@ -1,0 +1,25 @@
+{
+  "name": "identity_missing_enrollment",
+  "description": "C1：证书缺 hf.EnrollmentID 时一律按非本人拒绝，不回退 mspId",
+  "steps": [
+    {
+      "op": "transferPoints",
+      "as": { "role": "player" },
+      "args": { "fromId": "alice", "toId": "bob", "amount": 10 },
+      "expect": { "ok": false, "code": "NOT_OWNER" },
+      "state": [{ "kind": "playerPoints", "playerId": "alice", "equals": 1000 }]
+    },
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_owned", "ownerId": "alice" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "transferPokemon",
+      "as": { "role": "player" },
+      "args": { "id": "p_owned", "toId": "bob" },
+      "expect": { "ok": false, "code": "NOT_OWNER" },
+      "state": [{ "kind": "pokemonOwner", "id": "p_owned", "equals": "alice" }]
+    }
+  ]
+}

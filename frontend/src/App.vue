@@ -57,8 +57,10 @@ async function onLogout() {
     </header>
     <router-view v-slot="{ Component }">
       <!-- 游戏页保活：切走时 Phaser sleep（不重跑 BootScene），切回来直接 resume；
-           超过 20 分钟未回由 GameView 自己失效重建（见 views/GameView.vue） -->
-      <KeepAlive :include="['GameView']">
+           超过 20 分钟未回由 GameView 自己失效重建（见 views/GameView.vue）。
+           KeepAlive 以 username 为 key（P2-3）：登出/换账号会销毁缓存，避免把上一个玩家的
+           Phaser 场景与游戏状态带给下一个玩家。 -->
+      <KeepAlive :include="['GameView']" :key="auth.user?.username ?? 'guest'">
         <component :is="Component" />
       </KeepAlive>
     </router-view>

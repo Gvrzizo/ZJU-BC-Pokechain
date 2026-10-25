@@ -28,7 +28,7 @@ const stacksOf = (ctx: ReturnType<typeof build>, player = 'ash') =>
   ctx.contract.queryItemsByOwner(player);
 
 describe('道具商店：商品表与价目（docs/backend-api.md §3）', () => {
-  it('价目表：重平衡后的规格价（精灵球 50 / 高级球 400 / 进化石 800 / 技能机 1500 / 金色王冠 15000 / 钥匙 5000）', () => {
+  it('价目表：重平衡后的规格价（精灵球 50 / 高级球 400 / 进化石 800 / 技能机 800 / 银色王冠 1200 / 金色王冠 6000 / 钥匙 5000）', () => {
     expect(SHOP_PRICES).toEqual({
       'poke-ball': 50,
       'great-ball': 150,
@@ -38,11 +38,11 @@ describe('道具商店：商品表与价目（docs/backend-api.md §3）', () =>
       'thunder-stone': 800,
       'water-stone': 800,
       'fire-stone': 800,
-      'tm-thunderbolt': 1500,
-      'tm-flamethrower': 1500,
-      'tm-surf': 1500,
-      'bottle-cap': 3000,
-      'gold-bottle-cap': 15000,
+      'tm-thunderbolt': 800,
+      'tm-flamethrower': 800,
+      'tm-surf': 800,
+      'bottle-cap': 1200,
+      'gold-bottle-cap': 6000,
       'rare-candy': 1000,
       'sky-key': 5000,
       'ocean-key': 5000,
@@ -54,14 +54,14 @@ describe('道具商店：商品表与价目（docs/backend-api.md §3）', () =>
     // 回收价 = 半价向下取整，最低 1；非卖品无价；**钥匙一律不可回收**（NOT_SELLABLE）
     expect(shopSellPrice('poke-ball')).toBe(25);
     expect(shopSellPrice('ultra-ball')).toBe(200);
-    expect(shopSellPrice('gold-bottle-cap')).toBe(7500);
+    expect(shopSellPrice('gold-bottle-cap')).toBe(3000);
     expect(shopSellPrice('master-ball')).toBeUndefined();
     for (const keyTypeId of KEY_TYPE_IDS) {
       expect([keyTypeId, SHOP_PRICES[keyTypeId]]).toEqual([keyTypeId, 5000]);
       expect([keyTypeId, shopSellPrice(keyTypeId)]).toEqual([keyTypeId, undefined]);
     }
-    // 定价口径：休闲玩家日收入约 100-300P（收服 20 / 击倒 等级×1），王冠是月级目标、钥匙是长线目标
-    expect(SHOP_PRICES['bottle-cap'] / 200).toBeGreaterThanOrEqual(14);
+    // 定价口径：休闲玩家日收入约 100-300P（收服 20 / 击倒 等级×1），王冠是周/月级目标、钥匙是长线目标
+    expect(SHOP_PRICES['bottle-cap'] / 300).toBeGreaterThanOrEqual(4);
     expect(SHOP_PRICES['ultra-ball']).toBeLessThan(SHOP_PRICES['bottle-cap']);
     // 钥匙是最贵的常规商品（≈ 月级积累），且比金色王冠便宜
     expect(SHOP_PRICES['sky-key']).toBeGreaterThan(SHOP_PRICES['bottle-cap']);
@@ -108,14 +108,14 @@ describe('道具商店：购买（AddPoints + MintItem）', () => {
   it('新道具（银色王冠 / 金色王冠 / 神奇糖果）可购买并落正确 typeId', async () => {
     const ctx = build();
     await registerPlayers(ctx.contract, 'ash');
-    await ctx.contract.addPoints(ADMIN_IDENTITY, 'ash', 5000, 'test-topup'); // 注册 1000 + 充值 5000
+    await ctx.contract.addPoints(ADMIN_IDENTITY, 'ash', 5000, 'test-topup'); // helpers 归一 1000 + 充值 5000
 
     await ctx.shop.buy(ash, 'bottle-cap', 1);
     await ctx.shop.buy(ash, 'rare-candy', 1, 'buy-candy-00001');
     const stacks = await stacksOf(ctx);
     expect(stacks.find((i) => i.typeId === 'bottle-cap')?.quantity).toBe(1);
     expect(stacks.find((i) => i.typeId === 'rare-candy')?.quantity).toBe(1);
-    expect(await pointsOf(ctx)).toBe(6000 - 3000 - 1000);
+    expect(await pointsOf(ctx)).toBe(6000 - 1200 - 1000);
   });
 
   it('余额不足：INSUFFICIENT_POINTS，积分与背包都不变', async () => {
@@ -129,9 +129,9 @@ describe('道具商店：购买（AddPoints + MintItem）', () => {
   it('购买重试：响应丢失后余额已花光，同一 idemKey 仍返回首次结果（不被余额校验误拒）', async () => {
     const ctx = build();
     await registerPlayers(ctx.contract, 'ash');
-    await ctx.contract.addPoints(ADMIN_IDENTITY, 'ash', 2000, 'test-topup'); // 3000 = 刚好一个银色王冠
+    await ctx.contract.addPoints(ADMIN_IDENTITY, 'ash', 200, 'test-topup'); // 1200 = 刚好一个银色王冠
     const key = 'buy-drain-000001';
-    const first = await ctx.shop.buy(ash, 'bottle-cap', 1, key); // 3000 → 0
+    const first = await ctx.shop.buy(ash, 'bottle-cap', 1, key); // 1200 → 0
     expect(first.points).toBe(0);
 
     const replay = await ctx.shop.buy(ash, 'bottle-cap', 1, key);

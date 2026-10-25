@@ -112,6 +112,14 @@ export function debitPoints(player: Player, amount: number): void {
   player.points = checkedAmount(player.points - amount, `points of ${player.playerId}`);
 }
 
+/** 72h 转账锁（H10）：nowISO < transferLockUntil 时禁止转出积分。 */
+export function assertTransferUnlocked(player: Player, nowISO: string): void {
+  const until = player.transferLockUntil;
+  if (until && Date.parse(nowISO) < Date.parse(until)) {
+    fail('TRANSFER_LOCKED', `player ${player.playerId} cannot transfer points before ${until}`);
+  }
+}
+
 /** 加分（溢出检查）。 */
 export function creditPoints(player: Player, amount: number): void {
   if (amount < 0 || !Number.isSafeInteger(amount)) {

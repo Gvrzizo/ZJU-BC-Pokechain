@@ -153,6 +153,10 @@ export class FabricChainAdapter extends ChainAdapter implements OnModuleInit, On
     const m = this.meta(args);
     return this.submit(as, 'PlayerContract:TransferPoints', [args.fromId, args.toId, String(args.amount), m.nowISO, m.idemKey]);
   }
+  async clearTransferLock(as: ChainIdentity, args: { playerId: string } & TxMeta): Promise<PlayerState> {
+    const m = this.meta(args);
+    return this.submit(as, 'PlayerContract:ClearTransferLock', [args.playerId, m.nowISO, m.idemKey]);
+  }
 
   // ---------------------------------------------------------------- RandomContract
   async commitRandom(as: ChainIdentity, args: { eventId: string; purpose: 'capture' | 'battle' | 'mint'; playerId: string; commitHash: string; clientSeed: string; meta?: string } & TxMeta): Promise<RandomCommitState> {

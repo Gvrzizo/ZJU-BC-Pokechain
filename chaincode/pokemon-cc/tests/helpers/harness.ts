@@ -209,11 +209,22 @@ export class World {
     return invoke(this.stub, fn);
   }
 
-  /** 注册玩家：链上 RegisterPlayer 仅 admin/system（后端注册用 ADMIN_IDENTITY），故以 admin 身份代发。 */
+  /**
+   * 注册玩家：链上 RegisterPlayer 仅 admin/system（后端注册用 ADMIN_IDENTITY），故以 admin 身份代发。
+   * 测试基线：注册后补到 1000P 并解除 72h 转账锁（H10）——battle/trade 用例关注业务语义，
+   * 专项用例直接调用 RegisterPlayer 断言 400P/锁定/ClearTransferLock。
+   */
   async registerPlayer(playerId: string, mspId: string, now = T1): Promise<void> {
     await this.run(() =>
       this.player.RegisterPlayer(this.ctx(mspId, 'admin', 'admin'), playerId, `nick-${playerId}`, now, `idem-reg-${playerId}`),
     );
+    const current = (await this.getPlayer(playerId)).points;
+    if (current !== 1000) {
+      await this.run(() =>
+        this.player.AddPoints(this.systemCtx(), playerId, String(1000 - current), 'test-topup', now, `idem-topup-${playerId}`),
+      );
+    }
+    await this.run(() => this.player.ClearTransferLock(this.adminCtx(), playerId, now, `idem-unlock-${playerId}`));
   }
 
   async mintItem(id: string, ownerId: string, quantity: number, now = T1, typeId = 'poke-ball'): Promise<void> {

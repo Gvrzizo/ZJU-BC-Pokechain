@@ -20,10 +20,12 @@
 ### Player `player:<playerId>`
 ```json
 { "docType":"player", "playerId":"u_xxx", "mspId":"Org1MSP", "nickname":"小智",
-  "role":"player", "points":1000, "wins":0, "losses":0, "rating":1000, "createdAt":"ISO" }
+  "role":"player", "points":400, "wins":0, "losses":0, "rating":1000, "createdAt":"ISO",
+  "transferLockUntil":"2026-01-04T00:00:00.000Z" }
 ```
 `rating`：排位分，注册默认 `1000`，范围 `0-99999`，仅 `system` 可经 `UpdateRating` 变更（`docs/backend-api.md` 侧的段位/匹配口径属后端）。
 `rating` 字段上线前的旧记录缺失该字段，链码读写时按 `1000` 处理。
+`transferLockUntil`（2026-10 P2）：注册时 = `nowISO + 72h`，此前禁止转出积分（`TRANSFER_LOCKED`）；缺省/空串的旧记录视为无锁（不迁移）。seed 用 admin `ClearTransferLock` 解锁 ash/gary 等演示账号。
 `mspId` 记录注册调用者的组织，仅供展示/审计；链上「本人」校验一律用证书 `hf.EnrollmentID`（见 §0 第 2 条），旧记录无需迁移。
 
 ### Pokemon `pokemon:<id>`
@@ -114,11 +116,12 @@ CreateBattle 时归一为 `{pokemonIds, items, points}` 并以此形态存储、
 ### 2.1 PlayerContract
 | 交易 | 参数 | 规则 | 事件 |
 |---|---|---|---|
-| `RegisterPlayer` | playerId, nickname, nowISO, idemKey | **仅 admin/system**（防抢注 username；后端注册与 seed 均用 `ADMIN_IDENTITY`）；不存在才创建；mspId 记录调用者组织（仅展示/审计）；role=player；初始 points=1000、rating=1000 | `PlayerRegistered` |
+| `RegisterPlayer` | playerId, nickname, nowISO, idemKey | **仅 admin/system**（防抢注 username；后端注册与 seed 均用 `ADMIN_IDENTITY`）；不存在才创建；mspId 记录调用者组织（仅展示/审计）；role=player；初始 points=**400**、rating=1000；`transferLockUntil = nowISO + 72h`（H10） | `PlayerRegistered` |
 | `GrantRole` | playerId, role, nowISO, idemKey | 仅 admin | `RoleGranted` |
 | `GetPlayer` | playerId | 查询（返回含 `rating`） | - |
 | `AddPoints` | playerId, delta(可负), reason, nowISO, idemKey | 仅 admin/system；余额不得为负 | `PointsChanged` |
-| `TransferPoints` | fromId, toId, amount, nowISO, idemKey | 调用者必须是 fromId 本人（`hf.EnrollmentID` 匹配）；amount>0 | `PointsChanged` |
+| `TransferPoints` | fromId, toId, amount, nowISO, idemKey | 调用者必须是 fromId 本人（`hf.EnrollmentID` 匹配）；amount>0；`nowISO < from.transferLockUntil` 抛 `TRANSFER_LOCKED` | `PointsChanged` |
+| `ClearTransferLock` | playerId, nowISO, idemKey | **仅 admin/system**；清空 `transferLockUntil`（seed 解锁演示账号用，后端不暴露 HTTP API） | `TransferLockCleared` |
 | `UpdateRating` | playerId, newRating, reason, nowISO, idemKey | 仅 system；`0 ≤ newRating ≤ 99999`（safeInt，越界抛 `INVALID_PARAM`）；与 points/wins 相互独立 | `RatingChanged`（payload 含 previous） |
 
 ### 2.2 RandomContract（承诺-揭示）
@@ -209,4 +212,4 @@ Trade 的 `offer/request` 保持 `{pokemonIds, itemIds, points}` **整堆语义�
 
 测试桩为手写最小实现（`tests/helpers/harness.ts`：内存世界状态 + 事务写缓存，抛错即回滚，与 Fabric 交易语义一致；以 `mspId`/`role`/`hf.EnrollmentID` 属性模拟 Org1MSP（admin/system/player）与 Org2MSP（arbitrator/player）身份——玩家上下文用 `World.ctxAs(playerId)`，缺 `hf.EnrollmentID` 用 `World.ctx(mspId)` 验证拒绝路径），当前 102 用例。不用 `@theledger/fabric-mock-stub`：其依赖 `fabric-shim ^1.4` + TS3，与本工程 fabric-shim 2.5 / TS5 栈不兼容。
 
-覆盖：注册/铸币/转移/放生；Commit→Reveal→MintFromCapture 全流程（含 SEED_MISMATCH 拒绝）；EV 更新合法路径与单项 255/总和 510/负数/缺字段/非整数拒绝、旧记录无 `evs` 字段的兼容读取；**能力养成**（ApplyGrowth `ivs` 子集提升与 `IV_DECREASE`/越界/未知键/非整数/非对象拒绝且不落库）；**羁绊值 bond**（铸造默认 50、`Transfer` 易主重置 30、转给自己不重置、Trade 双方各自重置、Battle 赢家赢得的宝可梦重置而自有宝可梦保持、DRAW 不重置、`BondUp` 批量提升/255 截断/角色与参数校验/放生后拒绝/锁定中可提升、旧记录缺字段兼容）；**排位分 rating**（默认 1000、`UpdateRating` 仅 system 与 0/99999 边界、越界/非整数/不存在拒绝、旧记录缺字段兼容）；**道具堆叠归一**（mint 自动合并到最早堆叠、旧记录缺 `createdAt` 视为最早、锁定堆叠不参与、`MergeStacks` 权限与返回值、转移/交易不自动合并）；**部分数量押注**（原堆叠减量+确定性 id 子堆叠锁定、qty 越界/非正/重复/混用旧字段拒绝、旧 `itemIds` 归一为整堆、赢家收堆合并、DRAW 并回原堆叠、原堆叠易主时子堆叠独立恢复）；**随机承诺 meta**（存取、缺省空串、超 256 字节拒绝）；Trade 创建锁定→双方确认执行→余额与归属断言、取消解锁、过期退款、双花拒绝（锁定资产再 CreateTrade 抛 ASSET_LOCKED）；Battle 锁定→提交→确认结算（赢家得全部）、DRAW 退款、Forfeit、Dispute→Arbitrate、CancelBattle（CREATED 全额退款/非 system 拒绝/ACTIVE 拒绝）、越权调用拒绝（非 owner 转移/非 arbitrator 仲裁/非 system 提交结果）、幂等键重放返回相同结果不重复变更。
+覆盖：注册（400P/72h 锁/`ClearTransferLock`）/铸币/转移/放生；Commit→Reveal→MintFromCapture 全流程（含 SEED_MISMATCH 拒绝）；EV 更新合法路径与单项 255/总和 510/负数/缺字段/非整数拒绝、旧记录无 `evs` 字段的兼容读取；**能力养成**（ApplyGrowth `ivs` 子集提升与 `IV_DECREASE`/越界/未知键/非整数/非对象拒绝且不落库）；**羁绊值 bond**（铸造默认 50、`Transfer` 易主重置 30、转给自己不重置、Trade 双方各自重置、Battle 赢家赢得的宝可梦重置而自有宝可梦保持、DRAW 不重置、`BondUp` 批量提升/255 截断/角色与参数校验/放生后拒绝/锁定中可提升、旧记录缺字段兼容）；**排位分 rating**（默认 1000、`UpdateRating` 仅 system 与 0/99999 边界、越界/非整数/不存在拒绝、旧记录缺字段兼容）；**道具堆叠归一**（mint 自动合并到最早堆叠、旧记录缺 `createdAt` 视为最早、锁定堆叠不参与、`MergeStacks` 权限与返回值、转移/交易不自动合并）；**部分数量押注**（原堆叠减量+确定性 id 子堆叠锁定、qty 越界/非正/重复/混用旧字段拒绝、旧 `itemIds` 归一为整堆、赢家收堆合并、DRAW 并回原堆叠、原堆叠易主时子堆叠独立恢复）；**随机承诺 meta**（存取、缺省空串、超 256 字节拒绝）；Trade 创建锁定→双方确认执行→余额与归属断言、取消解锁、过期退款、双花拒绝（锁定资产再 CreateTrade 抛 ASSET_LOCKED）；Battle 锁定→提交→确认结算（赢家得全部）、DRAW 退款、Forfeit、Dispute→Arbitrate、CancelBattle（CREATED 全额退款/非 system 拒绝/ACTIVE 拒绝）、越权调用拒绝（非 owner 转移/非 arbitrator 仲裁/非 system 提交结果）、幂等键重放返回相同结果不重复变更。

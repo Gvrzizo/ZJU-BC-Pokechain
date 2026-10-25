@@ -164,7 +164,7 @@ X.509 证书 + 私钥 ──► 证书属性：role=player|admin|system|arbitrat
 
 ### 5.1 为什么 Fabric 没有挖矿与节点奖励
 
-Hyperledger Fabric 是**许可链**（permissioned）：加入 `gamechannel` 的组织与节点由 MSP/CA 证书准入、通道配置决定，没有公开链那种"算力竞争出块、按算力分配奖励"的机制，也**不存在原生代币**与 gas 概念，交易不消耗任何链上货币。它的最终性来自**排序服务（Raft orderer）出块 + 背书策略（本作业为 Org1/Org2 双组织多数背书，见 §3.3）**：交易一旦被足够多背书节点签名、由 orderer 排入区块并写入账本即最终确认，不需要等待若干个区块的"确认数"，也不需要矿工打包。因此本项目的"积分"（`Player.points`）不可能是挖矿产出，而是**游戏自己发行的链上记账资产**：由 `admin`/`system` 身份经 `PlayerContract.AddPoints` 发放与扣减（注册初始 1000、收服 +20、击倒/放生按等级 ×1、押注结算），每一笔都带可审计 `reason` 并落链，等价于运营方在账本上记账，而非节点算力奖励。同理，运行 peer/orderer 的组织（课程环境即两台机器/容器）**不会因为出块而获得任何积分**，节点奖励在这套架构里从设计上就不存在。
+Hyperledger Fabric 是**许可链**（permissioned）：加入 `gamechannel` 的组织与节点由 MSP/CA 证书准入、通道配置决定，没有公开链那种"算力竞争出块、按算力分配奖励"的机制，也**不存在原生代币**与 gas 概念，交易不消耗任何链上货币。它的最终性来自**排序服务（Raft orderer）出块 + 背书策略（本作业为 Org1/Org2 双组织多数背书，见 §3.3）**：交易一旦被足够多背书节点签名、由 orderer 排入区块并写入账本即最终确认，不需要等待若干个区块的"确认数"，也不需要矿工打包。因此本项目的"积分"（`Player.points`）不可能是挖矿产出，而是**游戏自己发行的链上记账资产**：由 `admin`/`system` 身份经 `PlayerContract.AddPoints` 发放与扣减（注册初始 400 且 72h 内不可转出——`Player.transferLockUntil`，堵多开小号转账；收服 +20、击倒/放生按等级 ×1、押注结算），每一笔都带可审计 `reason` 并落链，等价于运营方在账本上记账，而非节点算力奖励。同理，运行 peer/orderer 的组织（课程环境即两台机器/容器）**不会因为出块而获得任何积分**，节点奖励在这套架构里从设计上就不存在。
 
 ## 6. 关键流程时序
 
@@ -188,7 +188,7 @@ Hyperledger Fabric 是**许可链**（permissioned）：加入 `gamechannel` 的
  │◀─────────────────│
 ```
 
-要点：三步任一失败即整体失败返回错误；`RegisterPlayer` 幂等，重复注册（如同名重试）不会重复建链上档案。`FABRIC_MOCK=true` 时跳过 CA 两步，链上档案由 MockChainAdapter 落 Redis 共享状态（`mockchain:*`，见 `backend/src/fabric/mock-chain.store.ts`）。新玩家链上初始 `points=1000`（`PlayerContract.RegisterPlayer`，详见 `docs/backend-api.md` §10「积分经济」），注册后前端引导进入 `/starter` 领新手礼包（三选一御三家，仅一次）。
+要点：三步任一失败即整体失败返回错误；`RegisterPlayer` 幂等，重复注册（如同名重试）不会重复建链上档案。`FABRIC_MOCK=true` 时跳过 CA 两步，链上档案由 MockChainAdapter 落 Redis 共享状态（`mockchain:*`，见 `backend/src/fabric/mock-chain.store.ts`）。新玩家链上初始 `points=400`，注册时写入 `transferLockUntil = nowISO + 72h`：锁定期内 `TransferPoints` 与交易中支付积分的一方都抛 `TRANSFER_LOCKED`（seed 用 admin `ClearTransferLock` 解锁演示账号）；详见 `docs/backend-api.md` §10「积分经济」。注册后前端引导进入 `/starter` 领新手礼包（三选一御三家，仅一次）。
 
 ### 6.2 捕捉：遇敌 → 野怪战斗（PvE）→ Commit → Reveal → Mint
 

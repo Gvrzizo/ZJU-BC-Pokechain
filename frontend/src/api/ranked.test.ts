@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MESSAGES } from '@/locales';
 import {
   ARENA_ENTRY_FEES,
+  ARENA_SUBSIDY_RATIO,
   RANK_TIERS,
   arenaEntryFor,
   arenaSubsidyFor,
@@ -82,12 +83,9 @@ describe('积分场准入（docs/backend-api.md §10/§11）', () => {
     for (const tier of RANK_TIERS) expect(ARENA_ENTRY_FEES[tier.key]).toBeGreaterThan(0);
   });
 
-  it('系统补贴 = 准入额 ×50% 向下取整', () => {
-    expect(arenaSubsidyFor(20)).toBe(10);
-    expect(arenaSubsidyFor(50)).toBe(25);
-    expect(arenaSubsidyFor(100)).toBe(50);
-    expect(arenaSubsidyFor(200)).toBe(100);
-    expect(arenaSubsidyFor(400)).toBe(200);
+  it('H12 起积分场不再增发：补贴系数为 0（与后端一致）', () => {
+    expect(ARENA_SUBSIDY_RATIO).toBe(0);
+    for (const fee of [20, 50, 100, 200, 400]) expect(arenaSubsidyFor(fee)).toBe(0);
   });
 });
 

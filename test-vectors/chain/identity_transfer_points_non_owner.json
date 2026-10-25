@@ -1,0 +1,26 @@
+{
+  "name": "identity_transfer_points_non_owner",
+  "description": "C1：非本人不能转走他人积分；本人转账改变双方余额",
+  "steps": [
+    {
+      "op": "transferPoints",
+      "as": "alice",
+      "args": { "fromId": "bob", "toId": "alice", "amount": 10 },
+      "expect": { "ok": false, "code": "NOT_OWNER" },
+      "state": [
+        { "kind": "playerPoints", "playerId": "alice", "equals": 1000 },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 1000 }
+      ]
+    },
+    {
+      "op": "transferPoints",
+      "as": "alice",
+      "args": { "fromId": "alice", "toId": "bob", "amount": 10 },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "playerPoints", "playerId": "alice", "equals": 990 },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 1010 }
+      ]
+    }
+  ]
+}

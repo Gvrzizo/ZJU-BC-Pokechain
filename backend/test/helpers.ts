@@ -66,9 +66,18 @@ export function userIdentity(username: string, role: 'player' | 'arbitrator' | '
   return { userId: username, role, mspId };
 }
 
+/**
+ * 注册测试玩家并归一到 1000P、解除 72h 转账锁（H10）：
+ * 业务用例关注结算/交易语义；注册积分与锁专项见 transfer-lock.spec.ts。
+ */
 export async function registerPlayers(contract: ContractService, ...names: string[]) {
   for (const name of names) {
     await contract.registerPlayer(ADMIN_IDENTITY, name, name, { idemKey: `register-${name}` });
+    const current = (await contract.getPlayer(name)).points;
+    if (current !== 1000) {
+      await contract.addPoints(SYSTEM_IDENTITY, name, 1000 - current, 'test-topup', { idemKey: `topup-${name}` });
+    }
+    await contract.clearTransferLock(ADMIN_IDENTITY, name, { idemKey: `unlock-${name}` });
   }
 }
 

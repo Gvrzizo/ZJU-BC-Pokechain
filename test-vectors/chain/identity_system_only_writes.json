@@ -1,0 +1,38 @@
+{
+  "name": "identity_system_only_writes",
+  "description": "C2/C3：铸造、揭示后铸造、养成写入只接受 system 证书",
+  "steps": [
+    {
+      "op": "addPoints",
+      "as": "alice",
+      "args": { "playerId": "alice", "delta": 100, "reason": "cheat" },
+      "expect": { "ok": false, "code": "FORBIDDEN" },
+      "state": [{ "kind": "playerPoints", "playerId": "alice", "equals": 1000 }]
+    },
+    {
+      "op": "mintPokemon",
+      "as": "alice",
+      "args": { "id": "p_cheat", "ownerId": "alice" },
+      "expect": { "ok": false, "code": "FORBIDDEN" }
+    },
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_ok", "ownerId": "alice" },
+      "expect": { "ok": true },
+      "state": [{ "kind": "pokemonLevel", "id": "p_ok", "equals": 5 }]
+    },
+    {
+      "op": "applyGrowth",
+      "as": "alice",
+      "args": { "id": "p_ok", "growth": { "level": 100 } },
+      "expect": { "ok": false, "code": "FORBIDDEN" },
+      "state": [{ "kind": "pokemonLevel", "id": "p_ok", "equals": 5 }]
+    },
+    {
+      "op": "applyGrowth",
+      "args": { "id": "p_ok", "growth": { "level": 10, "evs": { "hp": 4, "atk": 0, "def": 0, "spatk": 0, "spdef": 0, "speed": 0 } } },
+      "expect": { "ok": true },
+      "state": [{ "kind": "pokemonLevel", "id": "p_ok", "equals": 10 }]
+    }
+  ]
+}

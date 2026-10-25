@@ -49,9 +49,14 @@ export function arenaEntryFor(rating: number): number {
   return ARENA_ENTRY_FEES[tierOf(rating).key];
 }
 
-/** 系统补贴 = 准入额 ×50%（向下取整） */
+/**
+ * 系统补贴系数（H12 起为 0：积分场零和，不增发）。
+ * 函数保留给帮助面板/未来调参；`ARENA_SUBSIDY_RATIO` 与后端 `backend/src/ranked/arena.ts` 保持一致。
+ */
+export const ARENA_SUBSIDY_RATIO = 0;
+
 export function arenaSubsidyFor(entryFee: number): number {
-  return Math.floor(entryFee * 0.5);
+  return Math.floor(entryFee * ARENA_SUBSIDY_RATIO);
 }
 
 export function tierOf(rating: number): RankTier {

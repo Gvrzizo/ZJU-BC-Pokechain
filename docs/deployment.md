@@ -231,7 +231,7 @@ chmod 600 ../backend/.fabric-certs/system-key.pem
 
 `scripts/e2e-smoke.sh` 已实现：健康检查 → 注册随机账号 A/B → admin 发放物资（admin 不可用则容忍降级）→ A 捕捉 → A→B 交易双确认 → 开房押注 → B forfeit → 断言 SETTLED 与积分归属 → fairness 复核 `sha256(serverSeed)==commitHash`，任一断言失败即打印请求/响应并 exit 1。模式 A / compose 栈直接 `./scripts/e2e-smoke.sh`（默认打 http://localhost:8080，`BASE_URL=http://localhost:3000` 可直连后端）。模式 B 真链下注册接口会走 CA enroll，新账号冒烟链路可用，但受上文"真链模式已知限制"约束（seed 账号不可玩、仲裁不在真链演示）。手工冒烟清单（模式 B，先完成 4.4）：
 
-1. 注册两个新账号 A/B（前端注册页）→ `peer chaincode query ... '{"Args":["PlayerContract:GetPlayer","<用户名>"]}'` 返回积分 1000；
+1. 注册两个新账号 A/B（前端注册页）→ `peer chaincode query ... '{"Args":["PlayerContract:GetPlayer","<用户名>"]}'` 返回积分 400、`transferLockUntil` 为注册 +72h；演示账号由 seed 的 `ClearTransferLock` 解锁；
 2. A 走捕捉（§5 动线第 2 步），链上 `RandomContract:GetRandom` 看到 COMMITTED→REVEALED→CONSUMED；
 3. A→B 发起交易并双方确认，`TradeContract:GetTrade` 看到 EXECUTED；
 4. A/B 押注对战打到结算，`BattleContract:GetBattle` 看到 SETTLED 且 escrow 归赢家；

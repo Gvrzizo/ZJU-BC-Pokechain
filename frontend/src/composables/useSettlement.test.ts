@@ -88,7 +88,7 @@ describe('createSettlement: 结算确认流程', () => {
 
   it('confirm 报错但链上已结算（兜底/并发）：判定为已交付，不提示手动重试', async () => {
     const flow = createSettlement('b_1');
-    vi.mocked(confirmBattleResult).mockRejectedValue(new Error('INVALID_BATTLE_STATE'));
+    vi.mocked(confirmBattleResult).mockRejectedValue(new Error('BAD_STATE'));
     vi.mocked(getBattle).mockResolvedValue({ battle: battle({ status: 'SETTLED' }), live: null });
 
     await flow.start();

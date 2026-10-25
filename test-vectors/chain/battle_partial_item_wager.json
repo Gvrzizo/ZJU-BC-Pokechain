@@ -1,0 +1,47 @@
+{
+  "name": "battle_partial_item_wager",
+  "description": "部分数量押注：原堆叠减量 + 确定性子堆叠锁定；结算后并回原堆叠",
+  "steps": [
+    {
+      "op": "mintItem",
+      "args": { "id": "stack_a", "ownerId": "alice", "typeId": "poke-ball", "quantity": 10 },
+      "expect": { "ok": true },
+      "state": [{ "kind": "itemQuantity", "id": "stack_a", "equals": 10 }]
+    },
+    {
+      "op": "createBattle",
+      "args": {
+        "id": "bi",
+        "playerA": "alice",
+        "playerB": "bob",
+        "wagerA": { "pokemonIds": [], "items": [{ "id": "stack_a", "qty": 3 }], "points": 0 },
+        "wagerB": { "pokemonIds": [], "items": [], "points": 0 }
+      },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "itemQuantity", "id": "stack_a", "equals": 7 },
+        { "kind": "itemStatus", "id": "stack_a", "equals": "IDLE" },
+        { "kind": "itemQuantity", "id": "stack_a#wbi", "equals": 3 },
+        { "kind": "itemStatus", "id": "stack_a#wbi", "equals": "LOCKED_BATTLE" },
+        { "kind": "itemOwner", "id": "stack_a#wbi", "equals": "alice" }
+      ]
+    },
+    {
+      "op": "activateBattle",
+      "args": { "id": "bi" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "forfeitBattle",
+      "args": { "id": "bi", "loserId": "bob", "reason": "timeout" },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "battleStatus", "id": "bi", "equals": "SETTLED" },
+        { "kind": "battleWinner", "id": "bi", "equals": "alice" },
+        { "kind": "itemQuantity", "id": "stack_a", "equals": 10 },
+        { "kind": "itemStatus", "id": "stack_a", "equals": "IDLE" },
+        { "kind": "itemOwner", "id": "stack_a", "equals": "alice" }
+      ]
+    }
+  ]
+}

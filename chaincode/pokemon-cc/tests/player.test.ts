@@ -1,4 +1,4 @@
-import { expectCode, ORG1, ORG2, T1, T2, World } from './helpers/harness';
+import { EXPIRES, expectCode, ORG1, ORG2, T1, T2, World } from './helpers/harness';
 
 describe('PlayerContract', () => {
   let w: World;
@@ -6,7 +6,7 @@ describe('PlayerContract', () => {
     w = new World();
   });
 
-  test('注册玩家（admin 代注册）：初始 points=1000、role=player、mspId 取调用者，发 PlayerRegistered 事件', async () => {
+  test('注册玩家（admin 代注册）：初始 points=400、72h 转账锁、role=player、mspId 取调用者，发 PlayerRegistered 事件', async () => {
     const res = await w.run(() => w.player.RegisterPlayer(w.adminCtx(), 'u_ash', '小智', T1, 'idem-1'));
     const p = JSON.parse(res);
     expect(p).toMatchObject({
@@ -15,9 +15,10 @@ describe('PlayerContract', () => {
       mspId: ORG1,
       nickname: '小智',
       role: 'player',
-      points: 1000,
+      points: 400,
       wins: 0,
       losses: 0,
+      transferLockUntil: '2026-01-04T00:00:00.000Z',
       createdAt: T1,
     });
     expect(w.eventNames()).toContain('PlayerRegistered');
@@ -38,7 +39,7 @@ describe('PlayerContract', () => {
       'FORBIDDEN',
     );
     await w.run(() => w.player.RegisterPlayer(w.systemCtx(), 'u_ash', '小智', T1, 'idem-reg-system'));
-    expect((await w.getPlayer('u_ash')).points).toBe(1000);
+    expect((await w.getPlayer('u_ash')).points).toBe(400);
   });
 
   test('AddPoints：admin 加分/扣分，事件 PointsChanged', async () => {
@@ -80,6 +81,44 @@ describe('PlayerContract', () => {
     expect(res).toMatchObject({ fromBalance: 700, toBalance: 1300 });
     expect((await w.getPlayer('u_ash')).points).toBe(700);
     expect((await w.getPlayer('u_gary')).points).toBe(1300);
+  });
+
+  test('H10：注册后 72h 内 TransferPoints 被拒 TRANSFER_LOCKED，到期或 ClearTransferLock 后可转', async () => {
+    await w.run(() => w.player.RegisterPlayer(w.adminCtx(), 'u_new', '新人', T1, 'idem-lock-reg1'));
+    await w.run(() => w.player.RegisterPlayer(w.adminCtx(), 'u_vet', '老手', T1, 'idem-lock-reg2'));
+    await expectCode(
+      w.run(() => w.player.TransferPoints(w.ctxAs('u_new'), 'u_new', 'u_vet', '100', T2, 'idem-lock-t1')),
+      'TRANSFER_LOCKED',
+    );
+    expect((await w.getPlayer('u_new')).points).toBe(400);
+    // 恰好 72h 后解锁
+    await w.run(() =>
+      w.player.TransferPoints(w.ctxAs('u_new'), 'u_new', 'u_vet', '100', '2026-01-04T00:00:00.000Z', 'idem-lock-t2'),
+    );
+    expect((await w.getPlayer('u_new')).points).toBe(300);
+
+    // ClearTransferLock 仅 admin/system；解锁后立刻可转
+    await expectCode(w.run(() => w.player.ClearTransferLock(w.ctxAs('u_new'), 'u_new', T2, 'idem-lock-c0')), 'FORBIDDEN');
+    await w.run(() => w.player.ClearTransferLock(w.adminCtx(), 'u_vet', T2, 'idem-lock-c1'));
+    expect((await w.getPlayer('u_vet')).transferLockUntil).toBe('');
+    await w.run(() => w.player.TransferPoints(w.ctxAs('u_vet'), 'u_vet', 'u_new', '50', T2, 'idem-lock-t3'));
+    expect((await w.getPlayer('u_new')).points).toBe(350);
+    expect(w.eventNames()).toContain('TransferLockCleared');
+  });
+
+  test('H10：交易里支付积分的一方在锁定期内被拒 TRANSFER_LOCKED', async () => {
+    await w.run(() => w.player.RegisterPlayer(w.adminCtx(), 'u_new', '新人', T1, 'idem-lock-trade1'));
+    await w.run(() => w.player.RegisterPlayer(w.adminCtx(), 'u_old', '老手', T1, 'idem-lock-trade2'));
+    const empty = JSON.stringify({ pokemonIds: [], itemIds: [], points: 0 });
+    const offerPts = JSON.stringify({ pokemonIds: [], itemIds: [], points: 50 });
+    await expectCode(
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_new'), 't_lock1', 'u_new', 'u_old', offerPts, empty, EXPIRES, T2, 'idem-lock-trade3')),
+      'TRANSFER_LOCKED',
+    );
+    await expectCode(
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_old'), 't_lock2', 'u_old', 'u_new', empty, offerPts, EXPIRES, T2, 'idem-lock-trade4')),
+      'TRANSFER_LOCKED',
+    );
   });
 
   test('TransferPoints：同 Org1 的其他玩家不能转走本人积分（hf.EnrollmentID 不匹配）抛 NOT_OWNER', async () => {

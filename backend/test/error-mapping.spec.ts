@@ -36,6 +36,7 @@ describe('H8 链码错误码 → HTTP 状态（全局过滤器）', () => {
     ['NOT_OWNER: pokemon p is not yours', HttpStatus.FORBIDDEN, 'NOT_OWNER', 'pokemon p is not yours'],
     ['FORBIDDEN: only system', HttpStatus.FORBIDDEN, 'FORBIDDEN', 'only system'],
     ['ASSET_LOCKED: pokemon p is LOCKED_BATTLE', HttpStatus.CONFLICT, 'ASSET_LOCKED', 'pokemon p is LOCKED_BATTLE'],
+    ['TRANSFER_LOCKED: player ash cannot transfer points yet', HttpStatus.CONFLICT, 'TRANSFER_LOCKED', 'player ash cannot transfer points yet'],
     ['BAD_STATE: battle b is ACTIVE', HttpStatus.CONFLICT, 'BAD_STATE', 'battle b is ACTIVE'],
     ['BATTLE_NOT_FOUND: no battle x', HttpStatus.NOT_FOUND, 'BATTLE_NOT_FOUND', 'no battle x'],
     ['INSUFFICIENT_POINTS: balance 0', HttpStatus.BAD_REQUEST, 'INSUFFICIENT_POINTS', 'balance 0'],

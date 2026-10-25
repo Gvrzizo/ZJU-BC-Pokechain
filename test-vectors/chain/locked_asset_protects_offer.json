@@ -1,0 +1,54 @@
+{
+  "name": "locked_asset_protects_offer",
+  "description": "锁定资产不能被转移、押注或再次挂牌；交易只锁发起方 offer",
+  "steps": [
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_locked", "ownerId": "alice" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "createTrade",
+      "as": "alice",
+      "args": {
+        "id": "t_lock",
+        "fromId": "alice",
+        "toId": "bob",
+        "offer": { "pokemonIds": ["p_locked"], "itemIds": [], "points": 0 },
+        "request": { "pokemonIds": [], "itemIds": [], "points": 0 }
+      },
+      "expect": { "ok": true },
+      "state": [{ "kind": "pokemonStatus", "id": "p_locked", "equals": "LOCKED_TRADE" }]
+    },
+    {
+      "op": "transferPokemon",
+      "as": "alice",
+      "args": { "id": "p_locked", "toId": "carol" },
+      "expect": { "ok": false, "code": "ASSET_LOCKED" },
+      "state": [{ "kind": "pokemonOwner", "id": "p_locked", "equals": "alice" }]
+    },
+    {
+      "op": "createBattle",
+      "args": {
+        "id": "b_lock",
+        "playerA": "alice",
+        "playerB": "bob",
+        "wagerA": { "pokemonIds": ["p_locked"], "items": [], "points": 0 },
+        "wagerB": { "pokemonIds": [], "items": [], "points": 0 }
+      },
+      "expect": { "ok": false, "code": "ASSET_LOCKED" }
+    },
+    {
+      "op": "createTrade",
+      "as": "alice",
+      "args": {
+        "id": "t_lock2",
+        "fromId": "alice",
+        "toId": "bob",
+        "offer": { "pokemonIds": ["p_locked"], "itemIds": [], "points": 0 },
+        "request": { "pokemonIds": [], "itemIds": [], "points": 0 }
+      },
+      "expect": { "ok": false, "code": "ASSET_LOCKED" }
+    }
+  ]
+}
