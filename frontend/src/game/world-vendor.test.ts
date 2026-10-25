@@ -49,7 +49,7 @@ describe.skipIf(!available)('vendor world 素材包', () => {
       const indices = Object.values(tileset.tiles) as number[];
       expect(indices.length).toBeGreaterThan(0);
       expect(tileset.columns).toBe(columns);
-      for (const index of [...indices, ...Object.values(tileset.autotiles ?? {}).flat()]) {
+      for (const index of [...indices, ...Object.values(tileset.autotiles ?? {}).flat(), ...tileset.wallTiles ?? []]) {
         expect(index).toBeGreaterThanOrEqual(0);
         expect(index).toBeLessThan(columns * height / 32);
       }

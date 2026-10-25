@@ -38,11 +38,13 @@ BootScene 启动时会：
 
 ### 世界素材（原作优先）
 
-`src/game/maps/` 有 15 张图、14 种 biome；`public/assets/vendor/world/manifest.json` v2 提供语义映射、原作邻接块和 sha256。`BootScene` 校验后注册原作图集，`native-map.ts` 直接裁切拼接，`world-art.ts` 缓存地图纹理。原作不存在或校验失败才回退程序化地形/人物。NPC 四向原作优先，护士因上游缺少行走帧而保留正面站姿。
+`src/game/maps/` 有 15 张图、14 种 biome；`public/assets/vendor/world/manifest.json` v2 提供语义映射、原作邻接块、完整岩壁方向块和 sha256。`BootScene` 校验后注册原作图集，`native-map.ts` 直接裁切拼接，`world-art.ts` 缓存地图纹理。原作不存在或校验失败才回退程序化地形/人物。NPC 四向原作优先，护士因上游缺少行走帧而保留正面站姿。
 
 ```bash
 # 从项目根目录运行（需要 Python 3 + Pillow）
 python3 frontend/tools/build-world-assets.py
+# 离线切片回归测试（合成像素，无需下载）：
+python3 -m unittest discover -s frontend/tools -p 'test_*.py'
 # 已有同版本 pokeemerald 源码时可离线读取：
 python3 frontend/tools/build-world-assets.py --source /path/to/pokeemerald
 # 前端 dev 启动后：/tools/world-preview.html 预览全部地图
@@ -58,11 +60,11 @@ python3 frontend/tools/build-world-assets.py --source /path/to/pokeemerald
 | `tower-v2.png` | 同上；tower | 天空之柱地板/台阶，原作柱前景与塔地板组合 |
 | `volcano-v2.png` | 同上；volcano magma | 红岩、灰地、岩浆 |
 | `sprites/hero-v2.png`、`hero-may-v2.png` | 96×256，3 列×4 行，每帧 32×64 | 原始 16×32 完整放大，不抽行；下/上/左/右各三帧 |
-| `sprites/<name>-<facing>-v2.png`、`<name>-v2.png` | 32×64；9 类 NPC、每类 5 张 | nurse / clerk / elder / kid / scientist / hiker / sailor / bug-catcher / mom |
+| `sprites/<name>-<facing>-v2.png`、`<name>-v2.png` | 32×64 画布；小孩内容为 32×32、脚底对齐；9 类 NPC、每类 5 张 | nurse / clerk / elder / kid / scientist / hiker / sailor / bug-catcher / mom |
 | `sprites/building-*-v2.png` | 中心/商店 128×128，民居 160×160 | 原作完整建筑，按门锚点与碰撞格对齐 |
 | `sprites/battle-grass-v2.png` | 240×112 | 原作草地战斗背景，游戏中 4 倍显示 |
 
-总计 5 张图集、51 张独立图片。`tiles` 值为行优先的瓦片索引（不是单行列号），`columns: 16`；`autotiles` 给出 3×3 原作过渡块，按象限拼接。图集主体保留原作完整 metatile ID；塔内追加了两格原作图层组合。旧 v1 manifest 和 32×32 主角仍兼容。
+总计 5 张图集、51 张独立图片。`tiles` 值为行优先的瓦片索引（不是单行列号），`columns: 16`；`autotiles` 给出道路/沙地/水岸的 3×3 原作过渡块，按象限拼接；`wallTiles` 是岩壁的完整 3×3 方向块，不裁成四角。树木保留 2×3 六格（含树根），放不下时用完整灌木。`wall` 表示连续山壁，`rock` 表示独立巨石；陆地巨石以原作前景叠在地面，不带海水底色。图集主体保留原作完整 metatile ID；塔内追加两格原作图层组合，1024 保留为陆地巨石组合。旧 v1 manifest 和 32×32 主角仍兼容。
 
 ```jsonc
 {
@@ -72,7 +74,8 @@ python3 frontend/tools/build-world-assets.py --source /path/to/pokeemerald
     "biomes": ["town"], "image": "town-v2.png", "columns": 16,
     "sha256": "实际文件哈希",
     "tiles": { "grass": 1, "path": 473 },
-    "autotiles": { "path": [464,465,466,472,473,474,480,481,482] }
+    "autotiles": { "path": [464,465,466,472,473,474,480,481,482] },
+    "wallTiles": [104,105,106,112,113,114,120,121,122]
   }],
   "sprites": [{ "name": "hero", "image": "sprites/hero-v2.png", "frameWidth": 32, "frameHeight": 64 }]
 }
@@ -247,6 +250,6 @@ public/
   fonts/       自托管像素字体（Press Start 2P + Fusion Pixel）+ OFL 许可证，来源见「字体」一节
 ```
 
-## 丰缘视觉改造（2026-10-21）
+## 丰缘视觉改造与地图修复（2026-10-25）
 
-原作资源优先，GPT Image 补充专用素材，完整说明见 [visual-design.md](../docs/visual-design.md)。本轮前端实测 190 单测 / 32 文件通过，vue-tsc + Vite 构建通过，并完成地图/页面浏览器检查。nginx 同时监听 IPv4/IPv6，world manifest 禁用缓存、图片带内容哈希更新。
+原作资源优先，GPT Image 补充专用素材，完整说明见 [visual-design.md](../docs/visual-design.md)。本轮前端实测 195 单测 / 32 文件 + 4 项 Python 切片测试通过，vue-tsc + Vite 构建通过，并完成地图/页面浏览器检查。nginx 同时监听 IPv4/IPv6，world manifest 禁用缓存、图片带内容哈希更新。

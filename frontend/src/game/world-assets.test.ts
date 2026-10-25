@@ -147,6 +147,12 @@ describe('key 与路径', () => {
 
 
 describe('原作过渡块与人物几何', () => {
+  it('完整岩壁方向块与道路过渡块分开解析，非法方向块会被忽略', () => {
+    const raw = { image: 'native.png', tiles: { grass: 1 }, wallTiles: [104,105,106,112,113,114,120,121,122] };
+    expect(parseTilesetSpec(raw)?.wallTiles).toEqual(raw.wallTiles);
+    expect(parseTilesetSpec({ ...raw, wallTiles: [104, 105] })?.wallTiles).toBeUndefined();
+    expect(parseTilesetSpec({ ...raw, wallTiles: [-1,105,106,112,113,114,120,121,122] })?.wallTiles).toBeUndefined();
+  });
   it('只接受九格非负整数过渡块，64px 高的原作人物帧不被压缩', () => {
     const spec = parseTilesetSpec({ image: 'native.png', tiles: { grass: 1 },
       autotiles: { path: [0,1,2,3,4,5,6,7,8], water: [0,1], grass: [-1,0,1,2,3,4,5,6,7] } });

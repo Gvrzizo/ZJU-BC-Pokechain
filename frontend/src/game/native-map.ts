@@ -72,29 +72,27 @@ export function mapBlits(map: MapDef, spec?: WorldTilesetSpec, buildings: Readon
     }
     if (native && outdoor && tile === T.tree) {
       if (trees.has(`${x},${y}`)) continue;
-      // Original 2x2 trees, greedily fitted wholly inside blocked cells. Narrow remnants use the original bush.
-      if ([at(x + 1, y), at(x, y + 1), at(x + 1, y + 1)].every((v) => v === T.tree) &&
-          !trees.has(`${x + 1},${y}`) && !trees.has(`${x},${y + 1}`) && !trees.has(`${x + 1},${y + 1}`)) {
-        [468, 469, 476, 477].forEach((index, q) => {
+      // The original tree includes a third row containing its trunk and shadow.
+      const footprint = [0, 1, 2, 3, 4, 5].map(i => [x + i % 2, y + Math.floor(i / 2)]);
+      if (footprint.every(([xx, yy]) => at(xx, yy) === T.tree && !trees.has(`${xx},${yy}`))) {
+        [468, 469, 476, 477, 484, 485].forEach((index, q) => {
           const xx = x + q % 2; const yy = y + Math.floor(q / 2);
           trees.add(`${xx},${yy}`); blit(index, xx, yy);
         });
       } else blit(14, x, y);
       continue;
     }
-    if (native && (tile === T.wall || tile === T.rock) && map.biome !== 'town') {
+    if (native && tile === T.wall && spec.wallTiles && map.biome !== 'town') {
       const same = (dx: number, dy: number) => {
         const other = at(x + dx, y + dy);
-        return other === undefined || other === tile;
+        return other === undefined || other === T.wall || other === T.door || other === T.stairs;
       };
       const n = same(0, -1), e = same(1, 0), s = same(0, 1), w = same(-1, 0);
-      // Isolated boulders use a full boulder, connected terrain uses the original cliff's edge pieces.
-      if (tile === T.rock && !n && !e && !s && !w) { semantic(tile, x, y); continue; }
-      const rockPatch = outdoor ? [104, 105, 106, 112, 113, 114, 120, 121, 122]
-        : map.biome === 'tower' ? [568, 569, 570, 576, 577, 578, 585, 589, 586]
-        : ['volcano', 'magma'].includes(map.biome) ? [795, 803, 802, 800, 811, 813, 808, 809, 810]
-        : [513, 521, 520, 528, 529, 530, 536, 537, 538];
-      transitionQuadrants(rockPatch, n, e, s, w).forEach((index, q) => blit(index, x, y, 'native', q));
+      // A one-cell spur cannot carry both faces of a cliff; use a complete boulder there.
+      if ((!n && !s) || (!e && !w)) { semantic(T.rock, x, y); continue; }
+      const row = !n ? 0 : !s ? 2 : 1;
+      const col = !w ? 0 : !e ? 2 : 1;
+      blit(spec.wallTiles[row * 3 + col], x, y);
       continue;
     }
     if (native && tile === T.plank) {

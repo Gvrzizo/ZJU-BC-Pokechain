@@ -4,7 +4,8 @@ import { mapBlits, transitionQuadrants } from './native-map';
 import type { WorldTilesetSpec } from './world-assets';
 
 const spec: WorldTilesetSpec = { biomes: ['town'], image: 'town.png', columns: 16,
-  tiles: { grass: 1, path: 473, tree: 14, door: 97, sign: 27 } };
+  tiles: { grass: 1, path: 473, tree: 14, rock: 1024, door: 97, sign: 27 },
+  wallTiles: [104, 105, 106, 112, 113, 114, 120, 121, 122] };
 const small = (grid: number[][]): MapDef => ({ ...MAPS.town, width: grid[0].length, height: grid.length, grid, objects: [], warps: [] });
 
 describe('原作地图渲染计划', () => {
@@ -27,11 +28,43 @@ describe('原作地图渲染计划', () => {
     expect(transitionQuadrants(patch, true, false, true, false)).toEqual([472, 474, 472, 474]);
   });
 
-  it('整棵原作树只覆盖四个实际阻挡格，窄处使用完整灌木', () => {
-    const map = small([[T.tree, T.tree, T.grass], [T.tree, T.tree, T.tree]]);
+  it('整棵原作树保留树根的第三行，只覆盖六个实际阻挡格', () => {
+    const map = small([[T.tree, T.tree, T.grass], [T.tree, T.tree, T.tree], [T.tree, T.tree, T.grass]]);
     const commands = mapBlits(map, spec);
-    expect(commands.map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([468, 469, 476, 477, 1, 14]);
-    expect(new Set(commands.map(b => `${b.dx},${b.dy}`)).size).toBe(6);
+    expect(commands.map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([468, 469, 476, 477, 484, 485, 1, 14, 1]);
+    expect(new Set(commands.map(b => `${b.dx},${b.dy}`)).size).toBe(9);
+  });
+
+  it('不足三行的树丛使用完整灌木，不会截断大树', () => {
+    const commands = mapBlits(small([[T.tree, T.tree], [T.tree, T.tree]]), spec);
+    expect(commands.map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([14, 14, 14, 14]);
+  });
+
+  it('相邻陆地石块保留完整巨石，不会拼成岩壁或使用海底礁石', () => {
+    const map = { ...small([[T.rock, T.rock], [T.rock, T.rock]]), biome: 'mid' as const };
+    const commands = mapBlits(map, spec);
+    expect(commands).toHaveLength(4);
+    expect(commands.every(b => b.sw === 32 && b.sh === 32 && b.sy / 32 * 16 + b.sx / 32 === 1024)).toBe(true);
+  });
+
+  it('岩壁使用完整朝向块，顶部、侧面与正面不再裁成四角', () => {
+    const map = { ...small([
+      [T.grass, T.grass, T.grass, T.grass, T.grass],
+      [T.grass, T.wall, T.wall, T.wall, T.grass],
+      [T.grass, T.wall, T.wall, T.wall, T.grass],
+      [T.grass, T.wall, T.wall, T.wall, T.grass],
+      [T.grass, T.grass, T.grass, T.grass, T.grass],
+    ]), biome: 'mid' as const };
+    const commands = mapBlits(map, spec).filter(b => b.dx >= 32 && b.dx <= 96 && b.dy >= 32 && b.dy <= 96);
+    expect(commands.map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual(spec.wallTiles);
+    expect(commands.every(b => b.sw === 32 && b.sh === 32)).toBe(true);
+  });
+
+  it('岩壁门洞保持两侧连续，单格凸起改用完整石块', () => {
+    const map = { ...small([[T.wall, T.wall, T.wall], [T.wall, T.door, T.wall], [T.grass, T.grass, T.grass]]), biome: 'mid' as const };
+    expect(mapBlits(map, spec).filter(b => b.dy === 32).map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([121, 97, 121]);
+    const spur = { ...small([[T.grass, T.wall, T.grass]]), biome: 'mid' as const };
+    expect(mapBlits(spur, spec)[1].sy / 32 * 16).toBe(1024);
   });
 
   it('四栋建筑的原作占地全部有碰撞，门的位置与可行走格一致', () => {

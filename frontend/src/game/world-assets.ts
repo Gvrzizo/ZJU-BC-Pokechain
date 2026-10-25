@@ -44,6 +44,8 @@ export interface WorldTilesetSpec {
   tiles: Partial<Record<TileId, number>>;
   /** 原作 3×3 邻接过渡块（左上至右下），运行时按 8px 象限拼接 */
   autotiles?: Partial<Record<TileId, number[]>>;
+  /** 岩壁的完整 3×3 方向块；不按道路的四象限方式裁切。 */
+  wallTiles?: number[];
 }
 
 export interface WorldSpriteSpec {
@@ -176,6 +178,8 @@ export function parseTilesetSpec(raw: unknown): WorldTilesetSpec | null {
   }
   return {
     autotiles,
+    wallTiles: Array.isArray(entry.wallTiles) && entry.wallTiles.length === 9 &&
+      entry.wallTiles.every((v) => Number.isInteger(v) && v >= 0) ? entry.wallTiles : undefined,
     biomes: biomes.length > 0 ? biomes : [],
     image,
     sha256: asString(entry.sha256),

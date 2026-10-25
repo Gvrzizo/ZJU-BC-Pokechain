@@ -251,7 +251,7 @@ export const FOREST: MapDef = {
 function buildRouteMid(): number[][] {
   const rng = makeRng(303);
   const g = createGrid(34, 26, T.grass);
-  border(g, T.rock, 2);
+  border(g, T.wall, 2);
   // 草丛、碎石与树
   for (const [cx, cy, rx, ry] of [
     [6, 6, 2.6, 2],
@@ -305,16 +305,16 @@ function buildRouteMid(): number[][] {
   fillRect(g, 8, 2, 2, 2, T.path);
   // 北面的遗迹石门：嵌在岩壁里，门口留 2 格地面
   setTile(g, 8, 1, T.door);
-  setTile(g, 7, 1, T.rock);
-  setTile(g, 9, 1, T.rock);
-  setTile(g, 8, 0, T.rock);
+  setTile(g, 7, 1, T.wall);
+  setTile(g, 9, 1, T.wall);
+  setTile(g, 8, 0, T.wall);
   // 东面的洞口：嵌在岩壁中部，下方留 2 格地面
-  setTile(g, 33, 14, T.rock);
-  setTile(g, 33, 15, T.rock);
+  setTile(g, 33, 14, T.wall);
+  setTile(g, 33, 15, T.wall);
   setTile(g, 32, 14, T.door);
   setTile(g, 32, 15, T.door);
-  setTile(g, 33, 13, T.rock);
-  setTile(g, 33, 16, T.rock);
+  setTile(g, 33, 13, T.wall);
+  setTile(g, 33, 16, T.wall);
 
   flowerCluster(g, 8, 5, rng, 3);
   flowerCluster(g, 22, 15, rng, 3);
@@ -384,11 +384,11 @@ export const ROUTE_MID: MapDef = {
 function buildCave(): number[][] {
   const rng = makeRng(404);
   const g = createGrid(24, 20, T.floor);
-  border(g, T.rock, 2);
+  border(g, T.wall, 2);
   // 中央岩体：把洞窟分成南北两厅，两侧各留一条通道
-  blob(g, T.rock, 12, 9.5, 4.6, 2.4, rng, { jitter: 0.35, onlyOn: 'floor' });
-  blob(g, T.rock, 6, 15.5, 2.4, 1.6, rng, { jitter: 0.3, onlyOn: 'floor' });
-  blob(g, T.rock, 18.5, 15, 2.6, 1.6, rng, { jitter: 0.3, onlyOn: 'floor' });
+  blob(g, T.wall, 12, 9.5, 4.6, 2.4, rng, { jitter: 0.35, onlyOn: 'floor' });
+  blob(g, T.wall, 6, 15.5, 2.4, 1.6, rng, { jitter: 0.3, onlyOn: 'floor' });
+  blob(g, T.wall, 18.5, 15, 2.6, 1.6, rng, { jitter: 0.3, onlyOn: 'floor' });
   // 碎石地（遇敌区）铺满两厅
   blob(g, T.gravel, 6, 5, 3.6, 2.4, rng, { jitter: 0.4, onlyOn: 'floor', fill: 0.95 });
   blob(g, T.gravel, 18, 5, 3.6, 2.4, rng, { jitter: 0.4, onlyOn: 'floor', fill: 0.95 });
@@ -410,8 +410,8 @@ function buildCave(): number[][] {
   setTile(g, 1, 10, T.floor);
   setTile(g, 14, 1, T.stairs);
   setTile(g, 15, 1, T.stairs);
-  setTile(g, 13, 1, T.rock);
-  setTile(g, 16, 1, T.rock);
+  setTile(g, 13, 1, T.wall);
+  setTile(g, 16, 1, T.wall);
   setTile(g, 14, 2, T.floor);
   setTile(g, 15, 2, T.floor);
   return g;
@@ -453,7 +453,7 @@ export const CAVE: MapDef = {
 function buildCoast(): number[][] {
   const rng = makeRng(505);
   const g = createGrid(38, 26, T.grass);
-  border(g, T.rock, 2);
+  border(g, T.wall, 2);
   // 岸上的树丛与高草（先铺，路与沙滩后压）
   blob(g, T.tree, 4, 6, 2, 2, rng, { onlyOn: 'grass' });
   blob(g, T.tree, 28, 5, 2.4, 2, rng, { onlyOn: 'grass' });
@@ -482,7 +482,7 @@ function buildCoast(): number[][] {
     setTile(g, x + 1, 22, T.plank);
   }
   // 海蚀洞口：岩崖里的一处暗门，门口留 2 格沙地
-  fillRect(g, 20, 10, 3, 3, T.rock);
+  fillRect(g, 20, 10, 3, 3, T.wall);
   setTile(g, 21, 12, T.door);
   setTile(g, 20, 12, T.sand);
   setTile(g, 22, 12, T.sand);
@@ -491,8 +491,8 @@ function buildCoast(): number[][] {
   road(g, [{ x: 14, y: 2 }, { x: 14, y: 9 }], T.path, 2);
   setTile(g, 14, 1, T.stairs);
   setTile(g, 15, 1, T.stairs);
-  setTile(g, 13, 1, T.rock);
-  setTile(g, 16, 1, T.rock);
+  setTile(g, 13, 1, T.wall);
+  setTile(g, 16, 1, T.wall);
   // 滨海步道分别连接两座码头，避免低潮线把桥头与陆地切开。
   road(g, [{ x: 14, y: 9 }, { x: 14, y: 11 }, { x: 6, y: 11 }, { x: 6, y: 14 }], T.path, 2);
   road(g, [{ x: 14, y: 9 }, { x: 30, y: 9 }, { x: 30, y: 14 }], T.path, 2);
@@ -577,7 +577,7 @@ export const COAST: MapDef = {
 function buildRouteNorth(): number[][] {
   const rng = makeRng(606);
   const g = createGrid(34, 26, T.grass);
-  border(g, T.rock, 2);
+  border(g, T.wall, 2);
   // 高草丛 + 岩块 + 高原水塘
   for (const [cx, cy, rx, ry] of [
     [12, 5, 3.4, 2.4],
@@ -619,13 +619,13 @@ function buildRouteNorth(): number[][] {
   );
   road(g, [{ x: 24, y: 6 }, { x: 24, y: 10 }], T.path, 2);
   // 塔基座：岩台 + 塔门（门口留 2 格路）
-  blob(g, T.rock, 24, 3.5, 4.6, 2.2, rng, { jitter: 0.28, onlyOn: 'grass' });
+  blob(g, T.wall, 24, 3.5, 4.6, 2.2, rng, { jitter: 0.28, onlyOn: 'grass' });
   road(g, [{ x: 24, y: 7 }, { x: 24, y: 9 }], T.path, 2);
-  setTile(g, 23, 6, T.rock);
-  setTile(g, 25, 6, T.rock);
+  setTile(g, 23, 6, T.wall);
+  setTile(g, 25, 6, T.wall);
   setTile(g, 24, 6, T.door);
-  setTile(g, 24, 5, T.rock);
-  setTile(g, 24, 4, T.rock);
+  setTile(g, 24, 5, T.wall);
+  setTile(g, 24, 4, T.wall);
   setTile(g, 6, 25, T.path);
   setTile(g, 7, 25, T.path);
   setTile(g, 32, 16, T.path);
@@ -690,7 +690,6 @@ function buildVolcano(): number[][] {
   const rng = makeRng(707);
   const g = createGrid(34, 26, T.gravel);
   border(g, T.wall, 2);
-  border(g, T.rock, 1);
   // 岩浆池：贴着岩壁，中央留给徒步的灰地
   blob(g, T.lava, 25, 8, 3.4, 2.4, rng, { jitter: 0.26, onlyOn: 'gravel' });
   blob(g, T.lava, 26, 19, 3, 2, rng, { jitter: 0.26, onlyOn: 'gravel' });
@@ -737,8 +736,8 @@ function buildVolcano(): number[][] {
   setTile(g, 0, 16, T.floor);
   setTile(g, 1, 16, T.floor);
   // 熔岩洞窟的入口嵌在岩壁里，门口留 2 格石地
-  setTile(g, 11, 1, T.rock);
-  setTile(g, 13, 1, T.rock);
+  setTile(g, 11, 1, T.wall);
+  setTile(g, 13, 1, T.wall);
   setTile(g, 12, 1, T.door);
   setTile(g, 11, 2, T.floor);
   setTile(g, 12, 2, T.floor);

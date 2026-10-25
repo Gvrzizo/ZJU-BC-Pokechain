@@ -25,8 +25,10 @@ SEMANTICS = ['grass', 'tallGrass', 'flower', 'path', 'sand', 'ash', 'gravel', 't
              'rock', 'water', 'deepWater', 'plank', 'wall', 'roof', 'floor', 'carpet',
              'counter', 'door', 'stairs', 'sign', 'lava', 'altar', 'pillar']
 # Full metatile IDs, as used in the original map data (primary <512; secondary >=512).
-OUTDOOR = dict(zip(SEMANTICS, [1, 13, 4, 473, 289, 113, 268, 14, 189, 209, 368,
-                              435, 121, 73, 289, 513, 27, 167, 175, 27, 368, 36, 189]))
+# Reserved atlas slot: original boulder foreground on land, rather than its sea-rock background.
+LAND_ROCK = 1024
+OUTDOOR = dict(zip(SEMANTICS, [1, 13, 4, 473, 289, 113, 268, 14, LAND_ROCK, 209, 368,
+                              435, 121, 73, 289, 513, 27, 167, 175, 27, 368, 36, LAND_ROCK]))
 PROFILES = {
     'nature': (['grass', 'forest', 'mid', 'north', 'coast', 'island', 'birth'], 'general', 'petalburg', OUTDOOR),
     'town': (['town'], 'general', 'petalburg', {**OUTDOOR, 'roof': 73, 'wall': 98, 'door': 97}),
@@ -35,7 +37,7 @@ PROFILES = {
         'rock': 515, 'door': 532, 'stairs': 573, 'altar': 630, 'pillar': 699, 'water': 659, 'lava': 868}),
     'tower': (['tower'], 'general', 'pacifidlog', {
         **OUTDOOR, 'grass': 701, 'floor': 701, 'gravel': 565, 'wall': 577,
-        'rock': 527, 'pillar': 720, 'door': 580, 'stairs': 580, 'altar': 564}),
+        'rock': LAND_ROCK, 'pillar': 720, 'door': 580, 'stairs': 580, 'altar': 564}),
     'volcano': (['volcano', 'magma'], 'general', 'cave', {
         **OUTDOOR, 'grass': 811, 'floor': 811, 'gravel': 801, 'ash': 803, 'wall': 809,
         'rock': 816, 'lava': 868, 'door': 822, 'stairs': 828, 'altar': 873}),
@@ -150,13 +152,17 @@ def save_image(image: Image.Image, path: Path) -> str:
 def build_atlas(name: str, bank: Tileset, out: Path, cave: Tileset | None = None) -> dict:
     biomes, _, _, tiles = PROFILES[name]
     count = 512 + bank.count
-    atlas_count = max(count, 729) if name == 'tower' else count
+    atlas_count = max(count, LAND_ROCK + 1)
     atlas = Image.new('RGBA', (16 * TILE, ((atlas_count + 15) // 16) * TILE))
     for mid in range(count):
         if mid < 512 and mid >= bank.primary.count:
             continue
         atlas.paste(bank.render(mid).resize((TILE, TILE), Image.Resampling.NEAREST),
                     (mid % 16 * TILE, mid // 16 * TILE))
+    rock = bank.render(tiles['grass']).copy()
+    rock.alpha_composite(bank.render(189, overlay_only=True))
+    atlas.paste(rock.resize((TILE, TILE), Image.Resampling.NEAREST),
+                (LAND_ROCK % 16 * TILE, LAND_ROCK // 16 * TILE))
     if name == 'tower' and cave:
         # Original stone-column foreground over the original tower floor; no pixel redrawing.
         for target, original in [(720, 699), (728, 707)]:
@@ -172,9 +178,14 @@ def build_atlas(name: str, bank: Tileset, out: Path, cave: Tileset | None = None
             'sand': [280, 281, 282, 288, 289, 290, 296, 297, 298],
             'water': [200, 201, 202, 208, 209, 210, 216, 217, 218],
         }
+    # Cliffs are complete directional metatiles, not interchangeable road quadrants.
+    walls = ([104, 105, 106, 112, 113, 114, 120, 121, 122] if name in ('nature', 'town') else
+             [568, 569, 570, 576, 577, 578, 585, 589, 586] if name == 'tower' else
+             [794, 795, 796, 800, 803, 802, 808, 809, 810] if name == 'volcano' else
+             [520, 521, 522, 528, 529, 530, 536, 537, 538])
     return {'biomes': biomes, 'image': f'{name}-v2.png', 'columns': 16,
             'sha256': save_image(atlas, out / f'{name}-v2.png'), 'tiles': tiles,
-            'autotiles': autotiles, 'nativeTileSize': 16, 'tileSize': TILE,
+            'autotiles': autotiles, 'wallTiles': walls, 'nativeTileSize': 16, 'tileSize': TILE,
             'source': {'primary': PROFILES[name][1], 'secondary': PROFILES[name][2]}}
 
 
@@ -185,6 +196,15 @@ def frame_image(sheet: Image.Image, frame: int) -> Image.Image:
     rgba.putalpha(Image.eval(indexed.convert('L') if indexed.mode != 'P' else
                             Image.frombytes('L', indexed.size, indexed.tobytes()), lambda i: 255 if i else 0))
     return rgba
+
+
+def person_frame(image: Image.Image, baseline: int, flip: bool = False) -> Image.Image:
+    if flip:
+        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    canvas = Image.new('RGBA', (32, 64))
+    canvas.paste(image.resize((image.width * 2, image.height * 2), Image.Resampling.NEAREST),
+                 (0, (32 - baseline) * 2))
+    return canvas
 
 
 def build_sprites(source: Source, bank: Tileset, out: Path) -> list[dict]:
@@ -202,12 +222,7 @@ def build_sprites(source: Source, bank: Tileset, out: Path) -> list[dict]:
         # Shift all frames by the same bottom padding, preserving walking motion and every original row.
         baseline = max((frame.getbbox() or (0, 0, 0, 32))[3] for frame in frames)
         def scaled(index: int, flip: bool = False):
-            image = frames[index]
-            if flip:
-                image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-            canvas = Image.new('RGBA', (32, 64))
-            canvas.paste(image.resize((32, 64), Image.Resampling.NEAREST), (0, (32 - baseline) * 2))
-            return canvas
+            return person_frame(frames[index], baseline, flip)
         if name in HEROES:
             image = Image.new('RGBA', (96, 256))
             for row, plan in enumerate([[0, 3, 4], [1, 5, 6], [2, 7, 8], [2, 7, 8]]):
