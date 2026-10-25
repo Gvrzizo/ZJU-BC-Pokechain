@@ -20,12 +20,27 @@ export class AppException extends HttpException {
   }
 }
 
+/**
+ * 在任意错误文本中查找 `CODE: message`：
+ * 真链 gateway 把链码错误放在 `EndorseError.details[].message` 里，文本形如
+ * `chaincode response 500, TRANSFER_LOCKED: player ...`（CODE 不在行首），
+ * 所以不能只用 `^CODE:` 锚定。取最后一个匹配（details 通常比外层消息更具体）。
+ */
+export function findCodedMessage(raw: string): { code: string; message: string } | null {
+  if (!raw) return null;
+  const re = /(?:^|[\s,])([A-Z][A-Z0-9_]{1,63}):[ \t]?([^\n]*)/g;
+  let match: RegExpExecArray | null;
+  let last: { code: string; message: string } | null = null;
+  while ((match = re.exec(raw)) !== null) {
+    last = { code: match[1], message: match[2].trim() || raw };
+  }
+  return last;
+}
+
 /** Split a 'CODE: message' string (as thrown by the chaincode) into parts. */
 export function splitCodedMessage(raw: string): { code: string; message: string } {
-  const match = CODE_RE.exec(raw ?? '');
-  if (match) {
-    return { code: match[1], message: match[2] || raw };
-  }
+  const coded = findCodedMessage(raw ?? '');
+  if (coded) return coded;
   return { code: 'INTERNAL_ERROR', message: raw };
 }
 
@@ -63,6 +78,7 @@ export const CHAIN_HTTP_STATUS: Readonly<Record<string, HttpStatus>> = {
   BAD_STATE: HttpStatus.CONFLICT,
   INVALID_BATTLE_STATE: HttpStatus.CONFLICT,
   INVALID_RANDOM_STATE: HttpStatus.CONFLICT,
+  RAND_NOT_FOUND: HttpStatus.NOT_FOUND,
   RAND_NOT_REVEALED: HttpStatus.CONFLICT,
   RANDOM_NOT_REVEALED: HttpStatus.CONFLICT,
   RAND_CONSUMED: HttpStatus.CONFLICT,

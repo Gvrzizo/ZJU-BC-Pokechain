@@ -23,6 +23,11 @@ docker info >/dev/null 2>&1 || fatalln "Docker 守护进程未运行（或当前
 docker compose version >/dev/null 2>&1 || fatalln "未找到 docker compose v2（请安装 Docker Compose 插件）"
 infoln "$(docker --version)"
 infoln "$(docker compose version)"
+DOCKER_MAJOR="$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d. -f1)"
+if [ -n "${DOCKER_MAJOR}" ] && [ "${DOCKER_MAJOR}" -ge 28 ] 2>/dev/null; then
+  warnln "Docker ${DOCKER_MAJOR}.x 与 Fabric 2.5 的 node 链码 docker builder 不兼容（broken pipe）："
+  warnln "deployCC.sh 会自动改用 ccaas（chaincode-as-a-service）链路，无需手工降级 Docker。"
+fi
 
 stepln "步骤 2/3 检查宿主机工具（curl / jq）"
 command -v curl >/dev/null 2>&1 || fatalln "未找到 curl"
@@ -40,6 +45,7 @@ bin_ok() {
   v="$("${b}" version 2>/dev/null | sed -n 's/^ *Version: //p' | head -n1)"
   [ -n "${v}" ] || v="$("${b}" --version 2>/dev/null | sed -n 's/^ *Version: //p' | head -n1)"
   [ -n "${v}" ] || return 1
+  v="${v#v}"   # peer 2.5.9 输出 "v2.5.9"，统一去掉前缀再比较
   [ "${v%.*}" = "${FABRIC_VERSION%.*}" ]
 }
 

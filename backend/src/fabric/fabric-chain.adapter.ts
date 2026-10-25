@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { decryptSecret } from '../common/utils/secret-box.util';
-import { splitCodedMessage } from '../common/utils/errors';
+import { findCodedMessage, splitCodedMessage } from '../common/utils/errors';
 import { ChainAdapter, normalizeWagerBundle, TxMeta } from './chain.adapter';
 import {
   AssetOffer,
@@ -21,6 +21,8 @@ import {
   TradeState,
   WagerInput,
 } from './chain.types';
+import { ErrorDetail } from '@hyperledger/fabric-protos/lib/gateway/gateway_pb';
+import { Status } from '@hyperledger/fabric-protos/lib/google/rpc/status_pb';
 import { FabricGatewayService } from './fabric-gateway.service';
 
 /**
@@ -80,8 +82,14 @@ export class FabricChainAdapter extends ChainAdapter implements OnModuleInit, On
   }
 
   private async contractFor(as: ChainIdentity) {
-    if (as.role === 'system' || as.role === 'admin') {
+    if (as.role === 'system') {
       const contract = await this.gateway.getSystemContract();
+      return { contract, close: () => undefined };
+    }
+    if (as.role === 'admin') {
+      // H20：admin 专属交易（GrantRole）必须带 role=admin 的服务证书；
+      // 缺证书时 gateway 会退回 system 并告警。
+      const contract = await this.gateway.getAdminContract();
       return { contract, close: () => undefined };
     }
     const user = await this.users.findOne({ where: { username: as.userId } });
@@ -93,9 +101,60 @@ export class FabricChainAdapter extends ChainAdapter implements OnModuleInit, On
     return this.gateway.getUserContract(as, cert, key);
   }
 
+  /**
+   * gateway 错误（EndorseError/EvaluateError）把真正原因放在 details[]/cause 里，
+   * 外层 message 只有 "failed to endorse transaction"。不展开会因为只看到外层文本
+   * 而把 TRANSFER_LOCKED/KEY_REQUIRED 等链码错误全部降级成 INTERNAL_ERROR（真链 H8 回归）。
+   */
+  private errorText(err: unknown): string {
+    const parts: string[] = [];
+    const visit = (value: unknown, depth: number): void => {
+      if (!value || depth > 3) return;
+      if (typeof value === 'string') {
+        parts.push(value);
+        return;
+      }
+      const e = value as { message?: unknown; details?: unknown; cause?: unknown };
+      if (typeof e.message === 'string') parts.push(e.message);
+      // gRPC ServiceError 的 details 是字符串（peer 的 "chaincode response 500, CODE: msg"）；
+      // GatewayError 解析后的 details 才是 ErrorDetail[]。两种都收。
+      if (typeof e.details === 'string') parts.push(e.details);
+      else if (Array.isArray(e.details)) {
+        for (const detail of e.details) {
+          const message = (detail as { message?: unknown } | null)?.message;
+          if (typeof message === 'string') parts.push(message);
+        }
+      }
+      // EndorseError 由原始 ServiceError 构造，peer 的详细错误在 grpc-status-details-bin
+      // 元数据里（google.rpc.Status → gateway.ErrorDetail），必须显式解出来。
+      const metadata = (value as { metadata?: { get?: (key: string) => unknown[] } }).metadata;
+      if (metadata?.get) {
+        try {
+          for (const raw of metadata.get('grpc-status-details-bin') ?? []) {
+            const status = Status.deserializeBinary(new Uint8Array(raw as Uint8Array));
+            for (const detail of status.getDetailsList()) {
+              try {
+                const message = ErrorDetail.deserializeBinary(detail.getValue_asU8()).getMessage();
+                if (message) parts.push(message);
+              } catch {
+                /* 忽略无法解析的单条 detail */
+              }
+            }
+          }
+        } catch {
+          /* metadata 不是预期格式时保持现有文本 */
+        }
+      }
+      visit(e.cause, depth + 1);
+    };
+    visit(err, 0);
+    if (parts.length === 0) parts.push(String(err));
+    return parts.join('\n');
+  }
+
   private unwrap(err: unknown): never {
-    const raw = err instanceof Error ? err.message : String(err);
-    const { code, message } = splitCodedMessage(raw);
+    const raw = this.errorText(err);
+    const { code, message } = findCodedMessage(raw) ?? splitCodedMessage(raw);
     const e = new Error(`${code}: ${message}`) as Error & { code?: string };
     e.code = code;
     throw e;

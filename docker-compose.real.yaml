@@ -1,0 +1,35 @@
+# PokeChain —— 真链（Fabric 2.5）运行覆盖文件
+#
+# 用法（与根 docker-compose.yaml 叠加；两条 compose 都要在仓库根执行）：
+#   1) ./scripts/up.sh                         # 起 Fabric 网络并 enroll system/admin 身份
+#   2) CC_VERSION=1.2 CC_SEQUENCE=3 ./scripts/deployCC.sh   # 部署链码（Docker 28+ 自动走 ccaas）
+#   3) ./scripts/real-chain-smoke.sh <已注册用户名>         # 先验 querycommitted / GetPlayer
+#   4) CERT_ENC_KEY=$(openssl rand -hex 32) \
+#      docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build
+#   5) BASE_URL=http://localhost:3000 ./scripts/e2e-smoke.sh
+#
+# 前置：backend/.fabric-certs 已由 scripts/enroll-system.sh 生成；
+#       network/organizations 已由 ./scripts/up.sh 生成；pokechain_net 存在。
+
+services:
+  backend:
+    environment:
+      FABRIC_MOCK: "false"
+      FABRIC_CERT_STORE_DIR: /app/.fabric-certs
+      FABRIC_PEER_ENDPOINT: peer0.org1.pokechain.com:7051
+      FABRIC_PEER_HOST_ALIAS: peer0.org1.pokechain.com
+      FABRIC_PEER_TLS_CERT_PATH: /network/organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/tls/ca.crt
+      FABRIC_CA_URL: https://ca.org1.pokechain.com:7054
+      FABRIC_CA_NAME: ca.org1.pokechain.com
+      FABRIC_CA_TLS_CERT_PATH: /network/organizations/peerOrganizations/org1.pokechain.com/ca/ca.org1.pokechain.com-cert.pem
+    volumes:
+      - ./network/organizations:/network/organizations:ro
+      - ./backend/.fabric-certs:/app/.fabric-certs:ro
+    networks:
+      - app
+      - fabric
+
+networks:
+  fabric:
+    external: true
+    name: pokechain_net

@@ -47,7 +47,7 @@
 
 ### 1.4 私钥托管与风险声明
 
-用户 Fabric 私钥由后端托管：enroll 后以 `CERT_ENC_KEY`（64 hex）派生的 AES-256-GCM（随机 12B IV + authTag）加密存 `users.fabric_key_enc`（`common/utils/secret-box.util.ts`）。**风险声明**：课程环境下后端即"私钥托管所"，DB 拖库+密钥泄露=全部链上身份失陷；`CERT_ENC_KEY` 未配置时代码回退到固定的开发用派生密钥（仅适用于本地演示）。生产替代方案：HSM/KMS 托管主密钥、或改为客户端签名（私钥不出浏览器，后端只转发已签名交易）——架构上 ChainAdapter 已把签名收敛在一处，替换成本低。system 身份私钥落盘 `backend/.fabric-certs/system-key.pem`（0o600），同理属课程简化。
+用户 Fabric 私钥由后端托管：enroll 后以 `CERT_ENC_KEY`（64 hex）派生的 AES-256-GCM（随机 12B IV + authTag）加密存 `users.fabric_key_enc`（`common/utils/secret-box.util.ts`）。**风险声明**：课程环境下后端即"私钥托管所"，DB 拖库+密钥泄露=全部链上身份失陷；`CERT_ENC_KEY` 未配置时代码回退到固定的开发用派生密钥（仅适用于本地演示）。生产替代方案：HSM/KMS 托管主密钥、或改为客户端签名（私钥不出浏览器，后端只转发已签名交易）——架构上 ChainAdapter 已把签名收敛在一处，替换成本低。system 与 admin（`opsadmin`）服务身份私钥落盘 `backend/.fabric-certs/{system,admin}-key.pem`（0o600，目录已 gitignore），同理属课程简化。
 
 ### 1.5 管理与仲裁操作留痕
 

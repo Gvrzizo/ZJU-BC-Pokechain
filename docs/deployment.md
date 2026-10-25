@@ -1,7 +1,7 @@
 # PokeChain 部署与演示手册
 
 > 两种运行模式：**A. 演示模式**（`FABRIC_MOCK=true`，Redis 共享 mock 链，5 分钟开课）；**B. 完整模式**（真实 Fabric 2.5 双组织网络）。
-> 本文所有命令在仓库根目录执行（除非另注），路径相对仓库根。涉及脚本：`scripts/{up,deployCC,down,reset,prereq,common}.sh`。
+> 本文所有命令在仓库根目录执行（除非另注），路径相对仓库根。涉及脚本：`scripts/{up,deployCC,down,reset,prereq,common,enroll-system,real-chain-smoke,e2e-smoke}.sh`。
 
 ## 1. 环境依赖
 
@@ -130,7 +130,7 @@ docker run -d --name frontend --network pokechain-app -p 8080:80 pokechain-front
 ./scripts/up.sh
 ```
 
-七步流程：① 依赖检查（缺二进制自动下载到 `network/bin`）→ ② cryptogen 生成三份组织证书（CA 私钥复制为 `ca/priv_sk`）→ ③ configtxgen 生成 `genesis.block` 与 `gamechannel.tx` → ④ `docker compose -f network/docker-compose.yaml up -d`（orderer/2 peer/2 CouchDB/2 CA）→ ⑤ 等待 peer 就绪 → ⑥ 创建 `gamechannel` 并加入两 peer → ⑦ 锚节点幂等校验（configtx.yaml 已内置 AnchorPeers，通常打印"已是期望值，跳过"）。**脚本幂等**：重复运行不会重建证书/通道。
+八步流程：① 依赖检查（缺二进制自动下载到 `network/bin`）→ ② cryptogen 生成三份组织证书（CA 私钥复制为 `ca/priv_sk`）→ ③ configtxgen 生成 `genesis.block` 与 `gamechannel.tx` → ④ `docker compose -f network/docker-compose.yaml up -d`（orderer/2 peer/2 CouchDB/2 CA）→ ⑤ 等待 peer 就绪 → ⑥ 创建 `gamechannel` 并加入两 peer → ⑦ 锚节点幂等校验（configtx.yaml 已内置 AnchorPeers，通常打印"已是期望值，跳过"）→ ⑧ `enroll-system.sh` 幂等准备 `system`/`opsadmin` 服务身份。**脚本幂等**：重复运行不会重建证书/通道。
 
 期望末尾输出：
 
@@ -142,34 +142,53 @@ docker run -d --name frontend --network pokechain-app -p 8080:80 pokechain-front
 通道：gamechannel
 ```
 
-### 4.2 部署链码
+### 4.2 部署链码（node / ccaas 自动选择）
 
 ```bash
+# 首次部署（默认 version=1.0 sequence=1）
 ./scripts/deployCC.sh
+# 已有旧定义时升级（本仓库评审环境已到 1.1/sequence 2）
+CC_VERSION=1.2 CC_SEQUENCE=3 ./scripts/deployCC.sh
 ```
 
-流程：打包（`pokemoncc_1.0`，node 链码，`META-INF` CouchDB 索引随包）→ 安装到两 peer → 两组织各自 `approveformyorg` → `checkcommitreadiness` 断言双批准 → `commit` → `querycommitted` 验证。幂等：已按相同 version/sequence 提交则直接退出。
+`deployCC.sh` 按 Docker 主版本自动选链路（`CC_LANG=auto`）：
+
+- **Docker ≤ 27 → node**：peer 的默认 Docker builder 在 peer 容器内构建链码镜像（`npm install` + `tsc`，首次数分钟），`docker ps --filter name=dev-` 可见 `dev-peer0.*` 容器。
+- **Docker ≥ 28 → ccaas（chaincode-as-a-service）**：Docker 28/29 与 Fabric 2.5 的 node builder 不兼容（`write unix @->/run/docker.sock: broken pipe`）。此时链码打成 ccaas 包（`metadata.json` + `code.tar.gz/connection.json`，地址 `pokechain-cc:19999`），由 compose profile `ccaas` 的 `pokechain-cc` 容器运行 `node dist/server.js`，peer 直连该地址；容器 `CCID` 必须等于安装后的 Package ID（脚本自动注入）。可强制覆盖：`CC_LANG=node|ccaas`。
+
+流程：打包 → 安装到两 peer → （ccaas）启动/复用 `pokechain-cc` 容器 → 两组织各自 `approveformyorg` → `checkcommitreadiness` 断言双批准 → `commit` → `querycommitted` 验证。幂等：已按相同 version/sequence 提交则直接退出（ccaas 会顺带确保容器在跑）。
 
 期望输出（末尾）：
 
 ```
-链码：pokemoncc  version=1.0  sequence=1  通道=gamechannel
+链码：pokemoncc  version=1.2  sequence=3  lang=ccaas  通道=gamechannel
 背书策略：通道默认（MAJORITY Endorsement，即 Org1+Org2 均须背书）
+运行时：pokechain-cc（容器内 gRPC pokechain-cc:19999，CCID=<package id>）
 ```
 
-链码容器首次由 peer 在容器内构建（`npm install` + `tsc`），**这一步较慢（数分钟）**，可在 `docker ps --filter name=dev-` 看到 `dev-peer0.org1...-pokemoncc_1.0-*` 容器。
-
 ### 4.3 验证网络与链码
+
+```bash
+./scripts/real-chain-smoke.sh <已注册用户名>   # querycommitted + 链码运行时 + GetPlayer
+./scripts/real-chain-smoke.sh <用户> --e2e     # 再跑一次 REST e2e
+```
+
+或手工：
 
 ```bash
 source scripts/common.sh
 switchOrg 1
 peer channel list                                        # 期望含 gamechannel
 peer lifecycle chaincode querycommitted -C gamechannel -n pokemoncc --output json | jq .
-# 期望：{"version":"1.0","sequence":1,...,"approvals":{"Org1MSP":true,"Org2MSP":true}}
+# 期望：version/sequence 与部署一致、approvals 双 true
+peer chaincode query -C gamechannel -n pokemoncc \
+  -c '{"Args":["PlayerContract:GetPlayer","<用户名>"]}'
+# 期望：返回 JSON（含 playerId/points/rating/transferLockUntil）
 ```
 
-### 4.4 配置后端并准备 system 身份
+**不要跳过 `GetPlayer` 直接跑 e2e**：ccaas 容器没起来时，REST 注册会报 500，容易误判为后端 bug。
+
+### 4.4 配置后端与服务身份（system / admin）
 
 1) 修正 `backend/.env`（`.env.example` 的 Fabric 默认值已对齐本仓库网络 org*.pokechain.com；切真链至少把 `FABRIC_MOCK` 改为 `false`，其余按下表核对）：
 
@@ -182,7 +201,9 @@ FABRIC_PEER_HOST_ALIAS=peer0.org1.pokechain.com
 FABRIC_PEER_TLS_CERT_PATH=../network/organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/tls/ca.crt
 FABRIC_CA_URL=https://localhost:7054
 FABRIC_CA_NAME=ca.org1.pokechain.com
-FABRIC_CA_TLS_CERT_PATH=../network/organizations/fabric-ca/org1/tls-cert.pem
+# C4b：必须指向组织 CA 根证书；fabric-ca/org1/tls-cert.pem 是 CA 的 TLS 叶子证书，
+# Node 会报 "unable to verify the first certificate"。
+FABRIC_CA_TLS_CERT_PATH=../network/organizations/peerOrganizations/org1.pokechain.com/ca/ca.org1.pokechain.com-cert.pem
 FABRIC_CA_ADMIN_ID=admin
 FABRIC_CA_ADMIN_SECRET=adminpw
 FABRIC_SYSTEM_USER=system
@@ -198,38 +219,52 @@ MINIO_MOCK=true        # 或接真实 MinIO
 
 （`FABRIC_CONNECTION_PROFILE` 变量存在但当前实现未消费——gateway 直接用上表 endpoint/TLS 配置建连。）
 
-2) **一次性 enroll system 服务身份**（后端不会自动做这一步）：
+2) **服务身份由脚本幂等准备**（`up.sh` 末尾会自动调用；也可单独执行）：
 
 ```bash
-cd network
-CA_TLS=organizations/fabric-ca/org1/tls-cert.pem
-export FABRIC_CA_CLIENT_HOME=$PWD/../backend/.fabric-certs/ca-admin
-bin/fabric-ca-client enroll -u https://admin:adminpw@localhost:7054 \
-  --caname ca.org1.pokechain.com --tls.certfiles $CA_TLS
-bin/fabric-ca-client register --id.name system --id.secret systempw \
-  --id.attrs "role=system:ecert" --caname ca.org1.pokechain.com \
-  --tls.certfiles $CA_TLS -u https://localhost:7054
-
-export FABRIC_CA_CLIENT_HOME=$PWD/../backend/.fabric-certs/ca-system
-bin/fabric-ca-client enroll -u https://system:systempw@localhost:7054 \
-  --caname ca.org1.pokechain.com --tls.certfiles $CA_TLS
-mkdir -p ../backend/.fabric-certs
-cp "$FABRIC_CA_CLIENT_HOME/msp/signcerts/cert.pem" ../backend/.fabric-certs/system-cert.pem
-cp "$FABRIC_CA_CLIENT_HOME"/msp/keystore/*_sk    ../backend/.fabric-certs/system-key.pem
-chmod 600 ../backend/.fabric-certs/system-key.pem
+./scripts/enroll-system.sh
 ```
 
-3) 启动后端与前端（同模式 A 的 §3.2 第 3–4 步，本地路径；或将根 compose 按文件头 [real-fabric] 注释接入 Fabric 网络后以 `FABRIC_MOCK=false docker compose up -d --build` 启动）。
+脚本做两件事，产物在 `backend/.fabric-certs/`（含私钥，已在 `.gitignore`）：
 
-**真链模式已知限制（三条，实现现状，非文档错误）**：
+| 文件 | enrollmentID | CA 属性 | 用途 |
+|---|---|---|---|
+| `system-cert.pem` / `system-key.pem` | `system` | `role=system` | MintFromCapture / RevealAndVerify / ApplyGrowth / 结算 |
+| `admin-cert.pem` / `admin-key.pem` | `opsadmin` | `role=admin` | `GrantRole` 等 admin 专属交易（H20） |
 
-- **演示账号不可用于真链**：`npm run seed` 建的 ash/gary/arbiter/admin 没有走 CA enroll，没有托管证书，其玩家身份交易会在后端报 `NO_FABRIC_CERT`。**请在前端注册页新建账号**（注册流程内含 CA register+enroll+加密托管）。
+- CA 注册只写 `role` 属性；`hf.EnrollmentID` 由 Fabric CA 自动写入 ecert（手工注册该属性会 403，C4a）。链码用 `hf.EnrollmentID` 校验“本人”。
+- 已注册但 secret 不同时 enroll 会 401，脚本会明确提示设置 `FABRIC_SYSTEM_SECRET` / `FABRIC_ADMIN_SECRET` 或删除 CA 身份，不会静默继续。
+- 证书缺失时后端启动会报 `NO_SERVICE_CERT`（admin 证书缺失则告警后退回 system，`GrantRole` 在真链仍会失败）。
+
+3) 启动后端与前端（二选一）：
+
+```bash
+# 本地路径：按 §3.2 第 3–4 步，启动前 export 上表变量（FABRIC_MOCK=false）
+# 容器路径：叠加真链覆盖文件（只读挂载 organizations 与 .fabric-certs，接入 pokechain_net）
+CERT_ENC_KEY=$(openssl rand -hex 32) \
+  docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build
+```
+
+**真链模式已知限制（两条，实现现状，非文档错误）**：
+
+- **演示账号不可用于真链**：`npm run seed` 建的 ash/gary/arbiter/admin 没有走 CA enroll，没有托管证书，其玩家身份交易会在后端报 `NO_FABRIC_CERT`。**请在前端注册页新建账号**（注册流程内含 CA register+enroll+加密托管）。admin 账号可用于管理端点（服务证书 `opsadmin` 签名）。
 - **仲裁链路**：后端只接 Org1 CA，无法为 arbiter 取得 Org2MSP 证书，而链码 `requireArbitrator` 强制 Org2MSP+arbitrator —— 真链上 `Arbitrate` 需要另行手工向 ca.org2:8054 注册 Org2 身份并入库，课程演示中**仲裁环节请在模式 A 展示**（Mock 模式身份由后端直接断言，arbiter 开箱可用）。
-- **admin 专属交易**：后端把 admin 身份映射到 system 证书签名，链码 `GrantRole` 要求 role=admin，真链上会被拒（MintItem/AddPoints 允许 admin|system，不受影响）。模式 A 无此问题。
 
 ### 4.5 端到端冒烟
 
-`scripts/e2e-smoke.sh` 已实现：健康检查 → 注册随机账号 A/B → admin 发放物资（admin 不可用则容忍降级）→ A 捕捉 → A→B 交易双确认 → 开房押注 → B forfeit → 断言 SETTLED 与积分归属 → fairness 复核 `sha256(serverSeed)==commitHash`，任一断言失败即打印请求/响应并 exit 1。模式 A / compose 栈直接 `./scripts/e2e-smoke.sh`（默认打 http://localhost:8080，`BASE_URL=http://localhost:3000` 可直连后端）。模式 B 真链下注册接口会走 CA enroll，新账号冒烟链路可用，但受上文"真链模式已知限制"约束（seed 账号不可玩、仲裁不在真链演示）。手工冒烟清单（模式 B，先完成 4.4）：
+`scripts/e2e-smoke.sh` 已实现：健康检查 → 注册随机账号 A/B → admin 发放物资（admin 不可用则容忍降级）→ A 捕捉 → A→B 交易双确认 → 开房押注 → B forfeit → 断言 SETTLED 与积分归属 → fairness 复核 `sha256(serverSeed)==commitHash`，任一断言失败即打印请求/响应并 exit 1。模式 A / compose 栈直接 `./scripts/e2e-smoke.sh`（默认打 http://localhost:8080，`BASE_URL=http://localhost:3000` 可直连后端）。模式 B 真链下注册接口会走 CA enroll，新账号冒烟链路可用，但受上文"真链模式已知限制"约束（seed 账号不可玩、仲裁不在真链演示）。
+
+真链推荐顺序：
+
+```bash
+./scripts/up.sh
+CC_VERSION=1.2 CC_SEQUENCE=3 ./scripts/deployCC.sh
+./scripts/real-chain-smoke.sh <已注册用户名>          # 先确认链码可调用
+# 起真链后端（compose 覆盖或本地）
+BASE_URL=http://localhost:3000 ./scripts/e2e-smoke.sh
+```
+
+手工冒烟清单（模式 B，先完成 4.4）：
 
 1. 注册两个新账号 A/B（前端注册页）→ `peer chaincode query ... '{"Args":["PlayerContract:GetPlayer","<用户名>"]}'` 返回积分 400、`transferLockUntil` 为注册 +72h；演示账号由 seed 的 `ClearTransferLock` 解锁；
 2. A 走捕捉（§5 动线第 2 步），链上 `RandomContract:GetRandom` 看到 COMMITTED→REVEALED→CONSUMED；
@@ -264,12 +299,16 @@ chmod 600 ../backend/.fabric-certs/system-key.pem
 | `peer: command not found` 或版本不符 | PATH 上有其他项目 2.4 旧二进制 | 脚本已把 `network/bin` 置 PATH 最前并校验 2.5.x；手工执行时先 `source scripts/common.sh` |
 | 端口被占用（7050/7051/7054/8054/9051，或 3000/5173/5432/6379） | 上次未停干净/端口冲突 | `sudo lsof -i :<端口>` 找进程；Fabric 侧先 `./scripts/down.sh` |
 | `x509: certificate is valid for ... not localhost` | 旧配置生成的证书无 localhost SAN | `./scripts/down.sh --purge && ./scripts/up.sh` 重建（勿在生产这么干） |
-| 链码部署卡在 install/首次调用很慢 | peer 容器内 npm install + tsc 构建 | 正常现象，等数分钟；看 `docker logs dev-peer0.org1...`；npm 源慢属网络问题，耐心重试 |
+| 链码部署卡在 install/首次调用很慢 | node 模式下 peer 容器内 npm install + tsc 构建 | 正常现象，等数分钟；看 `docker logs dev-peer0.org1...`；npm 源慢属网络问题，耐心重试 |
+| `chaincode install failed ... write unix @->/run/docker.sock: broken pipe` | Docker 28+ 与 Fabric 2.5 node builder 不兼容 | `deployCC.sh` 会自动改用 ccaas（`CC_LANG=auto`）；确认 `docker ps` 有 `pokechain-cc`，日志见 `docker logs pokechain-cc` |
+| `connection to pokechain-cc:19999 failed / no such host` | ccaas 容器没起或不在 `pokechain_net` | `CC_VERSION=... CC_SEQUENCE=... ./scripts/deployCC.sh` 重建容器；`docker network inspect pokechain_net` 确认容器已加入 |
+| 真链注册报 403（CA register 失败） | 注册请求里手写了 `hf.EnrollmentID` | 代码已修正（C4a，只注册 `role`）；旧版本请升级后端 |
+| 真链注册报 `unable to verify the first certificate` | `FABRIC_CA_TLS_CERT_PATH` 指向 CA TLS 叶子证书 | 改为 `organizations/peerOrganizations/org1.pokechain.com/ca/ca.org1.pokechain.com-cert.pem`（C4b） |
 | `approveformyorg` 报 "redefine uncommitted approved chaincode" | 该组织已批准同 sequence | 脚本幂等跳过，可忽略；升级链码需改 `deployCC.sh` 中 `CC_VERSION`/`CC_SEQUENCE` 后重跑 |
 | 锚节点步骤报错 | configtx.yaml 已内置 AnchorPeers | up.sh 检测到已是期望值会跳过；个别 gossip 警告可忽略 |
 | CA 容器起不来 / enroll 不受信 | 手工动过 `organizations/` | 删 `organizations/fabric-ca/` 与对应 `ca/priv_sk` 后重跑 up.sh |
 | 后端启动报 `NO_FABRIC_CERT`（真链） | seed 账号无托管证书 | 模式 B 必须用注册页新建账号（§4.4） |
-| 后端报 system 证书文件不存在（真链） | 未做 §4.4 第 2 步 | 按 4.4 手工 enroll system 身份到 `backend/.fabric-certs/` |
+| 后端报 `NO_SERVICE_CERT`（真链） | 未做 §4.4 第 2 步 | 运行 `./scripts/enroll-system.sh`（生成 system 与 admin 证书到 `backend/.fabric-certs/`） |
 | `Arbitrate` 真链上 FORBIDDEN | 仲裁需 Org2MSP 证书，后端未接 Org2 CA | 课程演示在模式 A 进行仲裁（§4.4 限制说明） |
 | 后端连不上 PG/Redis | 容器未起或端口冲突 | compose 栈：`docker compose ps`（postgres/redis 应为 healthy）；本地 docker run 方式：`docker ps` 确认 pokechain-pg / pokechain-redis；核 `.env` 的 DATABASE_URL/REDIS_URL |
 | 前端一直占位图 | 未放 vendor 素材或 sha256 校验失败回退 | 正常降级行为；放素材到 `frontend/public/assets/vendor/` 并登记 manifest |

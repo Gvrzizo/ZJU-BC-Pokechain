@@ -1,6 +1,10 @@
 import { HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
-import { CodedError } from '../src/common/utils/errors';
+import { ErrorDetail } from '@hyperledger/fabric-protos/lib/gateway/gateway_pb';
+import { Status } from '@hyperledger/fabric-protos/lib/google/rpc/status_pb';
+import { Any } from 'google-protobuf/google/protobuf/any_pb.js';
+import { FabricChainAdapter } from '../src/fabric/fabric-chain.adapter';
+import { CodedError, findCodedMessage, splitCodedMessage } from '../src/common/utils/errors';
 import { makeChain, makePokemonService, makeRedis, registerPlayers, seedPokemon, userIdentity } from './helpers';
 
 /** 用假 host 跑全局异常过滤器，返回实际写出的 status / body。 */
@@ -78,5 +82,87 @@ describe('H8 链码错误码 → HTTP 状态（全局过滤器）', () => {
     expect(statusCode).toBe(HttpStatus.BAD_REQUEST);
     expect(body).toMatchObject({ statusCode: HttpStatus.BAD_REQUEST, code: 'INSUFFICIENT_POINTS' });
     expect(String(body.message)).toContain('balance');
+  });
+});
+
+describe('真链 gateway 错误展开（EndorseError.details / cause）', () => {
+  it('从 peer 的 "chaincode response 500, CODE: msg" 提取链码错误', () => {
+    const raw =
+      'failed to endorse transaction, see attached details for more info\n' +
+      'chaincode response 500, TRANSFER_LOCKED: player ash cannot transfer points before 2026-10-28T00:00:00.000Z';
+    expect(findCodedMessage(raw)).toEqual({
+      code: 'TRANSFER_LOCKED',
+      message: 'player ash cannot transfer points before 2026-10-28T00:00:00.000Z',
+    });
+  });
+
+  it('多行 details 取最后一个可识别 code（内层比外层具体）', () => {
+    const raw = [
+      'failed to endorse transaction, see attached details for more info',
+      'chaincode response 500, KEY_REQUIRED: 天空之柱需要天空之钥（sky-key）才能进入',
+    ].join('\n');
+    expect(findCodedMessage(raw)?.code).toBe('KEY_REQUIRED');
+  });
+
+  it('没有 code 时返回 null，splitCodedMessage 仍回退 INTERNAL_ERROR', () => {
+    expect(findCodedMessage('context deadline exceeded')).toBeNull();
+    expect(splitCodedMessage('context deadline exceeded')).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'context deadline exceeded',
+    });
+  });
+});
+
+describe('FabricChainAdapter 错误展开（gRPC ServiceError.details 是字符串）', () => {
+  const adapter = new FabricChainAdapter({} as never, { get: () => true } as never, {} as never);
+
+  it('把 ABORTED 外层文本与 peer 的 chaincode response 细节合并后取内层 code', () => {
+    const err = {
+      message: '10 ABORTED: failed to endorse transaction, see attached details for more info',
+      details:
+        'chaincode response 500, TRANSFER_LOCKED: player ash cannot transfer points before 2026-10-28T00:00:00.000Z',
+      code: 10,
+    };
+    const text = (adapter as unknown as { errorText(e: unknown): string }).errorText(err);
+    expect(text).toContain('TRANSFER_LOCKED');
+    expect(findCodedMessage(text)?.code).toBe('TRANSFER_LOCKED');
+  });
+
+  it('也支持解析后的 ErrorDetail[]（GatewayError.details）', () => {
+    const err = {
+      message: 'failed to endorse transaction',
+      details: [{ address: 'peer0', message: 'chaincode response 500, FORBIDDEN: only system', mspId: 'Org1MSP' }],
+    };
+    const text = (adapter as unknown as { errorText(e: unknown): string }).errorText(err);
+    expect(findCodedMessage(text)?.code).toBe('FORBIDDEN');
+  });
+});
+
+describe('FabricChainAdapter 错误展开（grpc-status-details-bin 元数据）', () => {
+  const adapter = new FabricChainAdapter({} as never, { get: () => true } as never, {} as never);
+
+  it('解出 peer 的 google.rpc.Status → ErrorDetail 链码错误', () => {
+    const detail = new ErrorDetail();
+    detail.setAddress('peer0.org1.pokechain.com:7051');
+    detail.setMspId('Org1MSP');
+    detail.setMessage('chaincode response 500, TRANSFER_LOCKED: player ash cannot transfer points');
+    const anyDetail = new Any();
+    anyDetail.setTypeUrl('type.googleapis.com/gateway.ErrorDetail');
+    anyDetail.setValue(detail.serializeBinary());
+    const status = new Status();
+    status.addDetails(anyDetail);
+    const metadata = {
+      get: (key: string) =>
+        key === 'grpc-status-details-bin' ? [Buffer.from(status.serializeBinary())] : [],
+    };
+    const err = {
+      message: '10 ABORTED: failed to endorse transaction, see attached details for more info',
+      details: 'failed to endorse transaction, see attached details for more info',
+      metadata,
+      code: 10,
+    };
+    const text = (adapter as unknown as { errorText(e: unknown): string }).errorText(err);
+    expect(findCodedMessage(text)?.code).toBe('TRANSFER_LOCKED');
+    expect(findCodedMessage(text)?.message).toContain('cannot transfer points');
   });
 });

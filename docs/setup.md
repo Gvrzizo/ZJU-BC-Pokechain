@@ -53,11 +53,17 @@ docker compose down -v       # 彻底清空（链状态/账号全没），之后
 ## 4. 可选：真链模式（Hyperledger Fabric 2.5）
 
 ```bash
-./scripts/up.sh               # 下载 Fabric 2.5.9 二进制到 network/bin，起双组织网络+通道（首次会拉镜像，较慢）
-./scripts/deployCC.sh         # 打包部署 TypeScript 链码 pokemoncc（首次在 peer 容器内 npm install，较慢）
-# 按根 docker-compose.yaml 文件头的 [real-fabric] 注释取消 backend 的 volumes/networks 注释
-FABRIC_MOCK=false docker compose up -d --build
+./scripts/up.sh               # 起双组织网络+通道；末尾自动 enroll system/admin 服务身份（幂等）
+CC_VERSION=1.2 CC_SEQUENCE=3 ./scripts/deployCC.sh   # 部署链码；Docker 28+ 自动走 ccaas（pokechain-cc 容器）
+./scripts/real-chain-smoke.sh <已注册用户名>          # 先验 querycommitted + GetPlayer
+CERT_ENC_KEY=$(openssl rand -hex 32) \
+  docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build
+BASE_URL=http://localhost:3000 ./scripts/e2e-smoke.sh
 ```
+
+Docker 28/29 与 Fabric 2.5 的 node 链码 docker builder 不兼容，`deployCC.sh` 会自动改用
+chaincode-as-a-service（`pokechain-cc` 容器，compose profile `ccaas`）；Docker ≤27 仍用 node 包。
+服务身份证书在 `backend/.fabric-certs/`（由 `enroll-system.sh` 生成，已 gitignore）。
 
 细节与真链已知限制（仲裁演示需走 mock 等）见 `docs/deployment.md` §4。**课堂演示用演示模式即可**，真链模式用于展示链码真实部署与 CouchDB 世界状态。
 

@@ -171,6 +171,9 @@ stepln "步骤 7/7 设置两组织锚节点"
 updateAnchorPeer 1
 updateAnchorPeer 2
 
+stepln "步骤 8/8 准备链上服务身份（system / admin）"
+"${SCRIPTS_DIR}/enroll-system.sh"
+
 stepln "网络启动完成"
 cat <<EOF
 拓扑：orderer.pokechain.com:7050 (Raft 单节点)

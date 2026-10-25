@@ -97,7 +97,7 @@ PokeChain 是一个基于 Hyperledger Fabric 2.5 的类宝可梦区块链游戏�
 ### 3.2 通道与链码
 
 - 通道：`gamechannel`（两组织 peer 均已加入，锚节点 peer0.org1:7051 / peer0.org2:9051，写在 configtx.yaml 的 AnchorPeers 中，`up.sh` 幂等校验跳过）。
-- 链码：`pokemoncc`（TypeScript，fabric-contract-api 2.5），部署 label `pokemoncc_1.0`、version 1.0、sequence 1（`scripts/deployCC.sh`）。
+- 链码：`pokemoncc`（TypeScript，fabric-contract-api 2.5），生命周期 version/sequence 由 `scripts/deployCC.sh` 的 `CC_VERSION`/`CC_SEQUENCE` 控制（默认 1.0/1）。Docker ≤27 用 node 包（peer 内构建镜像）；Docker 28+ 自动改用 **ccaas**（`pokechain-cc` 容器运行 `chaincode/pokemon-cc/dist/server.js`，peer 通过 `connection.json` 的 `pokechain-cc:19999` 直连）。
 - 状态库：CouchDB，支撑 `QueryByOwner`/`QueryPokedex` 等富查询；索引文件随链码打包于 `chaincode/pokemon-cc/META-INF/statedb/couchdb/indexes/`（owner、trade、battle、species 四张）。
 
 ### 3.3 背书与治理策略
@@ -135,8 +135,8 @@ X.509 证书 + 私钥 ──► 证书属性：role=player|admin|system|arbitrat
 | 身份 | MSP | 获取方式 | 典型交易 |
 |---|---|---|---|
 | 玩家（ash/gary…） | Org1MSP | 注册时 CA enroll，证书私钥 AES-256-GCM 加密存 users 表 | Transfer、ConfirmTrade、ConfirmResult、Dispute |
-| system | Org1MSP | `FabricCaService.ensureSystemIdentity()` 注册/enroll（当前需手工执行，命令见 `docs/deployment.md` §4.4），证书落盘 `backend/.fabric-certs/` | RevealAndVerify、MintFromCapture、CreateBattle、SubmitResult、Forfeit、SettleBattle |
-| admin | Org1MSP | 种子脚本/手工注册 | RegisterPlayer 代发、GrantRole、MintItem、AddPoints |
+| system | Org1MSP | `scripts/enroll-system.sh`（`up.sh` 自动调用）注册/enroll，`role=system`，证书落盘 `backend/.fabric-certs/system-*.pem` | RevealAndVerify、MintFromCapture、ApplyGrowth、CreateBattle、SubmitResult、Forfeit、SettleBattle |
+| admin | Org1MSP | `scripts/enroll-system.sh` 注册 `opsadmin`（`role=admin`），证书落盘 `backend/.fabric-certs/admin-*.pem`（H20） | RegisterPlayer 代发、GrantRole、MintItem、AddPoints |
 | arbiter | Org2MSP | 种子脚本建账号（DB role=arbitrator、fabricMspId=Org2MSP；Mock 模式开箱可用；真链需另行向 Org2 CA enroll，见 `docs/deployment.md` §4.4） | Arbitrate |
 
 ### 4.3 托管代发模式
@@ -306,7 +306,7 @@ Pokechain/
 ├── frontend/                   # Vue3 + Phaser 3
 │   └── src/{api,stores,game,ui,components,views,styles}
 │   └── nginx.conf              # SPA + /api + /socket.io 反代
-├── scripts/                    # up.sh / deployCC.sh / down.sh / reset.sh / prereq.sh
+├── scripts/                    # up.sh / deployCC.sh / down.sh / reset.sh / prereq.sh / enroll-system.sh / real-chain-smoke.sh
 └── docs/                       # 本文档族
 ```
 

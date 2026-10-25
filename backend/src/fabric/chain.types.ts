@@ -15,10 +15,16 @@ export const SYSTEM_IDENTITY: ChainIdentity = {
   userId: 'system',
 };
 
+/**
+ * Admin service identity (H20). `opsadmin` is the CA enrollment created by
+ * `scripts/enroll-system.sh` with attr role=admin; its certificate is signed for
+ * chaincode calls that require `admin` (GrantRole). In mock mode the userId is
+ * informational only.
+ */
 export const ADMIN_IDENTITY: ChainIdentity = {
   mspId: 'Org1MSP',
   role: 'admin',
-  userId: 'admin',
+  userId: 'opsadmin',
 };
 
 export function identityForUser(user: {

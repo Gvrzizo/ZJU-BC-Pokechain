@@ -11,11 +11,10 @@ name: pokechain-app
 #   docker compose down -v                       # 停止并清空数据卷
 #
 # 连接真实 Fabric 网络（先用 ./scripts/up.sh 把 network/ 起起来）：
-#   1) 取消 backend 服务下方标注 [real-fabric] 的 volumes / networks 注释，
-#      并取消本文件底部 networks.fabric 的注释（外部网络 pokechain_net）；
-#   2) FABRIC_MOCK=false docker compose up -d --build
-#   说明：容器内通过 peer0.org1.pokechain.com / ca.org1.pokechain.com 等主机名直连
-#   Fabric 网络（同一 docker 网络 pokechain_net 内可解析）；证书以只读卷挂载到 /network。
+#   docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build
+#   覆盖文件会挂载 network/organizations 与 backend/.fabric-certs（只读），并把 backend
+#   接入 pokechain_net；容器内通过 peer0.org1.pokechain.com / ca.org1.pokechain.com 直连。
+#   手动方式（不推荐）：取消 backend 下方 [real-fabric] 注释并取消 networks.fabric 注释。
 
 services:
   postgres:
@@ -117,7 +116,7 @@ services:
       FABRIC_PEER_TLS_CERT_PATH: /network/organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/tls/ca.crt
       FABRIC_CA_URL: ${FABRIC_CA_URL:-https://ca.org1.pokechain.com:7054}
       FABRIC_CA_NAME: ${FABRIC_CA_NAME:-ca.org1.pokechain.com}
-      FABRIC_CA_TLS_CERT_PATH: /network/organizations/fabric-ca/org1/tls-cert.pem
+      FABRIC_CA_TLS_CERT_PATH: /network/organizations/peerOrganizations/org1.pokechain.com/ca/ca.org1.pokechain.com-cert.pem
       CERT_ENC_KEY: ${CERT_ENC_KEY:-}
       # 战斗结果签名密钥（secp256k1 PKCS8 PEM）。空值=启动时生成临时钥，重启后旧 serverSig 不可验证；
       # 生产/真链必须固定设置（H19），容器内换行用 \n 转义或改用 env_file。

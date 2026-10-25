@@ -3,6 +3,38 @@ import * as path from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+/** Shape of the Fabric CA registration request this service sends. */
+export interface CaRegistrationRequest {
+  enrollmentID: string;
+  affiliation: string;
+  role: string;
+  attrs: { name: string; value: string; ecert: boolean }[];
+  maxEnrollments: number;
+}
+
+/**
+ * Registration request shared by signup and the service identities.
+ *
+ * Only `role` is registered explicitly: Fabric CA always writes
+ * `hf.EnrollmentID` (= enrollmentID) into the ecert itself. Registering that
+ * attribute by hand is rejected with 403 by CA 1.5 (see C4a in
+ * docs/remediation-guide-2026-10-25.md). Chaincode identity checks read the
+ * auto-populated value via `common/cid.ts::getEnrollmentId`.
+ */
+export function buildCaRegistrationRequest(
+  enrollmentID: string,
+  role: string,
+  affiliation = 'org1.department1',
+): CaRegistrationRequest {
+  return {
+    enrollmentID,
+    affiliation,
+    role: 'client',
+    attrs: [{ name: 'role', value: role, ecert: true }],
+    maxEnrollments: 1,
+  };
+}
+
 /**
  * Fabric CA integration (fabric-ca-client): registers/enrolls the system
  * identity at bootstrap and player identities at signup. Only used when
@@ -66,19 +98,7 @@ export class FabricCaService {
       adminEnrollment.key.toBytes(),
     );
 
-    const secret = await ca.register(
-      {
-        enrollmentID: username,
-        affiliation: 'org1.department1',
-        role: 'client',
-        attrs: [
-          { name: 'role', value: role, ecert: true },
-          { name: 'hf.EnrollmentID', value: username, ecert: true },
-        ],
-        maxEnrollments: 1,
-      },
-      adminUser,
-    );
+    const secret = await ca.register(buildCaRegistrationRequest(username, role), adminUser);
     this.logger.log(`registered fabric identity ${username} (role=${role})`);
     return this.enroll(username, secret);
   }

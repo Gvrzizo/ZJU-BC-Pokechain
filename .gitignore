@@ -15,6 +15,9 @@ network/install-fabric.sh
 backend/wallet/
 backend/.env.local
 
+# 真链服务身份（scripts/enroll-system.sh 生成，含私钥，禁止入库）
+backend/.fabric-certs/
+
 # 演示资产（由使用者自行放入）
 frontend/public/assets/vendor/
 minio-data/

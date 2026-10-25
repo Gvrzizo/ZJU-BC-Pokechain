@@ -22,15 +22,15 @@ export default () => ({
       process.env.FABRIC_CONNECTION_PROFILE ??
       '../network/organizations/connection-org1.json',
     peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'localhost:7051',
-    peerHostAlias: process.env.FABRIC_PEER_HOST_ALIAS ?? 'peer0.org1.example.com',
+    peerHostAlias: process.env.FABRIC_PEER_HOST_ALIAS ?? 'peer0.org1.pokechain.com',
     peerTlsCertPath:
       process.env.FABRIC_PEER_TLS_CERT_PATH ??
-      '../network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt',
+      '../network/organizations/peerOrganizations/org1.pokechain.com/peers/peer0.org1.pokechain.com/tls/ca.crt',
     caUrl: process.env.FABRIC_CA_URL ?? 'https://localhost:7054',
-    caName: process.env.FABRIC_CA_NAME ?? 'ca-org1',
+    caName: process.env.FABRIC_CA_NAME ?? 'ca.org1.pokechain.com',
     caTlsCertPath:
       process.env.FABRIC_CA_TLS_CERT_PATH ??
-      '../network/organizations/peerOrganizations/org1.example.com/ca/ca.org1.example.com-cert.pem',
+      '../network/organizations/peerOrganizations/org1.pokechain.com/ca/ca.org1.pokechain.com-cert.pem',
     caAdminEnrollId: process.env.FABRIC_CA_ADMIN_ID ?? 'admin',
     caAdminEnrollSecret: process.env.FABRIC_CA_ADMIN_SECRET ?? 'adminpw',
     systemUser: process.env.FABRIC_SYSTEM_USER ?? 'system',

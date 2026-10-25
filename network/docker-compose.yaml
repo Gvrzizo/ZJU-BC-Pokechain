@@ -207,3 +207,24 @@ services:
       - "9051:9051"
     networks:
       - pokechain_net
+
+  # chaincode-as-a-service（ccaas）链码运行时：Docker 28/29 上 node 包 docker build 不可用时的回退（C4d）。
+  # 由 scripts/deployCC.sh 用 `--profile ccaas` 启动，CCID 必须是链码 Package ID（安装后由脚本注入）。
+  pokechain-cc:
+    container_name: pokechain-cc
+    image: pokechain-chaincode:latest
+    profiles: ["ccaas"]
+    build:
+      context: ../chaincode/pokemon-cc
+      dockerfile: Dockerfile
+    environment:
+      CCID: ${CCID:-}
+      CHAINCODE_ADDRESS: 0.0.0.0:19999
+      FABRIC_LOGGING_SPEC: INFO
+    working_dir: /chaincode
+    command: ["node", "dist/server.js"]
+    restart: unless-stopped
+    labels:
+      service: pokechain-cc
+    networks:
+      - pokechain_net

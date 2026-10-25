@@ -16,6 +16,9 @@ export class FabricGatewayService {
   private readonly logger = new Logger(FabricGatewayService.name);
   private systemGateway: import('@hyperledger/fabric-gateway').Gateway | null = null;
   private systemClient: import('@grpc/grpc-js').Client | null = null;
+  private adminGateway: import('@hyperledger/fabric-gateway').Gateway | null = null;
+  private adminClient: import('@grpc/grpc-js').Client | null = null;
+  private warnedAdminFallback = false;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -58,23 +61,73 @@ export class FabricGatewayService {
     return { gateway, client };
   }
 
-  /** System service identity (enrolled 'system' user with CA attr role=system). */
-  async getSystemNetwork() {
-    if (!this.systemGateway) {
-      const dir = this.resolve(this.config.get<string>('fabric.certStoreDir') ?? '.fabric-certs');
-      const cert = fs.readFileSync(path.join(dir, 'system-cert.pem'), 'utf8');
-      const key = fs.readFileSync(path.join(dir, 'system-key.pem'), 'utf8');
-      const mspId = this.config.get<string>('fabric.systemMspId') ?? 'Org1MSP';
-      const { gateway, client } = await this.connectWithCert(cert, key, mspId);
+  /**
+   * Service identity gateway (system or admin). Certificates are created by
+   * `scripts/enroll-system.sh` and mounted read-only in real-chain mode (C4c).
+   */
+  private async getServiceGateway(
+    kind: 'system' | 'admin',
+  ): Promise<import('@hyperledger/fabric-gateway').Gateway> {
+    if (kind === 'system' && this.systemGateway) return this.systemGateway;
+    if (kind === 'admin' && this.adminGateway) return this.adminGateway;
+
+    const dir = this.resolve(this.config.get<string>('fabric.certStoreDir') ?? '.fabric-certs');
+    const prefix = kind;
+    const certPath = path.join(dir, `${prefix}-cert.pem`);
+    const keyPath = path.join(dir, `${prefix}-key.pem`);
+    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+      if (kind === 'admin') {
+        // H20：没有 admin 证书时退回 system（能发 AddPoints/MintItem，但链码
+        // GrantRole 只认 role=admin，会失败）。提示一次，不阻断启动。
+        if (!this.warnedAdminFallback) {
+          this.warnedAdminFallback = true;
+          this.logger.warn(
+            'admin service certificate missing; falling back to the system identity ' +
+              '(GrantRole will fail on a real chain). Run scripts/enroll-system.sh to enroll admin.',
+          );
+        }
+        return this.getServiceGateway('system');
+      }
+      throw new Error(
+        `NO_SERVICE_CERT: ${certPath} not found. Run scripts/enroll-system.sh ` +
+          '(or follow docs/deployment.md §4.4) before starting FABRIC_MOCK=false.',
+      );
+    }
+    const cert = fs.readFileSync(certPath, 'utf8');
+    const key = fs.readFileSync(keyPath, 'utf8');
+    const mspId = this.config.get<string>('fabric.systemMspId') ?? 'Org1MSP';
+    const { gateway, client } = await this.connectWithCert(cert, key, mspId);
+    if (kind === 'system') {
       this.systemGateway = gateway;
       this.systemClient = client;
+    } else {
+      this.adminGateway = gateway;
+      this.adminClient = client;
     }
-    return this.systemGateway.getNetwork(this.channel);
+    return gateway;
+  }
+
+  /** System service identity (enrolled 'system' user with CA attr role=system). */
+  async getSystemNetwork() {
+    const gateway = await this.getServiceGateway('system');
+    return gateway.getNetwork(this.channel);
   }
 
   /** System service identity contract handle. */
   async getSystemContract() {
     const network = await this.getSystemNetwork();
+    return network.getContract(this.chaincode);
+  }
+
+  /** Admin service identity (enrolled 'opsadmin' user with CA attr role=admin, H20). */
+  async getAdminNetwork() {
+    const gateway = await this.getServiceGateway('admin');
+    return gateway.getNetwork(this.channel);
+  }
+
+  /** Admin service identity contract handle (GrantRole / admin-only transactions). */
+  async getAdminContract() {
+    const network = await this.getAdminNetwork();
     return network.getContract(this.chaincode);
   }
 
@@ -104,7 +157,11 @@ export class FabricGatewayService {
   async close(): Promise<void> {
     this.systemGateway?.close();
     this.systemClient?.close();
+    this.adminGateway?.close();
+    this.adminClient?.close();
     this.systemGateway = null;
     this.systemClient = null;
+    this.adminGateway = null;
+    this.adminClient = null;
   }
 }
