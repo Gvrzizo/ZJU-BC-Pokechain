@@ -11,7 +11,7 @@ import { getSpecies, SpeciesDef } from '../game-data/species.data';
 import { computeStats, emptyEvs, normalizeEvs } from '../game-data/stats';
 import { CaptureService } from '../pokemon/capture.service';
 import { CAPTURE_EXP_GAIN, PokemonService } from '../pokemon/pokemon.service';
-import { BondService } from '../ranked/bond.service';
+import { BondService } from '../bond/bond.service';
 import { resolveOwnedBall } from '../pokemon/ball';
 import {
   MASTER_BALL_BONUS,

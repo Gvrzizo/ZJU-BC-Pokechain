@@ -8,9 +8,10 @@ import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, identityForUser, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
-import { BattleRoom, BattlesService, assertTeamSize, assertTeamUnique } from '../battles/battles.service';
+import { BattleRoom, BattlesService } from '../battles/battles.service';
 import { OpponentPokemonDetail, enrichTeam, toOpponentTeam } from '../battles/wager-detail';
 import { PokemonHpService } from '../pokemon/pokemon-hp.service';
+import { assertTeamOwnership } from '../pokemon/team-eligibility';
 import { RankedBattleLauncher } from './battle-launcher';
 import { BOT_DAILY_LIMIT, BOT_NICKNAME, BOT_OFFER_AFTER_MS, BOT_PLAYER_ID, botDailyKey, utcDate } from './bot';
 import { arenaEntryFee, arenaEntryIdemKey, arenaEntryReason, arenaEntryRefunds } from './arena';
@@ -931,24 +932,7 @@ export class RankedService {
    */
   async assertTeam(playerId: string, pokemonIds: string[]): Promise<void> {
     // 队伍规模 1-6 + 不得重复（与房间创建/加入同一口径）：400 INVALID_TEAM_SIZE / DUPLICATE_TEAM
-    assertTeamSize(pokemonIds);
-    assertTeamUnique(pokemonIds);
-    for (const id of [...new Set(pokemonIds)]) {
-      const pokemon = await this.contract.getPokemon(id).catch(() => null);
-      if (!pokemon || pokemon.ownerId !== playerId) {
-        throw new AppException('NOT_OWNER', `pokemon ${id} is not owned by ${playerId}`, HttpStatus.FORBIDDEN);
-      }
-      if (pokemon.status !== 'IDLE') {
-        throw new AppException('ASSET_LOCKED', `pokemon ${id} is ${pokemon.status}`, HttpStatus.CONFLICT);
-      }
-      if ((await this.hp.currentHp(pokemon)) <= 0) {
-        throw new AppException(
-          'FAINTED',
-          `pokemon ${id} (${pokemon.name}) has fainted; heal it at the pokemon center before queueing`,
-          HttpStatus.CONFLICT,
-        );
-      }
-    }
+    await assertTeamOwnership({ contract: this.contract, hp: this.hp }, playerId, pokemonIds, { surface: 'queue' });
   }
 }
 

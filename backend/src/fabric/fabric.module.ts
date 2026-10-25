@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../users/entities/user.entity';
@@ -18,7 +18,6 @@ export function createMockChainAdapter(config: ConfigService, redis: RedisServic
   return new MockChainAdapter(mock ? new RedisMockChainStore(redis.client) : undefined);
 }
 
-@Global()
 @Module({
   imports: [TypeOrmModule.forFeature([User])],
   providers: [

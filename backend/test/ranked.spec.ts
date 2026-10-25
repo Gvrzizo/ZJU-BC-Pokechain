@@ -10,7 +10,7 @@ import { BattleRewardService } from '../src/ranked/battle-reward.service';
 import { RankedBattleLauncher } from '../src/ranked/battle-launcher';
 import { RankedBotService } from '../src/ranked/bot.service';
 import { computeWagerHash } from '../src/fabric/chain.adapter';
-import { BondService } from '../src/ranked/bond.service';
+import { BondService } from '../src/bond/bond.service';
 import { utcDate } from '../src/ranked/bot';
 import { QUEUE_TTL_SEC, RankedService } from '../src/ranked/ranked.service';
 import { eloUpdate, expectedScore, MATCH_WINDOW } from '../src/ranked/elo';

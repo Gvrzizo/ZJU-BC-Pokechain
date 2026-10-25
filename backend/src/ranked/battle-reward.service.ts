@@ -5,7 +5,7 @@ import { ContractService } from '../fabric/contract.service';
 import { SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { BattlesService, BattleSettledEvent } from '../battles/battles.service';
 import { BATTLE_WIN_EXP_GAIN, PokemonService } from '../pokemon/pokemon.service';
-import { BondService } from './bond.service';
+import { BondService } from '../bond/bond.service';
 import { RankedService } from './ranked.service';
 import { eloUpdate, RankedOutcome, scaleElo } from './elo';
 import { BOT_RATING_SCALE, BOT_REWARD_SCALE, utcDate } from './bot';

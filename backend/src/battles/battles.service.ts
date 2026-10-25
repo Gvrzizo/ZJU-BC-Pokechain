@@ -13,6 +13,7 @@ import { AuditLog } from '../admin/entities/audit-log.entity';
 import { PlayerBlockService } from '../users/player-block.service';
 import { UsersService } from '../users/users.service';
 import { PokemonHpService } from '../pokemon/pokemon-hp.service';
+import { assertTeamOwnership } from '../pokemon/team-eligibility';
 import { BattleManagerService } from './battle-manager.service';
 import { errorCodeOf } from './battle-error';
 import { DisputeRecord } from './entities/dispute-record.entity';
@@ -85,37 +86,6 @@ export interface BattleSettledEvent {
   teamB: string[];
 }
 
-/** 出战队伍规模：1-6 只（房间创建/加入与排位入队同一口径，docs/backend-api.md §5/§11） */
-export const TEAM_SIZE_MIN = 1;
-export const TEAM_SIZE_MAX = 6;
-
-/** 队伍规模校验：违规 400 `INVALID_TEAM_SIZE`（链上/引擎按最多 6 只设计）。 */
-export function assertTeamSize(pokemonIds: string[]): void {
-  const size = Array.isArray(pokemonIds) ? pokemonIds.length : 0;
-  if (size < TEAM_SIZE_MIN || size > TEAM_SIZE_MAX) {
-    throw new AppException(
-      'INVALID_TEAM_SIZE',
-      `teamPokemonIds must contain ${TEAM_SIZE_MIN}-${TEAM_SIZE_MAX} pokemon, got ${size}`,
-      HttpStatus.BAD_REQUEST,
-    );
-  }
-}
-
-/**
- * 出战队伍去重（H2 / docs/review-2026-10-25.md）：同一只宝可梦不能占多个槽位
- * （否则「最强一只 ×6」等于 6 条命，押注房可稳赢）。房间与排位共用。
- */
-export function assertTeamUnique(pokemonIds: string[]): void {
-  if (!Array.isArray(pokemonIds)) return;
-  if (new Set(pokemonIds).size !== pokemonIds.length) {
-    throw new AppException(
-      'DUPLICATE_TEAM',
-      'teamPokemonIds must not contain duplicates',
-      HttpStatus.BAD_REQUEST,
-    );
-  }
-}
-
 const ROOM_TTL_SEC = 3600;
 /** chain battle states that still allow (re)joining the live battle screen */
 const LIVE_BATTLE_STATES = new Set(['CREATED', 'ACTIVE', 'RESULT_SUBMITTED']);
@@ -179,7 +149,7 @@ export class BattlesService implements OnModuleInit {
   }
 
   async createRoom(as: ChainIdentity, dto: CreateRoomDto): Promise<BattleRoom> {
-    await this.assertTeamOwnership(as.userId, dto.teamPokemonIds);
+    await assertTeamOwnership({ contract: this.contract, hp: this.hp }, as.userId, dto.teamPokemonIds);
     const room: BattleRoom = {
       id: `r_${randomUUID()}`,
       mode: '1v1',
@@ -496,7 +466,7 @@ export class BattlesService implements OnModuleInit {
         HttpStatus.FORBIDDEN,
       );
     }
-    await this.assertTeamOwnership(as.userId, dto.teamPokemonIds);
+    await assertTeamOwnership({ contract: this.contract, hp: this.hp }, as.userId, dto.teamPokemonIds);
     room.playerB = as.userId;
     room.wagerB = await this.normalizeWager(as.userId, dto.wager);
     room.teamB = dto.teamPokemonIds;
@@ -526,8 +496,8 @@ export class BattlesService implements OnModuleInit {
     if (room.confirmations.A && room.confirmations.B) {
       // 链上 CreateBattle 会锁定资产且不可回滚：锁资产前**重新**校验双方队伍
       // （队伍提交到押注双确认之间，宝可梦可能已在别的战斗中濒死 → FAINTED，见 docs/backend-api.md §2）
-      await this.assertTeamOwnership(room.playerA, room.teamA);
-      await this.assertTeamOwnership(room.playerB, room.teamB);
+      await assertTeamOwnership({ contract: this.contract, hp: this.hp }, room.playerA, room.teamA);
+      await assertTeamOwnership({ contract: this.contract, hp: this.hp }, room.playerB, room.teamB);
       // H5：先落 battleId + STARTING，再开始链上/引擎三步；任何一步失败都能按 battleId 补偿，
       // 不会出现“链上资产已锁、本地没记 battleId”的永久冻结房间。
       const battleId = `b_${randomUUID()}`;
@@ -760,24 +730,6 @@ export class BattlesService implements OnModuleInit {
     if (this.manager.get(room.battleId)) return false; // live on this server
     const status = await this.battleStatus(room.battleId);
     return !status || !LIVE_BATTLE_STATES.has(status);
-  }
-
-  private async assertTeamOwnership(playerId: string, pokemonIds: string[]): Promise<void> {
-    assertTeamSize(pokemonIds);
-    assertTeamUnique(pokemonIds);
-    for (const id of pokemonIds) {
-      const p = await this.contract.getPokemon(id).catch(() => null);
-      if (!p || p.ownerId !== playerId) {
-        throw new AppException('NOT_OWNER', `pokemon ${id} is not owned by ${playerId}`, HttpStatus.FORBIDDEN);
-      }
-      if (p.status !== 'IDLE') {
-        throw new AppException('ASSET_LOCKED', `pokemon ${id} is ${p.status}`, HttpStatus.CONFLICT);
-      }
-      // 伤势持久化（docs/backend-api.md §2）：濒死（0 HP）的宝可梦不能进队伍提交
-      if ((await this.hp.currentHp(p)) <= 0) {
-        throw new AppException('FAINTED', `pokemon ${id} has fainted; heal it before battling`, HttpStatus.CONFLICT);
-      }
-    }
   }
 
   /**

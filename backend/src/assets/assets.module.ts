@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AuditLog } from '../admin/entities/audit-log.entity';
+import { AdminModule } from '../admin/admin.module';
 import { AssetsController } from './assets.controller';
 import { AssetsService } from './assets.service';
 import { Asset } from './entities/asset.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Asset, AuditLog])],
+  imports: [TypeOrmModule.forFeature([Asset]), AdminModule],
   controllers: [AssetsController],
   providers: [AssetsService],
   exports: [AssetsService],

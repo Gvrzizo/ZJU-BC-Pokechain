@@ -31,6 +31,18 @@ export const BOND_BATCH = 50;
 
 export type BondSide = 'A' | 'B';
 
+/** 一只宝可梦的羁绊变化（仅列出真正被提升的） */
+export interface BondChange {
+  pokemonId: string;
+  speciesId: number;
+  name: string;
+  side: 'A' | 'B';
+  result: 'WIN' | 'LOSS' | 'DRAW';
+  before: number;
+  after: number;
+  delta: number;
+}
+
 /** 一次 BondUp 调用（一个阵营的一批宝可梦） */
 export interface BondGrant {
   side: BondSide;

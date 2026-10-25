@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { DeriveStream } from '../common/utils/crypto.util';
+import { utcDate } from '../common/utils/time.util';
 import { EngineAction, EngineMonInput } from '../battles/engine/battle-engine';
 import { MoveDef } from '../game-data/moves.data';
 import { NATURES } from '../game-data/natures.data';
@@ -46,10 +47,8 @@ export function botDailyKey(playerId: string, date?: string): string {
   return `ranked:bot:${playerId}:${date ?? utcDate()}`;
 }
 
-/** 每日上限的日期分界（UTC，确定性） */
-export function utcDate(now = Date.now()): string {
-  return new Date(now).toISOString().slice(0, 10);
-}
+/** 每日上限的日期分界（UTC，确定性）；实现见 common/utils/time.util.ts */
+export { utcDate } from '../common/utils/time.util';
 
 /** 玩家队伍平均等级（无队伍按 5 计，与野怪口径一致） */
 export function averageLevel(levels: number[], fallback = 5): number {

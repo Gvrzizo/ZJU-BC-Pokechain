@@ -9,7 +9,7 @@ import { User } from '../src/users/entities/user.entity';
 import { BattleRewardService } from '../src/ranked/battle-reward.service';
 import { RankedBattleLauncher } from '../src/ranked/battle-launcher';
 import { RankedBotService } from '../src/ranked/bot.service';
-import { BondService } from '../src/ranked/bond.service';
+import { BondService } from '../src/bond/bond.service';
 import { RankedService } from '../src/ranked/ranked.service';
 import { MATCH_WINDOW_BASE, MATCH_WINDOW_MAX, matchWindowFor } from '../src/ranked/elo';
 import {
