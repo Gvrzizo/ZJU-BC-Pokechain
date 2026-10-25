@@ -278,15 +278,15 @@ p = min(1, a / 255)                                                   // 大师�
 
 | typeId | 名称 | 购买价 | 回收价 | typeId | 名称 | 购买价 | 回收价 |
 |---|---|---|---|---|---|---|---|
-| `poke-ball` | 精灵球 | 50 | 25 | `tm-thunderbolt` | 十万伏特技能机 | 1500 | 750 |
-| `great-ball` | 超级球 | 150 | 75 | `tm-flamethrower` | 喷射火焰技能机 | 1500 | 750 |
-| `ultra-ball` | 高级球 | 400 | 200 | `tm-surf` | 冲浪技能机 | 1500 | 750 |
-| `potion` | 伤药 | 50 | 25 | `bottle-cap` | 银色王冠 | 3000 | 1500 |
-| `super-potion` | 好伤药 | 120 | 60 | `gold-bottle-cap` | 金色王冠 | 15000 | 7500 |
+| `poke-ball` | 精灵球 | 50 | 25 | `tm-thunderbolt` | 十万伏特技能机 | 800 | 400 |
+| `great-ball` | 超级球 | 150 | 75 | `tm-flamethrower` | 喷射火焰技能机 | 800 | 400 |
+| `ultra-ball` | 高级球 | 400 | 200 | `tm-surf` | 冲浪技能机 | 800 | 400 |
+| `potion` | 伤药 | 50 | 25 | `bottle-cap` | 银色王冠 | 1200 | 600 |
+| `super-potion` | 好伤药 | 120 | 60 | `gold-bottle-cap` | 金色王冠 | 6000 | 3000 |
 | `thunder-stone` | 雷之石 | 800 | 400 | `rare-candy` | 神奇糖果 | 1000 | 500 |
 | `water-stone` | 水之石 | 800 | 400 | `sky-key` | 天空之钥 | **5000** | **不回收** |
 | `fire-stone` | 火之石 | 800 | 400 | `ocean-key` | 海洋之钥 | **5000** | **不回收** |
-| `master-ball` | 大师球 | 非卖品（奖励限定） | 不回收 | `magma-key` | 熔岩之钥 | **5000** | **不回收** |
+| `master-ball` | 大师球 | 非卖品（**传说图鉴 6/6 奖励**） | 不回收 | `magma-key` | 熔岩之钥 | **5000** | **不回收** |
 | | | | | `ruins-key` | 遗迹之钥 | **5000** | **不回收** |
 | | | | | `island-key` | 岛之钥 | **5000** | **不回收** |
 | | | | | `birth-key` | 诞生岛船票 | **5000** | **不回收** |
@@ -294,8 +294,9 @@ p = min(1, a / 255)                                                   // 大师�
 **传说区钥匙（`kind='key'`，2026-09）**：6 把钥匙各自对应一个传说区（§2「传说区」），**买断即永久通行**（进区不消耗、可反复进入）。
 定位是**月级积分 sink**（5000P ≈ 日收入 100–300P 的 2-4 周积累）与**可交易的稀缺品**（道具可经交易转手，但商店**不回收钥匙**——否则"买入→卖回"会凭空造出积分；`POST /items/:id/use` 也一律 `NOT_USABLE`，避免误点白白消耗门票）。`master-ball` 与钥匙在 `GET /shop` 里分别表现为"非卖品"与"可买不可卖"，前端据此隐藏卖出按钮。
 
-**定价口径（2026-09 重平衡，与 §10 的 faucet 配套）**：休闲玩家日收入约 **100–300P**（野怪 + 排位），
-因此 1 个精灵球 ≈ 半日收入、高级球 400 ≈ **2-3 天积累**、银色王冠 3000 / 金色王冠 15000 ≈ **月级目标**，
+**定价口径（2026-10 P2 回调，与 §10 的 faucet 配套）**：休闲玩家日收入约 **100–300P**（野怪 + 排位），
+因此 1 个精灵球 ≈ 半日收入、高级球 400 ≈ **1-2 天积累**、银色王冠 1200 / 金色王冠 6000 ≈ **周/月级目标**，
+TM 800（原 1500：360 个野生种里约 88% 已有 ≥90 威力招式，高价 TM 缺乏决策价值；H13），
 **传说区钥匙 5000 = 长线目标**（一把钥匙换一个传说区，且每人在每区只能持有一只传说）；
 回收（半价）只用于回血，不构成 faucet，**钥匙不回收**以维持稀缺性。旧价目（精灵球 20 / 高级球 150 / 王冠 1000）在 faucet 收紧后会让
 稀有道具失去稀缺感，故整体重定价——数值与文案同步在 `backend/test/shop.spec.ts` 锁定。
@@ -347,7 +348,7 @@ p = min(1, a / 255)                                                   // 大师�
 - 配对成功后**先进入 15 秒接受期**（`MATCH_PENDING`，双方各自 `POST /ranked/queue/accept`，见 §11.1），双方都接受才按上面的房间流程创建 battle（`playerA`=先入队者），`battle:activated` 推送与普通房一致；拿不到推送时前端轮询 `GET /ranked/queue/status` 的 `battleId` 进入 `/battle/:id`。
 - 结算面板的**排位分 / 羁绊变化**（rating before→after、每只宝可梦 bond before→after）由 `GET /ranked/battles/:battleId/outcome` 提供（附加 `bot` / `arena` 字段），链上应用完成前返回 `{status:'PENDING'}`。
 - 押注 DTO 对排位房不适用（押注包恒为 `{pokemonIds:[],items:[],points:0}`）；结算仍走 `SubmitResult → 双方 ConfirmResult → SETTLED`（2 分钟兜底 SettleBattle 同样有效）。
-- 积分场（`mode:'arena'`）与机器人场（排队 60 秒后 `POST /ranked/queue/accept-bot`）复用同一引擎；机器人场没有房间（`roomId=null`）且奖励减半，规则见 §11.1。
+- 积分场（`mode:'arena'`）与机器人场（排队 60 秒后 `POST /ranked/queue/accept-bot`）复用同一引擎；机器人场没有房间（`roomId=null`），rating 增益 0、羁绊/经验减半，规则见 §11.1。
 
 #### 押注 DTO（wager）
 
@@ -484,17 +485,18 @@ helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2
 只能由 `admin` / `system` 身份经 `PlayerContract.AddPoints` 增减，每一笔都带可审计的 `reason`（`addPoints` 幂等键由调用方固定，成本口径见 `backend/src/pokemon/points-economy.ts`）。
 用户侧积分一律来自链上状态：`GET /users/me` 的 `points` 即 `Player.points`。
 
-**来源（sources，2026-09 重平衡后：注册 1000 不变，其余 faucet 大幅收紧）**
+**来源（sources，2026-10 P2 后：注册 400 + 72h 转账锁、竞技场零增发，其余 faucet 维持 2026-09 收紧口径）**
 
 | 来源 | 数量 | reason | 幂等键 | 实现 |
 |---|---|---|---|---|
-| 注册 | +1000 | —（`RegisterPlayer` 初始值） | `register-<username>` | 链码 `PlayerContract.RegisterPlayer`（`docs/chaincode-api.md` §1） |
+| 注册 | **+400**（`INITIAL_POINTS`） | —（`RegisterPlayer` 初始值） | `register-<username>` | 链码 `PlayerContract.RegisterPlayer`（`docs/chaincode-api.md` §2.1）；同时写 `transferLockUntil = nowISO + 72h` |
+| 传说图鉴 6/6 | 大师球 ×1（道具，非积分） | —（`MintItem`） | `legendary-dex-<playerId>` | `pokemon/legendary-reward.ts`（快速捕捉/野怪收服后触发，每人一次） |
 | 收服野怪成功（野怪战斗或快速捕捉） | +20 | `reward:catch:<pokemonId>` | `<pokemonId>-reward-catch` | `wild/wild.service.ts::grantCatchReward`、`pokemon/capture.service.ts::attempt` |
 | 击倒野怪 | 野怪等级 × 1 | `reward:wild-faint:<sessionId>` | `<sessionId>-reward-faint` | `wild/wild.service.ts::grantFaintReward`（`WILD_FAINTED` 结算时） |
 | 放生宝可梦 | 等级 × 1 | `reward:release:<pokemonId>` | `<pokemonId>-reward-release` | `pokemon/pokemon.service.ts::grantReleaseReward`（`Release` 之后） |
 | PvP 胜利 | **不给积分，只给经验**（参战队伍 +30 exp） | — | `<battleId>-exp-<pokemonId>` | §5 / §11，经验与积分是两套口径 |
 | PvP 押注赢取 | 双方押注积分之和 | `battle-settle`（结算走链码内部转账） | battle 结算幂等 | `docs/backend-api.md` §5 |
-| 积分场（arena）胜者 | 双方准入积分之和 + 系统补贴（胜者准入额 ×50% 向下取整） | `arena:reward:<battleId>` | `<battleId>-arena-reward` | §11.1 积分场（`BattleRewardService::applyArenaSettlement`） |
+| 积分场（arena）胜者 | 双方准入积分之和（**H12 起零和、无系统补贴**） | `arena:reward:<battleId>` | `<battleId>-arena-reward` | §11.1 积分场（`BattleRewardService::applyArenaSettlement`） |
 | 积分场平局退还 | 各自准入额 | `arena:refund:<battleId>` | `<battleId>-arena-refund-A/B` | 同上 |
 | 积分场取消/仲裁退款 | 各自准入额 | `arena:entry-refund:<battleId>` | `<battleId>-arena-entry-refund-A/B` | `RankedService::refundArenaEntries`、§11.1 |
 | 交易收付 | 按 offer/request | `trade` | trade 幂等 | §4 |
@@ -506,8 +508,8 @@ helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2
 `AddPoints` 余额不足抛 `INSUFFICIENT_POINTS`，扣减不落链（积分场扣费失败则取消建房并让双方回队列）。
 
 **日收入口径（写进定价依据）**：野怪（击倒 等级×1 + 收服 20，含掉落道具折算）约 **60–200P/天**；
-排位（casual 只给评级与羁绊，arena 有净流入但受「每日 3 次补贴 + 准入」约束）约 **0–150P/天**；
-合计 **100–300P/天**——据此对齐商店价目（精灵球 50、高级球 400、王冠 3000/15000）。
+排位（casual 只给评级与羁绊，arena 零和）约 **0–50P/天**；
+合计 **100–300P/天**——据此对齐商店价目（精灵球 50、高级球 400、银冠 1200/金冠 6000、TM 800）。
 积分通胀的主要旧来源（收服 50 / 击倒 等级×2 / 放生 等级×5）已收紧，放生不再是刷分手段。
 
 **实现要点**
@@ -592,7 +594,7 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 期望分  E_a = 1 / (1 + 10^((R_b − R_a)/400))
 新分    R_a' = clamp(round(R_a + 32 × (S_a − E_a)), 0, 99999)
         胜者 S=1、负者 S=0、平局双方 S=0.5（DRAW 按 0.5 期望结算）
-机器人场：变化量 ×0.5 后四舍五入（同分对局 ±16 → ±8）
+机器人场：变化量 ×0（H12：零风险场不推进段位；`BOT_RATING_SCALE = 0`）
 ```
 
 - `R_a/R_b` 取**首次应用时链上的 rating**（链为准），计算出的新分**固化在排位房记录里**（`ranked:battle:<battleId>.plan`），之后的重试/重放都用同一组数值提交，配合固定幂等键与链上 `UpdateRating` 的幂等，重复应用不会叠加（幂等测试覆盖：重复广播 + 重复 sweep 后分数不变）。
@@ -604,7 +606,7 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 - 队伍：**3 只内存临时实体**（不上链），等级 = 玩家队伍平均等级 ±2（夹 2-100），种族从野生池随机，技能取该等级已学会的最后 4 个；生成种子与队伍摘要记在 `ranked:battle:<battleId>.bot`（可复核）。
 - 出招：服务端代打，监听引擎 `turn` 广播后延迟 0.7s 出招；从该对局 RandomCommit 派生流（偏移 `100000 + 回合×8`，与引擎从 0 递增的顺序游标互不干扰）挑技能，**普通伤害招优先**，当前宝可梦倒地时换上一只存活队友。
 - 入场：机器人开局即标记"已到场"（`enterBattle`），玩家的 90 秒入场宽限照常生效。
-- **奖励减半**（`BOT_REWARD_SCALE = 0.5`）：ELO 变化 ×0.5 四舍五入、羁绊 ×0.5 **向下取整**（+2→+1、+1→+0）、经验 30→15（幂等键与通用 PvP 胜利经验一致：`<battleId>-exp-<pokemonId>`）。
+- **奖励缩减**：**rating 变化 0**（`BOT_RATING_SCALE = 0`，H12）、羁绊 `BOT_REWARD_SCALE = 0.5` **向下取整**（+2→+1、+1→+0）、经验 30→15（幂等键与通用 PvP 胜利经验一致：`<battleId>-exp-<pokemonId>`）。
 - **每日上限 5 场**：Redis 计数 `ranked:bot:<player>:<yyyy-mm-dd>`（UTC 日期，TTL 2 天）；开局失败会回滚计数。`arena` 模式不提供机器人。
 - 强度提示：种族取自野生池（**含进化型**），只有等级按 ±2 对齐——偶发的强种族（超能系进化型等）会让练习赛明显偏难，这是当前口径的已知特性（离线实测 3 场单只 5 级御三家对局均告负）。
 
@@ -620,15 +622,15 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 
 - **扣费时机**：匹配成功且**双方都 accept 时才扣**（各扣自己的准入，reason `arena:entry:<battleId>`，幂等键 `<battleId>-arena-entry-A|B`）；一方拒绝/超时/取消 → 不扣。第一方扣成功、第二方失败时第一方原路退回（reason `arena:entry-refund:<battleId>`），**扣失败即取消建房**（双方 409 `INSUFFICIENT_POINTS` 提示并出队）。
 - **结算**（`BattleRewardService`，计划在首次结算时固化进 `ranked:battle:<battleId>.arena`）：
-  - 胜者：`双方准入之和 + 系统补贴`，reason `arena:reward:<battleId>`，幂等键 `<battleId>-arena-reward`；
+  - 胜者：`双方准入之和`（**不额外增发**），reason `arena:reward:<battleId>`，幂等键 `<battleId>-arena-reward`；
   - 平局：各自退还准入（`arena:refund:<battleId>`）；
   - 仲裁 `REFUNDED`：不发奖，但双方准入原路退回。
-- **系统补贴** = 胜者准入额 × 50% 向下取整（`floor(entry × 0.5)`；跨段位对局按胜者自己的准入额算）。
-- **防刷**（任一命中即不发补贴，原因记录在 `arena.plan.subsidyBlocked`）：
+- **系统补贴** = 胜者准入额 × `ARENA_SUBSIDY_RATIO`（H12 起为 **0**：积分场零和，胜者只拿双方入场费；跨段位对局按胜者自己的准入额算）。
+- **防刷**（判定保留；系数为 0 时无补贴可发，不会产生系统增发。任一命中会记录在 `arena.plan.subsidyBlocked`）：
   1. 每人每天最多 3 次补贴（Redis SET `ranked:subsidy:<player>:<yyyy-mm-dd>` 存 battleId，`SCARD` 即次数——重放同一场不会重复占名额）；
   2. 对局双方 rating 差 > 400（扩圈匹配可能配出大分差对手）；
   3. 机器人场（`bot` 记录存在时）。
-- 权重说明：准入积分是链上资产，支出走 `PlayerContract.AddPoints`（负数），补贴是系统发行（正数），全部带 reason 与固定幂等键，重试/重放不叠加。
+- 权重说明：准入积分是链上资产，支出走 `PlayerContract.AddPoints`（负数）；H12 起不再有系统补贴（系数 0）。全部带 reason 与固定幂等键，重试/重放不叠加。
 
 **段位（前端徽章，`frontend/src/api/ranked.ts::RANK_TIERS`）**
 
