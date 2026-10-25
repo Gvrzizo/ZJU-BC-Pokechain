@@ -8,7 +8,7 @@ import { PokeType } from './type-chart';
  * - **普通区**（7 个）：固定的**等级带** + **进化阶段门槛**（`stage ≤ maxStage`）+ **栖息地属性过滤**
  *   （种族属性 ∈ `habitats` 才入池），池内按稀有度加权抽样。野怪等级只由区域决定，与队伍等级脱钩。
  * - **传说区**（6 个）：池是**显式指定**的传说种族（等权）、等级带很窄（或固定等级），
- *   进入需要对应**钥匙道具**（非消耗品），且**每人每区只能持有一只**（拥有池内任一种族即拒绝，
+ *   进入需要对应**钥匙道具**（一次性：创建遇敌时消耗 1 把，H11），且**每人每区只能持有一只**（拥有池内任一种族即拒绝，
  *   门控见 capture.service.ts::assertLegendaryAccess），诱饵被拒。
  * - **兼容别名**：旧三区 id `south`/`mid`/`north` 分别指向 `route-grass`/`route-mid`/`route-north`，
  *   输入时归一为规范 id（响应/链上 `Commit.meta.zone` 一律记规范 id）。
@@ -51,7 +51,7 @@ export interface ZoneDef {
   habitats: readonly PokeType[];
   /** 传说区标记：需要钥匙、每人每池仅一只、禁止诱饵（见 capture.service.ts） */
   legendary?: boolean;
-  /** 进入该区所需的钥匙 typeId（非消耗品，`game-data/items.data.ts` 的 kind='key'） */
+  /** 进入该区所需的钥匙 typeId（一次性消耗品，`game-data/items.data.ts` 的 kind='key'） */
   keyTypeId?: string;
   /** 传说区固定池（全国图鉴 id）；普通区不填（由 stage + 栖息地过滤得到） */
   poolSpeciesIds?: readonly number[];

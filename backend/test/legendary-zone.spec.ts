@@ -86,22 +86,25 @@ describe('传说区门控（docs/backend-api.md §2「传说区」）', () => {
     expect(enc.zone).toMatchObject({ id: 'sky-pillar', name: '天空之柱', legendary: true, keyTypeId: 'sky-key' });
   });
 
-  it('钥匙只是门票：不消耗、堆叠不变，可反复进入（未捕获前）', async () => {
+  it('钥匙是一次性门票：每次创建传说区遇敌消耗 1 把，用完后 KEY_REQUIRED（H11）', async () => {
     const ctx = build();
     await registerPlayers(ctx.contract, 'ash');
-    const key = await mintKey(ctx, 'sky-key');
-    const before = await ctx.contract.getItem(key.id);
+    const key = await mintKey(ctx, 'sky-key', 2);
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       const enc = await ctx.capture.encounter(ash, undefined, 0, 'sky-pillar');
       expect(enc.wild.speciesId).toBe(384);
       expect(enc.wild.level).toBeGreaterThanOrEqual(45);
       expect(enc.wild.level).toBeLessThanOrEqual(50);
       // Commit.meta 记规范 id（审计可复算 n=0/n=1）
       expect(JSON.parse((await ctx.contract.getRandom(enc.eventId)).meta)).toEqual({ zone: 'sky-pillar' });
+      expect((await ctx.contract.getItem(key.id)).quantity).toBe(1 - i);
     }
-    const after = await ctx.contract.getItem(key.id);
-    expect([after.quantity, after.status]).toEqual([before.quantity, 'IDLE']);
+
+    // 第三把没有 → 403，堆叠保持 0
+    await expect(ctx.capture.encounter(ash, undefined, 0, 'sky-pillar')).rejects.toMatchObject({ status: 403 });
+    await expect(ctx.capture.encounter(ash, undefined, 0, 'sky-pillar')).rejects.toThrow(/KEY_REQUIRED/);
+    expect((await ctx.contract.getItem(key.id)).quantity).toBe(0);
   });
 
   it('数量为 0 或锁定中的钥匙都不算持有（KEY_REQUIRED）', async () => {
@@ -140,7 +143,10 @@ describe('传说区门控（docs/backend-api.md §2「传说区」）', () => {
   it('等级带：天空之柱 Lv45-50、古代遗迹固定 Lv40、诞生之岛固定 Lv45', async () => {
     const ctx = build();
     await registerPlayers(ctx.contract, 'ash');
-    for (const keyTypeId of ['sky-key', 'ruins-key', 'birth-key']) await mintKey(ctx, keyTypeId);
+    // 钥匙是一次性门票：按后面的遇敌次数各备足（天空 40 / 遗迹 35 / 诞生 5）
+    await mintKey(ctx, 'sky-key', 40);
+    await mintKey(ctx, 'ruins-key', 35);
+    await mintKey(ctx, 'birth-key', 5);
 
     const levels = new Set<number>();
     for (let i = 0; i < 40; i++) {
@@ -188,7 +194,7 @@ describe('传说区门控（docs/backend-api.md §2「传说区」）', () => {
   it('放生或交易走后可再捕（口径：看当前归属，不看历史）', async () => {
     const ctx = build();
     await registerPlayers(ctx.contract, 'ash', 'gary');
-    await mintKey(ctx, 'sky-key');
+    await mintKey(ctx, 'sky-key', 2);
     const released = await seedPokemon(ctx.chain, 'ash', { id: 'p_ray2', speciesId: 384, status: 'IDLE' });
     await expect(ctx.capture.encounter(ash, undefined, 0, 'sky-pillar')).rejects.toThrow(/LEGENDARY_OWNED/);
 
@@ -214,17 +220,17 @@ describe('传说区门控（docs/backend-api.md §2「传说区」）', () => {
     expect(enc.wild.speciesId).toBe(384);
   });
 
-  it('全流程：无钥匙被拒 → 买钥匙 → 遇裂空座 → 捕捉 → 再遇被拒 LEGENDARY_OWNED', async () => {
+  it('全流程：无钥匙被拒 → 买钥匙 → 遇裂空座 → 捕捉 → 钥匙耗尽 403 → 补钥匙再遇 LEGENDARY_OWNED', async () => {
     const ctx = build();
     await registerPlayers(ctx.contract, 'ash');
 
     // ① 无钥匙
     await expect(ctx.capture.encounter(ash, undefined, 0, 'sky-pillar')).rejects.toThrow(/KEY_REQUIRED/);
 
-    // ② 商店购买天空之钥（5000P；注册送 1000P，先补足积分）
+    // ② 商店购买天空之钥（1500P；注册送 1000P，先补足积分）
     await ctx.contract.addPoints(SYSTEM_IDENTITY, 'ash', 5000, 'test-grant');
     const bought = await ctx.shop.buy(ash, 'sky-key', 1);
-    expect(bought).toMatchObject({ typeId: 'sky-key', nameZh: '天空之钥', unitPrice: 5000, total: 5000 });
+    expect(bought).toMatchObject({ typeId: 'sky-key', nameZh: '天空之钥', unitPrice: 1500, total: 1500 });
 
     // ③ 遇裂空座（大师球必中，直接走快速捕捉）
     const enc = await ctx.capture.encounter(ash, undefined, 0, 'sky-pillar');
@@ -237,12 +243,17 @@ describe('传说区门控（docs/backend-api.md §2「传说区」）', () => {
     expect(caught.pokemon.level).toBe(enc.wild.level);
     expect(caught.pokemon.level).toBeGreaterThanOrEqual(45);
 
-    // ④ 再遇：已拥有 → 409（钥匙仍在背包里，只是"传说仅此一只"）
-    expect((await ctx.contract.getItem(bought.item.id)).quantity).toBe(1);
+    // ④ 再遇：钥匙已在遇敌时消耗 → 先 403 KEY_REQUIRED（无钥匙优先于归属校验）
+    expect((await ctx.contract.getItem(bought.item.id)).quantity).toBe(0);
+    await expect(ctx.capture.encounter(ash, undefined, 0, 'sky-pillar')).rejects.toMatchObject({ status: 403 });
+
+    // ⑤ 补一把钥匙再遇：已拥有 → 409，且这把钥匙不被消耗
+    const extra = await mintKey(ctx, 'sky-key');
     await expect(ctx.capture.encounter(ash, undefined, 0, 'sky-pillar')).rejects.toMatchObject({ status: 409 });
     await expect(ctx.capture.encounter(ash, undefined, 0, 'sky-pillar')).rejects.toThrow(
       /LEGENDARY_OWNED: 你已经拥有 烈空坐/,
     );
+    expect((await ctx.contract.getItem(extra.id)).quantity).toBe(1);
   });
 
   it('钥匙不可使用、不可在商店回收（避免误操作）', async () => {

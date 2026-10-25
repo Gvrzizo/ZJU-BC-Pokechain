@@ -1,4 +1,5 @@
 import { RedisService } from '../common/redis/redis.service';
+import { ZoneId } from '../game-data/encounter.data';
 import { MoveDef, StatStageKey, StatusCondition } from '../game-data/moves.data';
 import { PokeType } from '../game-data/type-chart';
 import { PokemonState, PokemonIvs } from '../fabric/chain.types';
@@ -88,6 +89,8 @@ export interface WildSession {
   /** 承诺-揭示种子的会话副本（encounter 时由 CaptureService 写入 capture:<eventId>） */
   serverSeed: string;
   clientSeed: string;
+  /** 遇敌区域（从 capture 会话复制；决定击倒奖励：传说区 0 积分，普通区 等级×1） */
+  zoneId?: ZoneId;
   turn: number;
   /** 已投出的球数：第 n 次投球消费 attempt 派生块 base=2+(n-1)*10（与快速捕捉共用计数） */
   attempts: number;
@@ -110,7 +113,7 @@ export interface WildSession {
   bondGainBy?: string;
   /** 本会话收服奖励（+20 积分）；未收服/未发放时缺省 */
   catchReward?: number;
-  /** 本会话击倒奖励（野怪等级×1）；未击倒/未发放时缺省 */
+  /** 本会话击倒奖励（普通区野怪等级×1；传说区固定 0）；未击倒/未发放时缺省 */
   faintReward?: number;
   /** 本会话掉落道具（收服或击倒时按 40000 区派生一次，见 capture-derive.ts）；未掉落/未发放时缺省 */
   drop?: WildDropGrant;

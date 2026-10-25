@@ -38,8 +38,9 @@ export const ITEM_TYPES: Record<string, ItemTypeDef> = Object.fromEntries(
     I('bottle-cap', 'Bottle Cap', '银色王冠', 'other'),
     I('gold-bottle-cap', 'Gold Bottle Cap', '金色王冠', 'other'),
     I('rare-candy', 'Rare Candy', '神奇糖果', 'other'),
-    // 传说区钥匙（kind='key'）：**非消耗品**，只用于通过 capture 的进入校验；
-    // 不可使用（POST /items/:id/use → NOT_USABLE）、不可回收（shop 卖出 → NOT_SELLABLE，见 shop.data.ts）
+    // 传说区钥匙（kind='key'）：**一次性消耗品**——`POST /capture/encounter` 通过门控后消耗 1 把
+    // （快速捕捉与野怪战斗共用这次遇敌，不会二次消耗）；不可使用（POST /items/:id/use → NOT_USABLE）、
+    // 不可回收（shop 卖出 → NOT_SELLABLE，见 shop.data.ts）
     I('sky-key', 'Sky Key', '天空之钥', 'key'),
     I('ocean-key', 'Ocean Key', '海洋之钥', 'key'),
     I('magma-key', 'Magma Key', '熔岩之钥', 'key'),

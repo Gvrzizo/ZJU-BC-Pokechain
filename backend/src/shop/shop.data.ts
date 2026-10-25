@@ -12,9 +12,9 @@ import { getItemType, ITEM_TYPES } from '../game-data/items.data';
  * 不在此表里的道具（如 master-ball，仅作为奖励发放）既不出售、也不回收：
  * 购买抛 `NOT_FOR_SALE`，卖出抛 `NOT_SELLABLE`。
  *
- * 传说区钥匙（kind='key'，2026-09）：**上架但不回收**——每把 5000P 是长线积分 sink
- * （约等于月级目标），且钥匙是可交易的稀缺品，回收价会凭空造出积分 faucet。
- * 回收排除见 `shopSellPrice`。
+ * 传说区钥匙（kind='key'，2026-09；2026-10 H11 改为一次性）：**上架但不回收**——每把 1500P
+ * 换**一次**传说区遇敌机会（`POST /capture/encounter` 时消耗 1 把），定价按"数日积累"而非月级目标；
+ * 回收价会凭空造出积分 faucet（钥匙已被消耗掉），回收排除见 `shopSellPrice`。
  *
  * 跑鞋（`running-shoes`）：**既不上架也不回收**——它只由起始镇「妈妈」赠送
  * （POST /users/me/running-shoes，一次性幂等），既不是 sink 也不该被回收换成积分。
@@ -34,13 +34,14 @@ export const SHOP_PRICES: Readonly<Record<string, number>> = {
   'bottle-cap': 1200,
   'gold-bottle-cap': 6000,
   'rare-candy': 1000,
-  // 传说区钥匙（天空之柱 / 海底洞窟 / 熔岩洞窟 / 古代遗迹 / 南方孤岛 / 诞生之岛）
-  'sky-key': 5000,
-  'ocean-key': 5000,
-  'magma-key': 5000,
-  'ruins-key': 5000,
-  'island-key': 5000,
-  'birth-key': 5000,
+  // 传说区钥匙（天空之柱 / 海底洞窟 / 熔岩洞窟 / 古代遗迹 / 南方孤岛 / 诞生之岛）：
+  // 一次性门票（H11），每把只够创建一次传说区遇敌
+  'sky-key': 1500,
+  'ocean-key': 1500,
+  'magma-key': 1500,
+  'ruins-key': 1500,
+  'island-key': 1500,
+  'birth-key': 1500,
 };
 
 /** 单次买/卖的数量上限：积分才是真正的约束，这里只挡误操作与整数溢出。 */
@@ -54,7 +55,7 @@ export function shopPrice(typeId: string): number | undefined {
 /**
  * 回收价 = 半价向下取整（不足 1 取 1）；非卖品返回 undefined。
  * **钥匙（kind='key'）一律不可回收**（返回 undefined → 卖出抛 `NOT_SELLABLE`）：
- * 钥匙进捕只需持有、永不消耗，回收会让"买钥匙 → 卖回"变成免手续费往返，也会削弱稀缺性。
+ * 钥匙已在创建传说区遇敌时被消耗，回收会让"买钥匙 → 卖回"变成免手续费往返。
  */
 export function shopSellPrice(typeId: string): number | undefined {
   if (getItemType(typeId)?.kind === 'key') return undefined;

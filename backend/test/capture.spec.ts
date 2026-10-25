@@ -61,6 +61,7 @@ describe('CaptureService (mock chain)', () => {
     const capture = new CaptureService(chain, contract, redis);
     await registerPlayers(contract, 'ash');
     const ball = await mintBall(contract, 'ash', 'i_ball_ok', 'poke-ball', 3);
+    await mintBall(contract, 'ash', 'i_master_ok', 'master-ball', 1);
 
     const ash = userIdentity('ash');
     // encounter through the service: commit happens on-chain before derivation
@@ -76,6 +77,14 @@ describe('CaptureService (mock chain)', () => {
     expect(enc.wild.level).toBeGreaterThanOrEqual(2);
     expect(enc.wild.level).toBeLessThanOrEqual(6);
     expect(evolutionStage(enc.wild.speciesId)).toBe(0);
+    // 快速捕捉（无队伍降级路径）的球成功率由服务端下发：满血投球 p=min(1, catchRate*ballBonus/765)
+    const chances = Object.fromEntries(enc.captureChances.map((c) => [c.typeId, c]));
+    expect(chances['poke-ball']).toMatchObject({ itemId: ball.id, quantity: 3, ballBonus: 1 });
+    expect(chances['poke-ball'].chance).toBeCloseTo(
+      Math.min(1, (getSpecies(enc.wild.speciesId).catchRate * 1) / 765),
+      12,
+    );
+    expect(chances['master-ball'].chance).toBe(1);
     // 派生可复算：响应与会话里的 serverSeed 重建派生流，n=0/n=1 对得上
     const session = await redis.getJson<{ serverSeed: string }>(`capture:${enc.eventId}`);
     const stream0 = new DeriveStream(session!.serverSeed, enc.clientSeed!, enc.eventId);

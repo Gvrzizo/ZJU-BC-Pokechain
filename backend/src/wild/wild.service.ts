@@ -5,6 +5,7 @@ import { AppException } from '../common/utils/errors';
 import { DeriveStream, sha256hex } from '../common/utils/crypto.util';
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, PokemonState, SYSTEM_IDENTITY } from '../fabric/chain.types';
+import { resolveZone } from '../game-data/encounter.data';
 import { getItemType } from '../game-data/items.data';
 import { getMove, MoveDef } from '../game-data/moves.data';
 import { getSpecies, SpeciesDef } from '../game-data/species.data';
@@ -12,7 +13,7 @@ import { computeStats, emptyEvs, normalizeEvs } from '../game-data/stats';
 import { CaptureService } from '../pokemon/capture.service';
 import { CAPTURE_EXP_GAIN, PokemonService } from '../pokemon/pokemon.service';
 import { BondService } from '../ranked/bond.service';
-import { resolveOwnedBall } from '../pokemon/ball';
+import { ownedBallChances, resolveOwnedBall } from '../pokemon/ball';
 import {
   MASTER_BALL_BONUS,
   SHINY_CHANCE,
@@ -187,6 +188,8 @@ export class WildService {
       playerId: as.userId,
       serverSeed: captureSession.serverSeed,
       clientSeed: captureSession.clientSeed,
+      // 区域随会话落盘：传说区击倒 0 积分（H11），普通区 等级×1
+      zoneId: captureSession.zoneId,
       turn: 1,
       attempts: 0,
       status: 'ACTIVE',
@@ -568,8 +571,16 @@ export class WildService {
     }
   }
 
-  /** 击倒奖励：野怪等级 × 1 积分（reason=reward:wild-faint:<sessionId>，idemKey 按会话固定）。 */
+  /**
+   * 击倒奖励：普通区 野怪等级 × 1 积分（reason=reward:wild-faint:<sessionId>，idemKey 按会话固定）。
+   * **传说区固定 0 积分**（H11）：钥匙已是一次性门票，若击倒也发等级×1，会把传说区变成
+   * "买钥匙刷高分"的 faucet；收服仍照常 +20（见 grantCatchReward）。
+   */
   private async grantFaintReward(session: WildSession): Promise<void> {
+    if (resolveZone(session.zoneId)?.legendary) {
+      session.faintReward = 0;
+      return;
+    }
     const points = session.wild.level * WILD_FAINT_POINTS_PER_LEVEL;
     await this.contract.addPoints(
       SYSTEM_IDENTITY,
@@ -671,23 +682,7 @@ export class WildService {
 
   /** 当前各球的捕捉成功率（官方公式，随野怪 HP 变化）——每次状态返回都重算。 */
   private async captureChances(playerId: string, species: SpeciesDef, wild: WildCombatant) {
-    const items = await this.contract.queryItemsByOwner(playerId).catch(() => []);
-    return items
-      .filter((i) => i.status === 'IDLE' && i.quantity > 0 && getItemType(i.typeId)?.kind === 'ball')
-      .map((i) => {
-        const type = getItemType(i.typeId)!;
-        const bonus = type.ballBonus ?? 1;
-        return {
-          itemId: i.id,
-          typeId: i.typeId,
-          name: type.name,
-          nameZh: type.nameZh,
-          quantity: i.quantity,
-          ballBonus: bonus,
-          chance: captureProbability(wild.maxHp, wild.hp, species.catchRate, bonus),
-        };
-      })
-      .sort((a, b) => a.ballBonus - b.ballBonus);
+    return ownedBallChances(this.contract, playerId, wild.maxHp, wild.hp, species.catchRate);
   }
 
   private async view(session: WildSession) {

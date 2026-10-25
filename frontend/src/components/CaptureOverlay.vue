@@ -7,11 +7,9 @@ import type { WildActionEx, WildPartyMember, WildStateEx } from '@/api/wild';
 import { currentHpOf, isFainted } from '@/utils/pokemon-hp';
 import { playCry } from '@/game/cries';
 import {
-  ballInfo,
   chanceColor,
   formatChance,
   moveDetailText,
-  quickCaptureChance,
   statusLabel,
   wildLogText,
   wildResultText,
@@ -121,17 +119,22 @@ const expectedLevels = computed(() => {
   };
 });
 
-/** 降级路径的球列表：背包里的球 + 满血投球的成功率（后端 encounter 给出官方捕获率） */
-const quickBalls = computed(() =>
-  store.balls.map((item) => {
-    const info = ballInfo(item.typeId);
+/**
+ * 降级路径的球列表：背包里的球 + 服务端下发的满血投球成功率
+ * （`POST /capture/encounter` 的 `captureChances`；前端不再复算捕捉公式，避免两边漂移）。
+ */
+const quickBalls = computed(() => {
+  const chances = enc.value?.captureChances ?? [];
+  return store.balls.map((item) => {
+    const server = chances.find((c) => c.itemId === item.id) ?? chances.find((c) => c.typeId === item.typeId);
     return {
       item,
-      nameZh: info.nameZh,
-      chance: quickCaptureChance(enc.value?.wild.catchRate ?? 0, info.bonus),
+      nameZh: server?.nameZh ?? item.typeId,
+      chance: server?.chance,
+      known: !!server,
     };
-  }),
-);
+  });
+});
 
 const logLines = computed(() => {
   const s = state.value;
@@ -422,7 +425,11 @@ if (store.items.length === 0) {
               @click="throwQuick(b.item.id)"
             >
               {{ b.nameZh }} ×{{ b.item.quantity }}
-              <span class="wild-chance" :style="{ color: chanceColor(b.chance) }">
+              <span
+                v-if="b.known && b.chance !== undefined"
+                class="wild-chance"
+                :style="{ color: chanceColor(b.chance) }"
+              >
                 {{ formatChance(b.chance) }}
               </span>
             </PixelButton>

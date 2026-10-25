@@ -3,27 +3,11 @@ import { LEGENDARY_KEYS, type MapId } from './maps';
 
 /**
  * 传说区门口的钥匙校验：
- * - 钥匙是**非消耗品**（商店 `typeId`：sky-key / ocean-key / magma-key / ruins-key / island-key / birth-key）；
- * - 未持有钥匙时弹对话拦住（告诉玩家钥匙名与购买地点）；
- * - **记忆通行**：成功进入过一次后本机记住（localStorage），之后即使背包查询失败也放行。
- *
- * 抽成纯模块（storage 可注入），便于单测覆盖「有钥匙 / 没钥匙 / 已记忆」三条路径。
+ * - 钥匙是**一次性消耗品**（商店 `typeId`：sky-key / ocean-key / magma-key / ruins-key / island-key / birth-key），
+ *   进入时只校验持有；真正扣除发生在 `POST /capture/encounter` 创建传说区遇敌时（H11）。
+ * - 未持有钥匙时弹对话拦住（告诉玩家钥匙名与购买地点）。
+ * - **不记忆通行**：钥匙用掉后必须重新购买，门口每次进入都重新校验背包。
  */
-
-export const PASSAGE_STORAGE_PREFIX = 'pokechain.world.pass:';
-
-export interface KeyValueStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-function defaultStorage(): KeyValueStorage | null {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    return null;
-  }
-}
 
 export interface LegendaryKeyDef {
   typeId: string;
@@ -46,52 +30,17 @@ export function keyName(typeId: string): string | undefined {
   return localized === typeId ? def.name : localized;
 }
 
-export function hasPassage(mapId: MapId, storage: KeyValueStorage | null = defaultStorage()): boolean {
-  if (!storage) return false;
-  try {
-    return storage.getItem(PASSAGE_STORAGE_PREFIX + mapId) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function rememberPassage(mapId: MapId, storage: KeyValueStorage | null = defaultStorage()): void {
-  if (!storage) return;
-  try {
-    storage.setItem(PASSAGE_STORAGE_PREFIX + mapId, '1');
-  } catch {
-    /* 存不进去不影响本次进入 */
-  }
-}
-
-export function forgetPassages(storage: KeyValueStorage | null = defaultStorage()): void {
-  if (!storage) return;
-  try {
-    for (const mapId of Object.values(LEGENDARY_KEYS).flatMap((k) => k.maps)) {
-      storage.setItem(PASSAGE_STORAGE_PREFIX + mapId, '0');
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
 export type KeyGateStatus = 'pass' | 'granted' | 'locked';
 
 /**
  * 判定能否进入 `targetMapId`：
  * - 不需要钥匙 → `pass`
- * - 本机已记忆通行 → `pass`
- * - 背包持有钥匙 → `granted`（调用方随后 `rememberPassage`）
+ * - 背包持有钥匙 → `granted`（进门只校验持有；钥匙在创建遇敌时消耗）
  * - 否则 → `locked`（弹 `missingKeyLines` 的对话）
  */
-export function keyGateStatus(
-  targetMapId: MapId,
-  ownedTypeIds: Iterable<string>,
-  storage: KeyValueStorage | null = defaultStorage(),
-): KeyGateStatus {
+export function keyGateStatus(targetMapId: MapId, ownedTypeIds: Iterable<string>): KeyGateStatus {
   const key = keyForMap(targetMapId);
   if (!key) return 'pass';
-  if (hasPassage(targetMapId, storage)) return 'pass';
   for (const typeId of ownedTypeIds) {
     if (typeId === key.typeId) return 'granted';
   }
@@ -102,6 +51,6 @@ export function keyGateStatus(
 export function missingKeyLines(keyName: string): string[] {
   return [
     `需要 ${keyName} 才能进入。`,
-    `钥匙可以在未白镇的「道具店」购买（非消耗品，买一次就够，价格见货架）。`,
+    `钥匙可以在未白镇的「道具店」购买（一次性：创建一次传说区遇敌消耗 1 把）。`,
   ];
 }

@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ballInfo,
   chanceTone,
   formatChance,
   moveDetailText,
-  quickCaptureChance,
   statusLabel,
   wildLogText,
   wildResultText,
@@ -145,24 +143,6 @@ describe('statusLabel 与技能悬停说明', () => {
       '撞击（Thunder Shock）\n威力 40 · 命中 100 · electric · 特殊',
     );
     expect(moveDetailText('撞击', null)).toBe('撞击');
-  });
-});
-
-describe('无队伍降级路径的球表与满血捕捉率', () => {
-  it('球倍率/名称与后端 items.data 对齐', () => {
-    expect(ballInfo('poke-ball')).toEqual({ nameZh: '精灵球', bonus: 1 });
-    expect(ballInfo('great-ball').bonus).toBe(1.5);
-    expect(ballInfo('ultra-ball').bonus).toBe(2);
-    expect(ballInfo('master-ball').bonus).toBe(255);
-    // 未知球按 ×1 兜底，名称回退为 typeId
-    expect(ballInfo('beast-ball')).toEqual({ nameZh: 'beast-ball', bonus: 1 });
-  });
-
-  it('满血投球与后端 captureProbability(1,1,rate,bonus) 同式，大师球必中', () => {
-    expect(quickCaptureChance(190, 1)).toBeCloseTo(190 / 765, 12);
-    expect(quickCaptureChance(45, 2)).toBeCloseTo(90 / 765, 12);
-    expect(quickCaptureChance(45, 255)).toBe(1);
-    expect(quickCaptureChance(0, 1)).toBe(0);
   });
 });
 

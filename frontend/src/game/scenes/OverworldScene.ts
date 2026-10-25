@@ -7,7 +7,7 @@ import { useWorldStore, readStoredSpawn } from '@/stores/world';
 import { zoneHint, zoneById, zoneLabel } from '@/stores/zone';
 import { BUS_EVENTS, gameBus } from '../bus';
 import { DialogSession } from '../dialog';
-import { keyForMap, keyGateStatus, keyName, missingKeyLines, rememberPassage } from '../gates';
+import { keyForMap, keyGateStatus, keyName, missingKeyLines } from '../gates';
 import {
   hasRunningShoes,
   isRunning,
@@ -81,7 +81,7 @@ const BIOME_BG: Record<BiomeId, string> = {
  * - **遇敌**：只有地图 `encounter.tiles` 列出的地形会触发（镇内没有配置），
  *   触发前把当前区域写进 world store（CaptureOverlay 据此请求后端决定野生池与等级）。
  * - **交互**：面向 NPC / 路牌按空格（或 Z / 回车）对话；踩到门口触发治疗、道具店跳转；
- *   传说区门口校验钥匙道具（`gates.ts`），没钥匙弹对话拦住；
+ *   传说区门口校验钥匙道具（`gates.ts`）：门口只查是否持有，钥匙在创建遇敌时消耗；没钥匙弹对话拦住；
  *   带 `event: 'running-shoes'` 的 NPC（妈妈）对话结束后走领取流程。
  * - **HUD**：区域名 / 等级带 / 传说提示 / 跨图横幅都交给 Vue（`WorldHud.vue` 读 world store），
  *   场景只负责写状态，样式与布局在 Vue 侧维护。
@@ -321,19 +321,19 @@ export class OverworldScene extends Phaser.Scene {
     void this.gateCheck(warp, keyType);
   }
 
-  /** 门口钥匙校验：已记忆通行 → 放行；背包有钥匙 → 记住并放行；否则弹对话拦住 */
+  /**
+   * 门口钥匙校验：只查**当前持有**（不做“记忆通行”）。
+   * 钥匙是一次性的（H11）：真正扣除发生在创建传说区遇敌时，所以门口看到钥匙就放行；
+   * 用掉后重进会被拦下，需要回未白镇道具店再买。
+   */
   private async gateCheck(warp: WarpDef, keyTypeId: string) {
     const name = keyName(keyTypeId) ?? '钥匙';
-    let status = keyGateStatus(warp.to.mapId, []);
-    if (status !== 'pass') {
-      status = keyGateStatus(warp.to.mapId, await this.fetchOwnedItemTypeIds());
-    }
+    const status = keyGateStatus(warp.to.mapId, await this.fetchOwnedItemTypeIds());
     if (status === 'locked') {
       this.busy = false;
       this.openDialog('门', missingKeyLines(name));
       return;
     }
-    rememberPassage(warp.to.mapId);
     // 取物期间玩家可能已经走开：只有还站在传送格上才传
     if (this.tilePos.x !== warp.x || this.tilePos.y !== warp.y) {
       this.busy = false;

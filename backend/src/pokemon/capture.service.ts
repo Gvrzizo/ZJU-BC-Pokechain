@@ -5,12 +5,12 @@ import { AppException } from '../common/utils/errors';
 import { DeriveStream, sha256hex } from '../common/utils/crypto.util';
 import { ChainAdapter } from '../fabric/chain.adapter';
 import { ContractService } from '../fabric/contract.service';
-import { ChainIdentity, SYSTEM_IDENTITY } from '../fabric/chain.types';
+import { ChainIdentity, ItemState, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { ZONE_IDS, ZoneDef, ZoneId, resolveZone, zoneSpeciesIds } from '../game-data/encounter.data';
 import { getItemType } from '../game-data/items.data';
 import { getSpecies } from '../game-data/species.data';
 import { computeStats, normalizeEvs } from '../game-data/stats';
-import { resolveOwnedBall } from './ball';
+import { ownedBallChances, resolveOwnedBall } from './ball';
 import { CATCH_REWARD_POINTS, catchRewardReason } from './points-economy';
 import { SHINY_CHANCE, computeDnaHash, deriveAttempt, deriveWild, lureSpec } from './capture-derive';
 import { grantLegendaryDexReward } from './legendary-reward';
@@ -159,7 +159,8 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
       );
     }
     // 传说区门控（docs/backend-api.md §2「传说区」）：禁止诱饵 + 钥匙 + 每人每池一只。
-    // 全部校验先于 Commit 与任何扣费：被拒时链上不留痕、积分不变。
+    // 全部校验先于 Commit 与任何扣费：被拒时链上不留痕、钥匙/积分不变。
+    let legendaryKey: ItemState | undefined;
     if (zone.legendary) {
       if (tier > 0) {
         throw new AppException(
@@ -168,7 +169,7 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
           HttpStatus.BAD_REQUEST,
         );
       }
-      await this.assertLegendaryAccess(as, zone);
+      legendaryKey = await this.assertLegendaryAccess(as, zone);
     }
     const serverSeed = randomBytes(32).toString('hex');
     const clientSeed = clientSeedInput && /^[0-9a-f]{8,64}$/i.test(clientSeedInput)
@@ -182,7 +183,16 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
       ...(lure.cost > 0 ? { lureTier: tier, cost: lure.cost } : {}),
     });
 
-    // 0) paid lure: debit the points first (admin/system identity like /pokemon/:id/train),
+    // 0) one-shot key (H11): a legendary-zone encounter consumes exactly one key after the
+    //    gate checks above and before Commit. Both the quick-capture and wild-battle paths
+    //    start from /capture/encounter, so this is the single consumption point.
+    if (legendaryKey) {
+      await this.contract.consumeItem(as, legendaryKey.id, 1, 'legendary-key', {
+        idemKey: `${eventId}-legendary-key`,
+      });
+    }
+
+    // 0b) paid lure: debit the points first (admin/system identity like /pokemon/:id/train),
     //    then bind {lureTier, cost} into the on-chain Commit meta so /fairness can audit it.
     if (lure.cost > 0) {
       await this.contract.addPoints(SYSTEM_IDENTITY, as.userId, -lure.cost, `lure:tier${tier}`, {
@@ -201,12 +211,28 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
         meta,
       });
     } catch (err) {
-      // 承诺失败（极少见）→ 尽力退还诱饵费用，避免玩家白扣分
+      // 承诺失败（极少见）→ 尽力退还诱饵费用与钥匙，避免玩家白扣
       if (lure.cost > 0) {
         await this.contract
           .addPoints(SYSTEM_IDENTITY, as.userId, lure.cost, `lure-refund:tier${tier}`, {
             idemKey: `${eventId}-lure-refund`,
           })
+          .catch(() => undefined);
+      }
+      if (legendaryKey) {
+        await this.contract
+          .mintItem(
+            SYSTEM_IDENTITY,
+            {
+              id: `i_${randomUUID()}`,
+              playerId: as.userId,
+              typeId: legendaryKey.typeId,
+              quantity: 1,
+              uri: getItemType(legendaryKey.typeId)?.uri ?? '',
+              metadataHash: sha256hex(`legendary-key-refund|${eventId}`),
+            },
+            { idemKey: `${eventId}-legendary-key-refund` },
+          )
           .catch(() => undefined);
       }
       throw err;
@@ -215,6 +241,9 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
     const stream = new DeriveStream(serverSeed, clientSeed, eventId);
     const { species, level } = deriveWild(stream, zone, lure.levelBonus);
     const shinyChance = SHINY_CHANCE * lure.shinyMultiplier;
+    // 快速捕捉（无队伍降级路径）的球成功率由服务端算好下发（满血投球 = captureProbability(1,1,...)），
+    // 前端不再复算公式，避免两侧漂移。
+    const captureChances = await ownedBallChances(this.contract, as.userId, 1, 1, species.catchRate);
 
     const session: CaptureSession = {
       playerId: as.userId,
@@ -253,6 +282,7 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
         catchRate: species.catchRate,
       },
       lure: { tier, cost: lure.cost, levelBonus: lure.levelBonus, shinyMultiplier: lure.shinyMultiplier },
+      captureChances,
       commitHash,
       clientSeed,
     };
@@ -260,16 +290,19 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * 传说区进入校验（docs/backend-api.md §2「传说区门控」）：
-   * ① 背包里有对应钥匙——本人名下 `status=IDLE`、`quantity≥1` 的该 typeId 堆叠，**不消耗**；
-   *    没有则 403 `KEY_REQUIRED`（消息同时带 typeId 与中文名）。
+   * ① 背包里有对应钥匙——本人名下 `status=IDLE`、`quantity≥1` 的该 typeId 堆叠；
+   *    **钥匙是一次性门票**：校验通过后调用方在 Commit 前消耗 1 把（reason=`legendary-key`）。
+   *    没有则 403 `KEY_REQUIRED`（消息同时带 typeId 与中文名），不消耗任何道具。
    * ② 本人**尚未拥有**该区任一传说种族——`QueryByOwner` 按 speciesId 过滤（含交易/对战锁定中）；
-   *    已拥有则 409 `LEGENDARY_OWNED`。放生（ownerId 置空）或交易走后即可再来（每人每池一只）。
+   *    已拥有则 409 `LEGENDARY_OWNED`（钥匙不消耗）。放生（ownerId 置空）或交易走后即可再来（每人每池一只）。
+   *
+   * 返回用于消耗的钥匙堆叠（调用方消费 1 个）。
    */
-  private async assertLegendaryAccess(as: ChainIdentity, zone: ZoneDef): Promise<void> {
+  private async assertLegendaryAccess(as: ChainIdentity, zone: ZoneDef): Promise<ItemState> {
     const keyTypeId = zone.keyTypeId;
     const keyType = keyTypeId ? getItemType(keyTypeId) : undefined;
     const stacks = await this.contract.queryItemsByOwner(as.userId);
-    const held = stacks.some((item) => item.typeId === keyTypeId && item.status === 'IDLE' && item.quantity >= 1);
+    const held = stacks.find((item) => item.typeId === keyTypeId && item.status === 'IDLE' && item.quantity >= 1);
     if (!held) {
       throw new AppException(
         'KEY_REQUIRED',
@@ -288,6 +321,7 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
         HttpStatus.CONFLICT,
       );
     }
+    return held;
   }
 
   async attempt(as: ChainIdentity, eventId: string, ballItemId: string) {

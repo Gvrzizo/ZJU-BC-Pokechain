@@ -72,32 +72,6 @@ export interface WildLogEvent extends Omit<WildBattleEvent, 'kind'> {
   kind: WildBattleEventKind;
 }
 
-/**
- * 球倍率与显示名（与 `backend/src/game-data/items.data.ts` 对齐）。
- * 仅"无队伍降级路径"（没有可出战宝可梦时的快速捕捉）在链下复算成功率时使用。
- */
-export const BALL_TABLE: Record<string, { nameZh: string; bonus: number }> = {
-  'poke-ball': { nameZh: '精灵球', bonus: 1 },
-  'great-ball': { nameZh: '超级球', bonus: 1.5 },
-  'ultra-ball': { nameZh: '高级球', bonus: 2 },
-  'master-ball': { nameZh: '大师球', bonus: 255 },
-};
-
-export function ballInfo(typeId: string): { nameZh: string; bonus: number } {
-  return BALL_TABLE[typeId] ?? { nameZh: typeId, bonus: 1 };
-}
-
-/**
- * 快速捕捉（无队伍降级路径）= 满血投球，与后端
- * `captureProbability(1, 1, catchRate, ballBonus)` 同式：`p = min(1, catchRate × ballBonus / 765)`。
- * 大师球（≥255）必中。有队伍时请用后端返回的 `captureChances`（含野怪当前 HP）。
- */
-export function quickCaptureChance(catchRate: number, ballBonus: number): number {
-  if (ballBonus >= 255) return 1;
-  if (!Number.isFinite(catchRate) || catchRate <= 0) return 0;
-  return Math.min(1, (catchRate * ballBonus) / 765);
-}
-
 function moveName(detail: Record<string, unknown>, ctx: WildLogContext): string {
   const id = typeof detail.move === 'string' ? detail.move : '';
   return ctx.moveNames?.[id] ?? id ?? '技能';

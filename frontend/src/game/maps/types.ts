@@ -60,7 +60,7 @@ export interface WarpDef {
   to: { mapId: MapId; x: number; y: number };
   kind: WarpKind;
   /**
-   * 需要持有的钥匙道具 typeId（**非消耗品**，商店有售）。
+   * 需要持有的钥匙道具 typeId（**一次性消耗品**：每次在对应传说区创建遇敌消耗 1 把，商店有售）。
    * 未持有且本机没有记忆过通行时，弹对话拦住（"需要 天空之钥 才能进入"）。
    */
   requiresItem?: string;

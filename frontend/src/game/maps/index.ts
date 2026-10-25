@@ -93,7 +93,7 @@ export const BIOMES: readonly BiomeId[] = [
 ];
 
 /**
- * 传说区钥匙：进入特殊区的门口要持有对应道具（**非消耗品**，商店有售）。
+ * 传说区钥匙：进入特殊区的门口要持有对应道具（**一次性**，创建传说区遇敌时消耗，商店有售）。
  * typeId 与后端 `items.data.ts` 的钥匙道具一致（`kind: 'key'`），显示名优先取 locales 的
  * `items[typeId]`（`gates.keyName`），这里的 `name` 只是兜底文案。
  */
