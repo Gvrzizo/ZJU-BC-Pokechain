@@ -7,39 +7,47 @@
 
 ---
 
-## ★ 执行进度（2026-10-25 更新，后续会话从这里继续）
+## ★ 执行进度（2026-10-25 P1 批次后，后续会话从这里继续）
 
 > 本文件是执行清单；下面记录**实际进度**，未完成的包保持原文不变，按 §0.2 继续。
 
-- **分支**：`fix/review-p0` 已 `--no-ff` 合并回 `main`（合并提交 `b30a9d7`）；**未推送远端**（`origin/main` 仍是合并前）。
-- **当前测试基线（实测）**：链码 **101**（8 套）+ tsc、后端 **385**（33 套）、前端 **200**（33 文件）；`git status` 干净。
-- **已完成**：P0-1（C1）、P0-2（C2/C3）、P0-3（C5）、P0-5（C6）、P0-6（H1/H2）。
-- **未开始**：P0-4（C4 真链部署，按要求后置）、P1-1 ~ P1-7、P2-1 ~ P2-3。
-- **下一步**：按 §1 顺序先做 **P1-1（H3/H4：PvP 经验 + 排行榜事件）**；C4 与经济仍按产品决策决定何时插入。
+- **分支**：`fix/review-p1` 已 `--no-ff` 合并回 `main`（合并提交 `<merge>`）；**未推送远端**（`origin/main` 仍是 P0 后状态）。
+- **当前测试基线（实测）**：链码 **102**（8 套）+ tsc、后端 **411**（37 套）、前端 **207**（35 文件）；Mock e2e **25/25**（重建容器后）；`git status` 干净。
+- **已完成**：P0-1（C1）、P0-2（C2/C3）、P0-3（C5）、P0-5（C6）、P0-6（H1/H2）；**P1-1 ~ P1-7 全部完成**。
+- **未开始**：P0-4（C4 真链部署，按要求后置）、P2-1（经济重平衡）、P2-2（架构与双链对拍）、P2-3（前端边角）。
+- **下一步**：P2-1 经济重平衡（需要产品决策，先按 §P2-1 的 1-2 项小步走）；P2-2 的对拍/事件类型可独立开工；C4 真链按 §4 单独安排，不要在未验证前宣称真链通过。
 
-### 已完成包的语义变化（后续包必须先知道）
+### P1 已完成包的语义变化（后续包必须先知道）
 
-1. **身份**：链码「本人」= 证书 `hf.EnrollmentID` == `playerId`，mspId 不再参与；`RegisterPlayer` 仅 `admin|system`。链码测试 harness 用 `World.ctxAs(playerId)`，缺属性用 `World.ctx(mspId)` 验证拒绝。
-2. **铸造/养成**：`MintFromCapture` / `RevealAndVerify` / `ApplyGrowth` 三条写入 **system-only**；`POST /pokemon/:id/moves/learn` 已删除，技能只来自升级学习表 + TM（TM 写链走 `SYSTEM_IDENTITY`）。→ **P1-3 只剩 H7（锁定资产先消耗）**。
-3. **交易锁**：`CreateTrade` 只锁 `offer`；`request` 在双确认执行时才校验归属/`IDLE` 并交换；`unlockTradeAssets` 仍双端解锁（旧交易兼容）；`ttlSeconds` 上限 7 天（DTO + 链码）。→ 后续涉及交易的测试/前端**不要**再假设 `request` 被锁。
-4. **对战结果**：`Forfeit` 现在会写 `result.winnerId` + 确定性 `resultHash` + `serverSubmitted`（已有 `SubmitResult` 签名时不覆盖）。→ **P1-1（H4）只需补 `BattleSettled.playerA/B` 与 `PointsChanged`**。
-5. **详情与队伍**：`GET /pokemon/:id` 仅本人（非本人/不存在统一 404）；房间与排位的队伍校验统一 `assertTeamSize + assertTeamUnique`（`INVALID_TEAM_SIZE` / `DUPLICATE_TEAM`）。
-6. **真链 e2e 未重跑**：C4 未做（评审环境的 ccaas 服务已停），P0-4 完成后按 §5.3 验证；不要在未验证前宣称真链通过。
+1. **普通 PvP 经验**：排位房与大厅房间的胜者参战队伍每只 +30 exp；机器人场仍 +15。`BattleRewardService.settle` 在 bonds 后、ranked 前发放，幂等键 `<battleId>-exp-<pokemonId>`。链码 `settle` 为双方发 `PointsChanged`，`BattleSettled` 带 `playerA/playerB`；积分榜监听 `playerId/playerA/playerB/winnerId/fromId/toId`。→ 后续涉及结算/排行榜的测试不要只发 `BattleSettled`（还要覆盖 `PointsChanged`）。
+2. **房间启动补偿**：`BattleRoom.status` 新增 `STARTING|FAILED`；押注双确认先写 `battleId+STARTING`。链码新增 `CancelBattle`（system、CREATED→REFUNDED，`result.winnerId='REFUND'`、`resultHash=sha256("cancel|<id>|<reason>")`）；对账对 CREATED 直接取消退款（不再先激活再 DRAW）。`settleAbandoned` 对 CREATED 走 `CancelBattle`。→ 后续房间测试不要假设 CREATED 一定被激活。
+3. **锁定先校验（H7）**：`PokemonService.mustOwn` 与 `ItemsService.mustOwnPokemon` 现在都要求 `status=IDLE`，训练/改名/进化/放生/伤药/石头/TM/王冠/糖果在消耗前拒绝 `ASSET_LOCKED`。→ 不再需要在各分支重复检查，但新增写入路径要复用这两个入口。
+4. **错误映射（H8）**：非 `HttpException` 的 `CODE: message` 由 `CHAIN_HTTP_STATUS` 映射；未收录保持 500。shop 已去本地映射表。→ 新增链码错误码时同步表，否则真链会 500。
+5. **结算后揭示（H9）**：快速捕捉只在投中时 reveal；野怪在终态 reveal；`capture:pending` 5 分钟 sweep 补揭示放弃的会话。`/fairness` 对 COMMITTED 返回 `revealed:false` 且不返回 serverSeed/resultHash。→ e2e/前端不要假设首球后能查 seed；失败投球后链上仍是 COMMITTED。
+6. **前端四修（H14-H17）**：交易确认按 username；`battle:join` 补发当前 turn；Socket auth 每次重连取当前 token；refresh 5s 超时。→ 交易/战斗 UI 测试不要再用 UUID 断言 sender。
+7. **签名密钥（H19）**：`SERVER_SIGNING_KEY` 固定时 keyId 稳定，`/fairness` 返回 `serverKeyId`，`battle_logs.server_key_id` 落库。→ 生产/真链必须设置；本地空值会告警。
 
 ### 提交对照
 
 | 批次 | 提交 | 说明 |
 |---|---|---|
-| 前置 | `e0dc8f2` | 消除 PvP 伤势用例对 90% 命中率的随机抖动（否则三套测试会间歇红） |
+| 前置 | `e0dc8f2` | 消除 PvP 伤势用例对 90% 命中率的随机抖动 |
 | P0-1 | `8521ccb` | `hf.EnrollmentID` 校验 + `RegisterPlayer` 收紧 + harness/负向用例 |
 | P0-2 | `d3d87d9` | 铸造/揭示/养成 system-only；免费学技能入口下线；TM 写链改 system |
 | P0-3 | `33f7b89` | 交易只锁 offer + 执行期校验 + TTL 上限；Mock 先预检后锁 |
 | P0-5 | `075467e` | `Forfeit` 写 winner/resultHash |
 | P0-6 | `0782069` | 详情 BOLA 404 + 队伍去重 `DUPLICATE_TEAM` |
 | 文档 | `dc20e3c` | 收录评审报告与本指导 |
+| P1-1 | `f4f5731` | PvP 胜利经验 + 结算 PointsChanged/BattleSettled 事件 + 排行榜刷新 |
+| P1-2 | `ed527bf` | 房间启动补偿 + `CancelBattle` + 对账/大厅状态 |
+| P1-3 | `74f7c20` | 锁定资产先校验（训练/道具/进化/放生） |
+| P1-4 | `800c205` | 链码错误码 → HTTP 映射 + shop 统一 |
+| P1-5 | `d00e8e3` | 结算后揭示 + 放弃会话 sweep + fairness 裁剪 |
+| P1-7 | `73d8024` | `SERVER_SIGNING_KEY` 持久化 + keyId |
+| P1-6 | `efe854f` | 交易确认/战斗重连/刷新超时 |
+| 合并 | `<merge>` | `fix/review-p1` --no-ff 合并回 main |
 
 ---
-
 
 ## 0. 开始前必读
 
@@ -74,7 +82,7 @@
 - 端口：前端 8080、后端 3000、PG 5432、Redis 6379；Fabric peer 7051/9051、CA 7054/8054。
 - 默认应用栈：`docker compose up -d --build`，`FABRIC_MOCK=true`。
 - 基线测试：链码 88、后端 367、前端 200；Mock e2e 25/25。
-- **当前（2026-10-25 P0 批次后）**：链码 101、后端 385、前端 200（见文首「执行进度」）。
+- **当前（2026-10-25 P1 批次后）**：链码 102、后端 411、前端 207（见文首「执行进度」）。
 - 真链：见 §4；评审已证明“修 4 处后可 25/25”，但也证明“开箱即用不成立”。
 
 ### 0.4 当前评审环境说明
@@ -97,13 +105,13 @@
 | P0-4 | C4 | 真链 CA/系统身份/链码部署 | Critical（部署） | 1-2d | P0-2 | ⏳ 后置（产品决策） |
 | P0-5 | C6 | `Forfeit` 写入 winner/result | High | 0.5h | 无 | ✅ `075467e` |
 | P0-6 | H1/H2 | 宝可梦详情 BOLA + 队伍去重 | High | 0.5d | 无 | ✅ `0782069` |
-| P1-1 | H3/H4 | PvP 经验 + 排行榜事件 | High | 1d | P0-5 | ⏳ 下一步 |
-| P1-2 | H5 | 房间启动失败补偿（含 `CancelBattle`） | High | 1-1.5d | P0-5 | ⏳ |
-| P1-3 | H6/H7 | 免费学技能 + 锁定资产先消耗 | High | 1d | P0-2 | ⏳ H6 已随 P0-2 完成，仅剩 H7 |
-| P1-4 | H8 | 链上错误码 → HTTP 映射 | High | 0.5d | 无 | ⏳ |
-| P1-5 | H9 | 首球 reveal 改为结算后 reveal | High | 1-2d | P0-2 | ⏳ |
-| P1-6 | H14-H17 | 前端交易/战斗重连/刷新 | High | 1d | P1-1/P1-2 | ⏳ |
-| P1-7 | H19 | `SERVER_SIGNING_KEY` 持久化 | Medium | 0.5d | 无 | ⏳ |
+| P1-1 | H3/H4 | PvP 经验 + 排行榜事件 | High | 1d | P0-5 | ✅ `f4f5731` |
+| P1-2 | H5 | 房间启动失败补偿（含 `CancelBattle`） | High | 1-1.5d | P0-5 | ✅ `ed527bf` |
+| P1-3 | H6/H7 | 免费学技能 + 锁定资产先消耗 | High | 1d | P0-2 | ✅ `74f7c20`（H6 随 P0-2） |
+| P1-4 | H8 | 链上错误码 → HTTP 映射 | High | 0.5d | 无 | ✅ `800c205` |
+| P1-5 | H9 | 首球 reveal 改为结算后 reveal | High | 1-2d | P0-2 | ✅ `d00e8e3` |
+| P1-6 | H14-H17 | 前端交易/战斗重连/刷新 | High | 1d | P1-1/P1-2 | ✅ `efe854f` |
+| P1-7 | H19 | `SERVER_SIGNING_KEY` 持久化 | Medium | 0.5d | 无 | ✅ `73d8024` |
 | P2-1 | H10-H13 | 经济重平衡（注册/钥匙/竞技场/大师球/价格） | High（经济） | 2-3d | P1 全绿 | ⏳ 后置（经济） |
 | P2-2 | — | Mock/链码对拍、事件类型、@Global、BondModule | 架构 | 2-3d | P0/P1 | ⏳ |
 | P2-3 | H18/H20 | 前端边角、admin 真链身份 | Medium | 0.5-1d | P1 | ⏳ |
@@ -1000,7 +1008,7 @@ BASE_URL=http://localhost:3100 ./scripts/e2e-smoke.sh
 
 ### 5.4 Definition of Done
 
-> 进度（2026-10-25）：P0 安全批次 5/6 完成（C4 后置），Mock e2e 与真链 e2e 尚未重跑；P1/P2 全部未开始。
+> 进度（2026-10-25）：P0 安全批次 5/6 完成（C4 后置）、P1 批次 7/7 完成；Mock 栈重建后 **e2e 25/25** 通过，真链 e2e 仍待 C4。
 
 - [ ] P0-1 ~ P0-6 全部完成，负向测试覆盖。
 - [ ] 三套测试全绿；测试计数更新到 `AGENTS.md`（不要照抄旧值）。
@@ -1049,7 +1057,7 @@ docs: 更新 AGENTS 与部署/契约文档
 
 1. `git status`，确认只有 `docs/review-2026-10-25.md` 未跟踪；`git checkout -b fix/review-p0`。
 2. 读 `AGENTS.md` + 评审报告 §2.1/§2.3/§3。
-3. 跑基线：链码 88、后端 367、前端 200；Mock e2e 25/25。
+3. 跑基线：链码 102、后端 411、前端 207；Mock e2e 25/25。
 4. 打开 `chaincode/pokemon-cc/src/common/state.ts` 和 `tests/helpers/harness.ts`，先写一个“B 不能转 A 积分”的失败用例。
 5. 实现 P0-1 的 `getEnrollmentId` + `assertCallerIsPlayer`；改 harness；跑到绿。
 6. 加 P0-5 的 `Forfeit` 用例 + 3 行修复；跑到绿。
