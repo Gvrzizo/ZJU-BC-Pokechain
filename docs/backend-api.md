@@ -329,7 +329,7 @@ p = min(1, a / 255)                                                   // 大师�
 | GET | `/battles/templates` | 常用押注模板 `{templates:[{id, name, note, wager, createdAt}]}`（每用户最多 10 个） |
 | POST | `/battles/templates` | 存模板 `{name(≤30), note?, wager}`；超过 10 个 → 409 `TEMPLATE_LIMIT` |
 | DELETE | `/battles/templates/:id` | 删模板（非本人 / 不存在 → 404 `TEMPLATE_NOT_FOUND`） |
-| POST | `/battles/:id/wager/confirm` | 双方确认押注清单；第二次确认时：服务端算 wagerHash → 链码 `CreateBattle`（锁定+escrow）→ `ActivateBattle` → 创建 Socket.IO 房间 |
+| POST | `/battles/:id/wager/confirm` | 双方确认押注清单；第二次确认时：**先生成 battleId 并把房间置 `STARTING`** → 链码 `CreateBattle`（锁定+escrow）→ `ActivateBattle` → 创建 Socket.IO 房间；任何一步失败按 H5 规则补偿（见下「启动失败补偿」），不会把资产锁在链上而本地没有 battleId |
 | POST | `/battles/:id/result/confirm` | 双方各确认一次对战结果 → 链码 `ConfirmResult`；第二次确认即 SETTLED（押注资产交付）。前端收到 `battle:end` 后自动调用，见下 |
 | POST | `/battles/:id/forfeit` | 主动认输 → 链码 `Forfeit(loser=自己)` |
 | POST | `/battles/:id/dispute` | `{reason}` → `Dispute` |
@@ -444,8 +444,9 @@ p = min(1, a / 255)                                                   // 大师�
   （`poke:hp` 只被野怪战斗读写，见 §2「伤势持久化」）；濒死校验仍在**报名/提交队伍**时生效。
 - 规则：**服务端权威**计算（简化回合制：速度决定先手、属性克制表、命中/暴击用该 battle 的 RandomCommit 派生流、**能力阶级/异常状态已落地**（见 §2「技能特效」，burn/psn/par 三种，掷点顺序 麻痹→命中→暴击→浮动→追加效果））；每回合 30s 超时 → 超时方判负走 `Forfeit`；掉线 60s 未重连判负；结束后服务端 `SubmitResult(resultHash=sha256(canonical(回合日志)), serverSig=secp256k1 签名)` → **前端双方客户端收到 `battle:end` 后自动** `ConfirmResult`（结算面板显示"已确认 x/2，等待对方确认"；自动确认失败时给手动"确认结算"按钮；SETTLED 后提示"押注已交付"并刷新背包/积分）→ 二次确认即链上 SETTLED；2 分钟（`BATTLE_SETTLE_FALLBACK_MS`）无人确认时服务端 `SettleBattle` 兜底。
 - **入场宽限（`BATTLE_ENTRY_GRACE_MS`，默认 90s）**：战斗激活后双方各自 `battle:join` 视为到场，**双方都到齐才启动 30s 回合计时**（宽限期内不发 `battle:turn`）；宽限结束时仍有一方未到场 → 该方 `Forfeit` 判负（押注归对方，非 DRAW），双方都没到场才判 DRAW。战斗开始后掉线仍按 60s 判负。
-- **房间生命周期**：房间在其 battle 进入终态（SETTLED/REFUNDED）后立即置为 FINISHED 并从 `GET /battles/rooms` 列表剔除（含引擎自行结束的路径与重启/结算兜底后的对账）；`ACTIVE` 房间仅对当事双方显示"回到战斗"重连入口，重连失败（`BATTLE_NOT_LIVE`）时前端提示"该对局已结束或已清理"并自动退回大厅、刷新列表。
-- **重启对账**：内存引擎随进程消失后，后端启动即按链上状态对账 Redis 房间——`SETTLED`/`REFUNDED`/`DISPUTED`/链上已无此 battle → 关房出列；`RESULT_SUBMITTED` → 直接 `SettleBattle` 兜底；`ACTIVE`（引擎已丢）与未激活的 `CREATED` → `SubmitResult(DRAW)` + `SettleBattle` 按"服务中断"退款（resultHash 前缀 `server-restart`，链下半审计日志 `battle.reconcile`），双方资产/积分原路退回并解锁；单个房间失败仅记日志，不阻塞启动。运行期 `GET /battles/rooms` 对"`ACTIVE` 但本进程无引擎且超过 `BATTLE_RECONCILE_STALE_MS`（默认 10 分钟）"的房间同样隐藏并触发一次后台对账（未超时的房间保留"回到战斗"入口，供重启后短时间内重连）。
+- **房间生命周期**：房间在其 battle 进入终态（SETTLED/REFUNDED）后立即置为 FINISHED 并从 `GET /battles/rooms` 列表剔除（含引擎自行结束的路径与重启/结算兜底后的对账）；`ACTIVE` 房间仅对当事双方显示"回到战斗"重连入口，重连失败（`BATTLE_NOT_LIVE`）时前端提示"该对局已结束或已清理"并自动退回大厅、刷新列表。瞬态 `STARTING`（已生成 battleId、正在链上建局/起引擎）与补偿失败的 `FAILED` 不进入大厅列表，避免出现点不进去的房间。
+- **启动失败补偿（H5，2026-10-25）**：押注双确认后先落 `battleId + STARTING` 再调链。`CreateBattle` 失败时先读链：链上确认不存在 → 房间回 `JOINED`、清 `battleId`，双方可重试；结果未知（网络超时/链不可读）或链上已存在 → 走补偿。`ActivateBattle`/读队伍/起引擎失败 → 按链上状态补偿：`CREATED` 调 `CancelBattle` 全额退款（→REFUNDED）、`ACTIVE` 调 `settleAbandoned` 以 DRAW 退款（→SETTLED）。补偿成功房间置 `FINISHED`；补偿本身失败（链不可读）置 `FAILED` 并保留 `battleId`，由对账重试，资产不会永久冻结。
+- **重启对账**：内存引擎随进程消失后，后端启动即按链上状态对账 Redis 房间——`SETTLED`/`REFUNDED`/`DISPUTED`/链上已无此 battle → 关房出列；`RESULT_SUBMITTED` → 直接 `SettleBattle` 兜底；`CREATED`（含 `STARTING`/`FAILED` 残留）→ `CancelBattle` 全额退款（→REFUNDED，`resultHash=sha256("cancel|<id>|server-restart")`）；`ACTIVE`（引擎已丢）→ `SubmitResult(DRAW)` + `SettleBattle` 按"服务中断"退款（resultHash 前缀 `server-restart`，链下半审计日志 `battle.reconcile`）；双方资产/积分原路退回并解锁；单个房间失败仅记日志，不阻塞启动。运行期 `GET /battles/rooms` 对"`ACTIVE` 但本进程无引擎且超过 `BATTLE_RECONCILE_STALE_MS`（默认 10 分钟）"以及"`STARTING` 但本进程无引擎"的房间隐藏并触发一次后台对账（未超时的 ACTIVE 房间保留"回到战斗"入口，供重启后短时间内重连）。
 - 战斗 RandomCommit：wager 双方确认后由服务端 `Commit(purpose='battle')`，结束时 `RevealAndVerify`，保证全程判定可审计。
 
 ## 6. 资源与公平性

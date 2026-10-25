@@ -400,6 +400,40 @@ export class BattleContract extends Contract {
     });
   }
 
+  /**
+   * 取消尚未激活的对局（H5 房间启动失败补偿）：system only、CREATED → 全额退款。
+   * 与仲裁 REFUND 同结算语义（资产解锁归还、escrow 原路退回），但不需要先 SubmitResult；
+   * 结果字段写入确定性的 cancel 标记，便于审计与前端识别（→REFUNDED）。
+   */
+  @Transaction()
+  public async CancelBattle(ctx: Context, id: string, reason: string, nowISO: string, idemKey: string): Promise<string> {
+    return withIdempotency(ctx, idemKey, nowISO, async () => {
+      requireRole(ctx, 'system');
+      requireNonEmpty(reason, 'reason');
+      assertISO(nowISO, 'nowISO');
+      const battle = await loadBattle(ctx, id);
+      if (battle.status !== 'CREATED') {
+        fail('BAD_STATE', `battle ${id} is ${battle.status}, expected CREATED`);
+      }
+      await settle(ctx, battle, 'REFUND', nowISO);
+      battle.status = 'REFUNDED';
+      battle.result.winnerId = 'REFUND';
+      battle.result.resultHash = sha256hex(`cancel|${battle.id}|${reason}`);
+      battle.result.serverSubmitted = true;
+      battle.arbiterNote = `CANCEL: ${reason}`;
+      await saveBattle(ctx, battle);
+      emit(ctx, 'BattleCancelled', { id, reason, playerA: battle.playerA, playerB: battle.playerB });
+      emit(ctx, 'BattleSettled', {
+        id,
+        winnerId: 'REFUND',
+        playerA: battle.playerA,
+        playerB: battle.playerB,
+        via: 'CancelBattle',
+      });
+      return JSON.stringify(battle);
+    });
+  }
+
   @Transaction()
   public async Forfeit(ctx: Context, id: string, loserId: string, reason: string, nowISO: string, idemKey: string): Promise<string> {
     return withIdempotency(ctx, idemKey, nowISO, async () => {

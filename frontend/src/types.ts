@@ -419,7 +419,8 @@ export interface BattleRoom {
   /** 加入者留言（房主在确认面板看到），无留言为 null */
   joinMessage?: string | null;
   confirmations: { A: boolean; B: boolean };
-  status: 'WAITING' | 'JOINED' | 'ACTIVE' | 'FINISHED';
+  /** STARTING/FAILED 是 H5 启动补偿的瞬态：大厅不展示，前端仅做兜底标签 */
+  status: 'WAITING' | 'JOINED' | 'STARTING' | 'ACTIVE' | 'FINISHED' | 'FAILED';
   createdAt: string;
   updatedAt?: string;
 }

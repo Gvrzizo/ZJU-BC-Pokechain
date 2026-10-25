@@ -39,7 +39,8 @@ export interface BattleRoom {
   /** 加入者留言（≤100 字，房间回 WAITING 时清空），房主在确认面板看到 */
   joinMessage: string | null;
   confirmations: { A: boolean; B: boolean };
-  status: 'WAITING' | 'JOINED' | 'ACTIVE' | 'FINISHED';
+  /** STARTING = 已生成 battleId、正在 CreateBattle/ActivateBattle/起引擎（H5 补偿用瞬态）；FAILED = 启动失败待对账 */
+  status: 'WAITING' | 'JOINED' | 'STARTING' | 'ACTIVE' | 'FINISHED' | 'FAILED';
   battleId: string | null;
   createdAt: string;
   /** 最近一次写入（房间状态 / 押注确认 / 结算）；对账用它判断房间是否长期停滞 */
@@ -243,7 +244,7 @@ export class BattlesService implements OnModuleInit {
     if (room.playerA !== as.userId) {
       throw new AppException('NOT_HOST', `room ${roomId} belongs to ${room.playerA}`, HttpStatus.FORBIDDEN);
     }
-    if (room.status === 'ACTIVE' || room.status === 'FINISHED') {
+    if (room.status === 'ACTIVE' || room.status === 'FINISHED' || room.status === 'STARTING') {
       throw new AppException('ROOM_NOT_OPEN', `room ${roomId} is ${room.status}`, HttpStatus.CONFLICT);
     }
     if (!room.playerB || room.playerB !== playerId) {
@@ -271,7 +272,7 @@ export class BattlesService implements OnModuleInit {
     if (room.playerA !== as.userId) {
       throw new AppException('NOT_HOST', `room ${roomId} belongs to ${room.playerA}`, HttpStatus.FORBIDDEN);
     }
-    if (room.status === 'ACTIVE' || room.status === 'FINISHED') {
+    if (room.status === 'ACTIVE' || room.status === 'FINISHED' || room.status === 'STARTING') {
       throw new AppException('ROOM_NOT_OPEN', `room ${roomId} is ${room.status}`, HttpStatus.CONFLICT);
     }
     if (room.status !== 'WAITING' || room.playerB) {
@@ -321,13 +322,16 @@ export class BattlesService implements OnModuleInit {
         await this.redis.srem('battle:rooms', id).catch(() => undefined);
         continue;
       }
-      if (room.status === 'ACTIVE' && !this.isLiveHere(room)) {
+      // FAILED：启动失败但补偿还可能有残留（链不可读），留给对账处理，先不展示
+      if (room.status === 'FAILED') continue;
+      if ((room.status === 'ACTIVE' || room.status === 'STARTING') && !this.isLiveHere(room)) {
         if (await this.isBattleOver(room)) {
           room.status = 'FINISHED';
           await this.saveRoom(room);
           continue;
         }
-        if (this.isAbandoned(room)) {
+        if (room.status === 'STARTING' || this.isAbandoned(room)) {
+          // STARTING 没有活引擎说明启动中断：隐藏并交给对账取消/结算，绝不给玩家一个进不去的房间
           this.logger.warn(`hiding stuck room ${room.id} (battle ${room.battleId} has no live engine)`);
           void this.reconcileRooms('runtime');
           continue;
@@ -386,7 +390,15 @@ export class BattlesService implements OnModuleInit {
       return false;
     }
     if (room.status === 'FINISHED') return false; // listRooms 负责出列
-    if (!room.battleId) return false; // WAITING / JOINED：正常的大厅房间
+    if (!room.battleId) {
+      // STARTING/FAILED 却没有 battleId：链上从未锁资产，超时后直接关房即可
+      if ((room.status === 'STARTING' || room.status === 'FAILED') && this.isAbandoned(room)) {
+        room.status = 'FINISHED';
+        await this.saveRoom(room);
+        return true;
+      }
+      return false; // WAITING / JOINED：正常的大厅房间
+    }
     if (this.isLiveHere(room)) return false; // 本进程还有活引擎，交给引擎收尾
 
     const chain = await this.readBattle(room.battleId);
@@ -401,8 +413,9 @@ export class BattlesService implements OnModuleInit {
       this.logger.warn(`closing room ${id}: battle ${room.battleId} does not exist on chain`);
     } else {
       const settled = await this.manager.settleAbandoned(room.battleId, ABANDON_NOTE);
+      const how = chain.status === 'CREATED' ? 'cancelled & refunded' : 'escrow refunded as DRAW';
       this.logger.log(
-        `room ${id}: battle ${room.battleId} ${chain.status} -> ${settled?.status ?? 'UNKNOWN'} (${reason}, escrow refunded as DRAW)`,
+        `room ${id}: battle ${room.battleId} ${chain.status} -> ${settled?.status ?? 'UNKNOWN'} (${reason}, ${how})`,
       );
       await this.recordReconcile(room, chain.status, settled?.status ?? 'UNKNOWN', reason);
     }
@@ -515,27 +528,81 @@ export class BattlesService implements OnModuleInit {
       // （队伍提交到押注双确认之间，宝可梦可能已在别的战斗中濒死 → FAINTED，见 docs/backend-api.md §2）
       await this.assertTeamOwnership(room.playerA, room.teamA);
       await this.assertTeamOwnership(room.playerB, room.teamB);
+      // H5：先落 battleId + STARTING，再开始链上/引擎三步；任何一步失败都能按 battleId 补偿，
+      // 不会出现“链上资产已锁、本地没记 battleId”的永久冻结房间。
       const battleId = `b_${randomUUID()}`;
       const wagerHash = computeWagerHash(room.playerA, room.playerB, room.wagerA, room.wagerB);
-      await this.contract.createBattle(SYSTEM_IDENTITY, {
-        id: battleId,
-        playerA: room.playerA,
-        playerB: room.playerB,
-        wagerA: room.wagerA,
-        wagerB: room.wagerB,
-        wagerHash,
-      });
-      await this.contract.activateBattle(SYSTEM_IDENTITY, battleId);
-      const teamA = await this.loadTeam(room.teamA);
-      const teamB = await this.loadTeam(room.teamB);
-      await this.manager.startBattle(battleId, room.playerA, room.playerB, teamA, teamB);
-      room.status = 'ACTIVE';
       room.battleId = battleId;
+      room.status = 'STARTING';
+      await this.saveRoom(room);
+
+      try {
+        await this.contract.createBattle(SYSTEM_IDENTITY, {
+          id: battleId,
+          playerA: room.playerA,
+          playerB: room.playerB,
+          wagerA: room.wagerA,
+          wagerB: room.wagerB,
+          wagerHash,
+        });
+      } catch (err) {
+        // 提交结果未知（网络超时等）时链上可能已经锁定：保守走补偿，交给对账重试；
+        // 只有链上明确不存在这场对局才把房间退回 JOINED 让双方重试。
+        const chain = await this.readBattle(battleId);
+        if (chain.unavailable || chain.status !== null) {
+          await this.compensateStartFailure(room, battleId, 'create-unknown');
+        } else {
+          room.battleId = null;
+          room.status = 'JOINED';
+          await this.saveRoom(room);
+        }
+        throw err;
+      }
+
+      try {
+        await this.contract.activateBattle(SYSTEM_IDENTITY, battleId);
+        const teamA = await this.loadTeam(room.teamA);
+        const teamB = await this.loadTeam(room.teamB);
+        await this.manager.startBattle(battleId, room.playerA, room.playerB, teamA, teamB);
+      } catch (err) {
+        // ActivateBattle 失败 → 链上仍 CREATED → CancelBattle 退款；
+        // 引擎起不来 → 链上 ACTIVE → DRAW 退款（settleAbandoned 统一处理）。
+        await this.compensateStartFailure(room, battleId, 'start-failed');
+        throw err;
+      }
+
+      room.status = 'ACTIVE';
       activated = { roomId: room.id, battleId, playerIds: [room.playerA, room.playerB] };
     }
     await this.saveRoom(room);
     if (activated) this.events.emit('activated', activated);
     return room;
+  }
+
+  /**
+   * H5 房间启动失败补偿：按链上状态收尾，避免“链上锁着、本地没有能进的 battle”。
+   * CREATED → CancelBattle 全额退款；ACTIVE/RESULT_SUBMITTED → settleAbandoned 的 DRAW 退款。
+   * 补偿成功 → 房间 FINISHED；补偿失败（链不可读等）→ 保留 FAILED，由 reconcileRoom 重试。
+   */
+  private async compensateStartFailure(room: BattleRoom, battleId: string, reason: string): Promise<void> {
+    room.battleId = battleId;
+    room.status = 'FAILED';
+    await this.saveRoom(room).catch((err: Error) => this.logger.warn(`room ${room.id}: save FAILED state: ${err.message}`));
+    try {
+      const settled = await this.manager.settleAbandoned(battleId, reason);
+      if (!settled || (settled.status !== 'SETTLED' && settled.status !== 'REFUNDED')) {
+        throw new Error(`battle ${battleId} is ${settled?.status ?? 'unreadable'}`);
+      }
+      room.status = 'FINISHED';
+      await this.saveRoom(room);
+      this.logger.log(
+        `room ${room.id}: start failed (${reason}), battle ${battleId} -> ${settled.status}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `room ${room.id}: start compensation failed (${reason}): ${(err as Error).message}; reconcile will retry`,
+      );
+    }
   }
 
   async forfeit(as: ChainIdentity, battleId: string): Promise<void> {
@@ -644,7 +711,7 @@ export class BattlesService implements OnModuleInit {
     const ids = await this.redis.smembers('battle:rooms');
     for (const id of ids) {
       const room = await this.redis.getJson<BattleRoom>(this.roomKey(id));
-      if (room && room.battleId === battleId && room.status === 'ACTIVE') {
+      if (room && room.battleId === battleId && (room.status === 'ACTIVE' || room.status === 'STARTING' || room.status === 'FAILED')) {
         room.status = 'FINISHED';
         await this.saveRoom(room);
       }

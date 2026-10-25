@@ -64,8 +64,10 @@ const editForm = ref({ name: '', note: '' });
 const STATUS_LABEL: Record<BattleRoom['status'], string> = {
   WAITING: '等待加入',
   JOINED: '待确认押注',
+  STARTING: '启动中',
   ACTIVE: '战斗中',
   FINISHED: '已结束',
+  FAILED: '启动失败',
 };
 
 function isParty(r: BattleRoom): boolean {
