@@ -42,6 +42,7 @@ import {
   wildEventKey,
   wildSessionKey,
 } from './wild-session';
+import { grantLegendaryDexReward } from '../pokemon/legendary-reward';
 
 export interface WildAction {
   type: 'move' | 'ball' | 'run' | 'switch';
@@ -444,6 +445,8 @@ export class WildService {
     await this.grantBond(session, 'catch');
     // 战斗掉落（40000 区）：收服成功也有概率掉落道具
     await this.grantDrop(session);
+    // H13：传说图鉴 6/6 → 大师球（幂等；失败只告警，不打断捕捉）
+    await grantLegendaryDexReward(this.contract, session.playerId, this.logger);
     return pokemon;
   }
 

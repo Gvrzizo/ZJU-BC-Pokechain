@@ -13,6 +13,7 @@ import { computeStats, normalizeEvs } from '../game-data/stats';
 import { resolveOwnedBall } from './ball';
 import { CATCH_REWARD_POINTS, catchRewardReason } from './points-economy';
 import { SHINY_CHANCE, computeDnaHash, deriveAttempt, deriveWild, lureSpec } from './capture-derive';
+import { grantLegendaryDexReward } from './legendary-reward';
 import { loadWildSessionByEvent } from '../wild/wild-session';
 
 /** 遇敌会话（Redis `capture:<eventId>`）：快速捕捉与野怪战斗共用同一事件与投球计数。 */
@@ -372,6 +373,8 @@ export class CaptureService implements OnModuleInit, OnModuleDestroy {
     await this.contract.addPoints(SYSTEM_IDENTITY, as.userId, CATCH_REWARD_POINTS, catchRewardReason(pokemon.id), {
       idemKey: `${pokemon.id}-reward-catch`,
     });
+    // H13：传说图鉴 6/6 → 大师球（幂等；失败只告警，不打断捕捉）
+    await grantLegendaryDexReward(this.contract, as.userId, this.logger);
     await this.redis.del(this.sessionKey(eventId));
     await this.clearPending(eventId);
     return { success: true as const, pokemon, catchReward: CATCH_REWARD_POINTS };

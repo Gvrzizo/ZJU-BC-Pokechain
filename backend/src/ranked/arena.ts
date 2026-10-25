@@ -1,6 +1,6 @@
 /**
  * 积分场（stakes arena）口径（docs/backend-api.md §10/§11）：
- * 准入积分按段位收，胜者拿走双方准入 + 系统补贴，平局退还各自准入。
+ * 准入积分按段位收，胜者拿走双方准入（H12 起不再叠加系统补贴，零和），平局退还各自准入。
  *
  * 防刷限制（补贴发放前逐条判定，任一命中即不发）：
  *   - 每人每天最多领 3 次补贴（Redis SET `ranked:subsidy:<player>:<yyyy-mm-dd>`，SCARD 计数）；
@@ -27,8 +27,12 @@ export const ARENA_ENTRY_FEES: Record<ArenaTierKey, number> = {
   master: 400,
 };
 
-/** 系统补贴 = 准入额 × 该系数（向下取整） */
-export const ARENA_SUBSIDY_RATIO = 0.5;
+/**
+ * 系统补贴 = 准入额 × 该系数（向下取整）。
+ * H12（2026-10）：改为 **0**——积分场不再增发，胜者只拿双方入场费（零和转移）。
+ * 原有「每日 3 次 / 分差 >400 / 机器人场不发」判定保留，未来若要恢复补贴只需调这个系数。
+ */
+export const ARENA_SUBSIDY_RATIO = 0;
 /** 每人每天的补贴上限（次数） */
 export const ARENA_SUBSIDY_DAILY_LIMIT = 3;
 /** 对手 rating 差超过该值不发补贴 */

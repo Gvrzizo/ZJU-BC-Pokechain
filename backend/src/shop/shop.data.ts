@@ -3,10 +3,10 @@ import { getItemType, ITEM_TYPES } from '../game-data/items.data';
 /**
  * 商店价目表（docs/backend-api.md §3「道具获取途径」），单位：积分。
  *
- * 2026-09 重定价：积分 faucet 收紧后（收服 20 / 击倒 等级×1 / 放生 等级×1），
- * 休闲玩家日收入约 100–300P（野怪 + 排位），价目按「日收入 ≈ 1-2 只精灵球」对齐：
- *   - 高级球 400 = 2-3 天积累（稀有消耗品）
- *   - 王冠 3000 / 金色王冠 15000 = 月级目标（个体值是长期养成的终点）
+ * 2026-09 重定价 + 2026-10 P2 回调（H13）：
+ *   - 高级球 400 = 1-2 天积累（稀有消耗品）
+ *   - 银色王冠 1200 / 金色王冠 6000 = 周/月级目标（个体值是长期养成的终点，别让月级目标失去吸引力）
+ *   - TM 800（原 1500：360 个野生种里约 88% 已有 ≥90 威力招式，高价 TM 缺乏决策价值）
  * 回收仍是半价向下取整（卖回只回血，不构成 faucet）。
  *
  * 不在此表里的道具（如 master-ball，仅作为奖励发放）既不出售、也不回收：
@@ -28,11 +28,11 @@ export const SHOP_PRICES: Readonly<Record<string, number>> = {
   'thunder-stone': 800,
   'water-stone': 800,
   'fire-stone': 800,
-  'tm-thunderbolt': 1500,
-  'tm-flamethrower': 1500,
-  'tm-surf': 1500,
-  'bottle-cap': 3000,
-  'gold-bottle-cap': 15000,
+  'tm-thunderbolt': 800,
+  'tm-flamethrower': 800,
+  'tm-surf': 800,
+  'bottle-cap': 1200,
+  'gold-bottle-cap': 6000,
   'rare-candy': 1000,
   // 传说区钥匙（天空之柱 / 海底洞窟 / 熔岩洞窟 / 古代遗迹 / 南方孤岛 / 诞生之岛）
   'sky-key': 5000,
