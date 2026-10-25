@@ -185,6 +185,7 @@ Trade 的 `offer/request` 保持 `{pokemonIds, itemIds, points}` **整堆语义�
   且 owner 未变时），否则将该子堆叠恢复为独立 IDLE 堆叠（保留 `#w<battleId>` id）。
 - REFUND：同 DRAW（仲裁退款），bond 不变。
 - 全部资产解锁→IDLE（lockRef 清空）、写入 settledAt、status 终态。任何一步校验失败整体抛错回滚，保证无部分结算。
+- **结算事件**：`BattleSettled` payload 带 `{id, winnerId, playerA, playerB}`（Forfeit 另带 `loserId`，SettleBattle/Arbitrate 另带 `via`）；并在同一交易内为双方各发一条 `PointsChanged {playerId, delta, balance, reason:"battle:<id>"}`（DRAW/REFUND 时 delta=0）。后端排行榜靠这两个事件刷新 Redis ZSET，缺事件会导致真链榜单停在旧分数（H4）。
 - 结算按 wager 引用定位锁定堆叠：整堆锁→原堆叠；拆分锁→子堆叠（原堆叠即使已被合并删除也能正确定位子堆叠）。
 
 ## 3. CouchDB 索引

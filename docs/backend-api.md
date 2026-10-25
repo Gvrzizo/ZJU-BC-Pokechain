@@ -455,7 +455,7 @@ p = min(1, a / 255)                                                   // 大师�
 | GET | `/assets/manifest` | 前端资源清单 `[{uri, sha256, size}]`（MinIO 签名 URL，前端下载后校验哈希） |
 | POST | `/assets/register` | admin：登记资源 `metadataHash+URI` |
 | GET | `/fairness/:eventId` | 返回 RandomCommit 全量（commitHash/serverSeed/clientSeed/resultHash）+ 派生算法说明，供任何人复核 |
-| GET | `/leaderboard` | 积分榜（Redis ZSET 缓存，链上事件驱动刷新，P1） |
+| GET | `/leaderboard` | 积分榜（Redis ZSET 缓存；监听链上 `PointsChanged`/`PlayerRegistered`/`BattleSettled`，事件里的 `playerId`/`playerA`/`playerB`/`winnerId`/`fromId`/`toId` 都会触发重读对应玩家余额刷新） |
 
 ## 7. PostgreSQL 表（链下）
 
@@ -695,4 +695,4 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 - `frontend/src/components/CaptureOverlay.vue`：准备阶段的首发列表带 HP 与（濒死）标记、**濒死成员禁选**；全队濒死时禁用"进入草丛"并提示去宝可梦中心；背包伤药可在战斗中/队伍页使用（`POST /items/:id/use {targetPokemonId}`）。
 - 交易所（TradeView）建议提示同一条"易主后羁绊重置为 30"（本次未改该文件）。
 
-**遗留**：`Transfer` 与交易确认处的羁绊重置目前只有链上行为 + 文档说明，交易界面尚未加仪式感提示；排位结算面板尚未渲染 `arena` 发奖明细（接口已返回）；通用 PvP 胜利经验（非机器人场 +30）的接线点 `PokemonService.grantBattleWinExp` 仍未被普通 PvP 结算调用（目前只接了机器人场的 ×0.5 分支，幂等键与通用接线一致，后续接线不会重复发奖）。
+**遗留**：`Transfer` 与交易确认处的羁绊重置目前只有链上行为 + 文档说明，交易界面尚未加仪式感提示；排位结算面板尚未渲染 `arena` 发奖明细（接口已返回）。

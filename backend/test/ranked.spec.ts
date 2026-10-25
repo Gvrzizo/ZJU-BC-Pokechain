@@ -9,6 +9,7 @@ import { User } from '../src/users/entities/user.entity';
 import { BattleRewardService } from '../src/ranked/battle-reward.service';
 import { RankedBattleLauncher } from '../src/ranked/battle-launcher';
 import { RankedBotService } from '../src/ranked/bot.service';
+import { computeWagerHash } from '../src/fabric/chain.adapter';
 import { BondService } from '../src/ranked/bond.service';
 import { utcDate } from '../src/ranked/bot';
 import { QUEUE_TTL_SEC, RankedService } from '../src/ranked/ranked.service';
@@ -309,6 +310,76 @@ describe('排位结算挂钩（docs/backend-api.md §11）', () => {
     expect(me).toMatchObject({ rating: 984, wins: 0, losses: 1, rank: 2, total: 2 });
   });
 
+  it('普通排位胜利：胜者参战队伍每只 +30 exp，重放/扫尾不叠加（H3）', async () => {
+    const stack = await makeStack();
+    const { pa, pb } = await seedTeams(stack.chain, stack.contract);
+    const { second } = await matchRanked(stack, pa.id, pb.id);
+    const battleId = second.battleId as string;
+    await settleThroughConfirm(stack, battleId, 'ash');
+    const applied = await waitFor(async () => {
+      const outcome = await stack.ranked.outcome(battleId);
+      return outcome.status === undefined && !!outcome.ratings?.length;
+    });
+    expect(applied).toBe(true);
+    expect((await stack.contract.getPokemon(pa.id)).exp).toBe(30);
+    expect((await stack.contract.getPokemon(pb.id)).exp).toBe(0);
+
+    // 广播重放 + sweep 兜底都不应重复加经验（链上 idemKey `<battleId>-exp-<pokemonId>`）
+    await stack.rewards.settle(battleId);
+    await stack.rewards.sweep();
+    expect((await stack.contract.getPokemon(pa.id)).exp).toBe(30);
+  });
+
+  it('房间（非排位）PvP：胜者队伍 +30 exp，DRAW 不发（H3）', async () => {
+    const stack = await makeStack();
+    const { pa, pb } = await seedTeams(stack.chain, stack.contract);
+    const wager = { pokemonIds: [], itemIds: [], points: 0 };
+    const wagerHash = computeWagerHash('ash', 'gary', wager, wager);
+    await stack.contract.createBattle(SYSTEM_IDENTITY, {
+      id: 'b_room_win',
+      playerA: 'ash',
+      playerB: 'gary',
+      wagerA: wager,
+      wagerB: wager,
+      wagerHash,
+    });
+    await stack.contract.activateBattle(SYSTEM_IDENTITY, 'b_room_win');
+    await chainSettle(stack.contract, 'b_room_win', 'ash');
+    await stack.rewards.onSettled({
+      battleId: 'b_room_win',
+      roomId: 'room-win',
+      playerA: 'ash',
+      playerB: 'gary',
+      teamA: [pa.id],
+      teamB: [pb.id],
+    });
+    expect((await stack.contract.getPokemon(pa.id)).exp).toBe(30);
+    expect((await stack.contract.getPokemon(pb.id)).exp).toBe(0);
+
+    const drawWagerHash = computeWagerHash('ash', 'gary', wager, wager);
+    await stack.contract.createBattle(SYSTEM_IDENTITY, {
+      id: 'b_room_draw',
+      playerA: 'ash',
+      playerB: 'gary',
+      wagerA: wager,
+      wagerB: wager,
+      wagerHash: drawWagerHash,
+    });
+    await stack.contract.activateBattle(SYSTEM_IDENTITY, 'b_room_draw');
+    await chainSettle(stack.contract, 'b_room_draw', 'DRAW');
+    await stack.rewards.onSettled({
+      battleId: 'b_room_draw',
+      roomId: 'room-draw',
+      playerA: 'ash',
+      playerB: 'gary',
+      teamA: [pa.id],
+      teamB: [pb.id],
+    });
+    // 平局不发经验（第一场仍是 30）
+    expect((await stack.contract.getPokemon(pa.id)).exp).toBe(30);
+    expect((await stack.contract.getPokemon(pb.id)).exp).toBe(0);
+  });
+
   it('结算挂钩幂等：重复广播/重放不会叠加 rating 与羁绊', async () => {
     const stack = await makeStack();
     const { pa, pb } = await seedTeams(stack.chain, stack.contract);
@@ -324,6 +395,9 @@ describe('排位结算挂钩（docs/backend-api.md §11）', () => {
     };
 
     await settleThroughConfirm(stack, battleId, 'ash');
+    // 广播是 fire-and-forget（settle 有临界区锁）：等首次结算真正落盘后再做幂等重放，
+    // 否则重放会撞在锁上直接返回，断言看到的是"还没结算"。
+    await waitFor(async () => (await stack.ranked.outcome(battleId)).ratings?.length === 2);
     await Promise.all([stack.rewards.onSettled(payload), stack.rewards.onSettled(payload)]);
     await stack.rewards.settle(battleId);
     await stack.rewards.sweep();

@@ -19,7 +19,9 @@ export class LeaderboardController implements OnModuleInit {
   onModuleInit(): void {
     this.events.stream$.subscribe(({ name, payload }) => {
       if (!['PointsChanged', 'PlayerRegistered', 'BattleSettled'].includes(name)) return;
-      const ids = [payload.playerId, payload.playerA, payload.playerB].filter(
+      // 结算/交易事件不一定带 playerId：BattleSettled 只有 winnerId，交易 PointsChanged 是 fromId/toId。
+      // 不把这三个 id 一起纳入，真链排行榜在结算后不会刷新（H4）。
+      const ids = [payload.playerId, payload.playerA, payload.playerB, payload.winnerId, payload.fromId, payload.toId].filter(
         (v): v is string => typeof v === 'string' && !!v,
       );
       for (const id of new Set(ids)) void this.refreshPlayer(id);

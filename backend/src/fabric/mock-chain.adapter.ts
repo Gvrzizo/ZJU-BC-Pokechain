@@ -1481,6 +1481,8 @@ export class MockChainAdapter extends ChainAdapter {
     try {
       const a = this.mustGet<PlayerState>(`player:${battle.playerA}`);
       const b = this.mustGet<PlayerState>(`player:${battle.playerB}`);
+      const beforeA = a.points;
+      const beforeB = b.points;
       const escrowTotal = battle.escrow.pointsA + battle.escrow.pointsB;
       const wagers: Array<{ wager: WagerBundle; owner: string }> = [
         { wager: battle.wagerA, owner: battle.playerA },
@@ -1560,6 +1562,9 @@ export class MockChainAdapter extends ChainAdapter {
         pointsA: a.points,
         pointsB: b.points,
       });
+      // 与链码一致：结算也发双方 PointsChanged，排行榜监听器据此刷新真链/ Mock 分数
+      this.emit('PointsChanged', { playerId: a.playerId, delta: a.points - beforeA, reason: `battle:${battle.id}`, points: a.points });
+      this.emit('PointsChanged', { playerId: b.playerId, delta: b.points - beforeB, reason: `battle:${battle.id}`, points: b.points });
       return this.mustGet<BattleState>(`battle:${battle.id}`);
     } catch (err) {
       this.state.clear();

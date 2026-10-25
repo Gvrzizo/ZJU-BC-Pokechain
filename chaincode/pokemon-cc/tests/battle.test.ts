@@ -133,6 +133,25 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     expect((await w.getPlayer('u_ash')).wins).toBe(1);
     expect((await w.getPlayer('u_gary')).losses).toBe(1);
     expect(w.eventNames()).toEqual(expect.arrayContaining(['BattleConfirmed', 'BattleSettled']));
+    // H4：BattleSettled 带双方 playerId，结算另发双方 PointsChanged（排行榜靠它刷新）
+    const settledEvents = w.stub.committedEvents
+      .filter((e) => e.name === 'BattleSettled')
+      .map((e) => JSON.parse(e.payload));
+    expect(settledEvents[settledEvents.length - 1]).toMatchObject({
+      id: 'b_1',
+      winnerId: 'u_ash',
+      playerA: 'u_ash',
+      playerB: 'u_gary',
+    });
+    const pointsEvents = w.stub.committedEvents
+      .filter((e) => e.name === 'PointsChanged')
+      .map((e) => JSON.parse(e.payload));
+    expect(pointsEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ playerId: 'u_ash', delta: 100, balance: 1050, reason: 'battle:b_1' }),
+        expect.objectContaining({ playerId: 'u_gary', delta: 0, balance: 950, reason: 'battle:b_1' }),
+      ]),
+    );
   });
 
   test('ConfirmResult/Dispute：同组织其他玩家不能替当事人确认/争议（NOT_OWNER）', async () => {
