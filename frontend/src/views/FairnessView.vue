@@ -29,7 +29,8 @@ async function verify() {
       const commit = await sha256Hex(ev.serverSeed);
       results.push({ label: 'sha256(serverSeed) == commitHash', pass: commit === ev.commitHash });
     } else {
-      results.push({ label: 'serverSeed 尚未 reveal', pass: false });
+      // H9：结算前只公开承诺，serverSeed 在结算（投中/战斗终态/超时）后揭示
+      results.push({ label: '承诺已上链；serverSeed 将在结算后揭示（当前无需/无法复算）', pass: true });
     }
 
     // ② resultHash == sha256(serverSeed|clientSeed|eventId)（若链上已写入）
@@ -89,6 +90,7 @@ async function verify() {
       <p style="font-size: var(--px-fs-sm)">
         输入捕捉 / 战斗的 eventId，拉取链上 RandomCommit 全量数据，
         用浏览器 Web Crypto 重算 sha256 验证承诺-揭示一致性。
+        <strong>serverSeed 在结算后揭示</strong>：尚未结算的 COMMITTED 事件只展示承诺，无法预测后续判定。
       </p>
       <div class="row mt-16">
         <input
@@ -113,7 +115,7 @@ async function verify() {
         <p>eventId: <span class="mono">{{ record.event.eventId }}</span></p>
         <p>playerId: <span class="mono">{{ record.event.playerId }}</span></p>
         <p class="mt-8">commitHash: <span class="mono">{{ record.event.commitHash }}</span></p>
-        <p>serverSeed: <span class="mono">{{ record.event.serverSeed || '（未 reveal）' }}</span></p>
+        <p>serverSeed: <span class="mono">{{ record.event.serverSeed || '（结算后揭示）' }}</span></p>
         <p>clientSeed: <span class="mono">{{ record.event.clientSeed }}</span></p>
         <p>resultHash: <span class="mono">{{ record.event.resultHash || '—' }}</span></p>
         <p v-if="record.event.meta">meta: <span class="mono">{{ record.event.meta }}</span></p>

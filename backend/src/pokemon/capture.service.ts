@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'crypto';
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { RedisService } from '../common/redis/redis.service';
 import { AppException } from '../common/utils/errors';
 import { DeriveStream, sha256hex } from '../common/utils/crypto.util';
@@ -33,18 +33,36 @@ export interface CaptureSession {
 
 export const CAPTURE_SESSION_TTL_SEC = 3600;
 
+/** 定时揭示登记：遭遇时写入到期时间，玩家放弃（会话过期）后由 sweep 揭示，避免事件永久 COMMITTED。 */
+const CAPTURE_PENDING_KEY = 'capture:pending';
+const CAPTURE_SEED_PREFIX = 'capture:seed:';
+const EXPIRY_SWEEP_MS = 5 * 60_000;
+
 export function captureSessionKey(eventId: string): string {
   return `capture:${eventId}`;
 }
 
-/** Capture orchestration (docs/backend-api.md §2): Commit-then-derive, consume ball -> Reveal -> judge -> Mint. */
+/** Capture orchestration (docs/backend-api.md §2): Commit-then-derive, consume ball -> judge -> Reveal -> Mint. */
 @Injectable()
-export class CaptureService {
+export class CaptureService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(CaptureService.name);
+  private sweeper?: NodeJS.Timeout;
+
   constructor(
     private readonly chain: ChainAdapter,
     private readonly contract: ContractService,
     private readonly redis: RedisService,
   ) {}
+
+  onModuleInit(): void {
+    // 玩家放弃的遭遇（会话过期、事件仍 COMMITTED）→ 定时结算后揭示，保证公平性可复核
+    this.sweeper = setInterval(() => void this.revealExpired(), EXPIRY_SWEEP_MS);
+    this.sweeper.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.sweeper) clearInterval(this.sweeper);
+  }
 
   private sessionKey(eventId: string): string {
     return captureSessionKey(eventId);
@@ -61,6 +79,67 @@ export class CaptureService {
 
   async clearSession(eventId: string): Promise<void> {
     await this.redis.del(this.sessionKey(eventId));
+  }
+
+  /**
+   * 结算后揭示（H9）：只有事件仍为 COMMITTED 才 reveal，已 REVEALED/CONSUMED 直接跳过。
+   * 读取失败会向上抛出（调用方保留定时任务，下一轮重试）。
+   */
+  async revealCommitted(eventId: string, serverSeed: string): Promise<boolean> {
+    const random = await this.contract.getRandom(eventId);
+    if (random.status !== 'COMMITTED') return false;
+    await this.contract.revealAndVerify(SYSTEM_IDENTITY, eventId, serverSeed, {
+      idemKey: `${eventId}-reveal`,
+    });
+    return true;
+  }
+
+  /**
+   * 事件终态收尾：best-effort reveal（失败只告警并保留定时登记，由 5 分钟 sweep 重试），
+   * 然后清理 `capture:pending` 登记。快速捕捉成功、野怪战斗终态都会调用。
+   */
+  async finalizeEvent(eventId: string, serverSeed: string): Promise<void> {
+    try {
+      await this.revealCommitted(eventId, serverSeed);
+      await this.clearPending(eventId);
+    } catch (err) {
+      this.logger.warn(`reveal on finalize failed for ${eventId}: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * 定时揭示玩家放弃的遭遇：`capture:pending` 的 score = 会话到期时间；
+   * 种子另存 `capture:seed:<eventId>`（TTL 2×会话），所以会话过期后仍能 reveal。
+   */
+  async revealExpired(now = Date.now()): Promise<number> {
+    const ids = await this.redis.client.zrangebyscore(CAPTURE_PENDING_KEY, 0, now).catch(() => [] as string[]);
+    let revealed = 0;
+    for (const eventId of ids) {
+      try {
+        const audit = await this.redis.getJson<{ serverSeed?: string }>(`${CAPTURE_SEED_PREFIX}${eventId}`);
+        if (!audit?.serverSeed) {
+          await this.clearPending(eventId);
+          continue;
+        }
+        if (await this.revealCommitted(eventId, audit.serverSeed)) revealed += 1;
+        await this.clearPending(eventId);
+      } catch (err) {
+        // 链暂时不可读：保留 zset 成员，下一轮再试（种子 TTL 过期后自然清理）
+        this.logger.warn(`delayed reveal failed for ${eventId}: ${(err as Error).message}`);
+      }
+    }
+    if (revealed > 0) this.logger.log(`revealed ${revealed} abandoned capture event(s)`);
+    return revealed;
+  }
+
+  private async trackPending(eventId: string, serverSeed: string): Promise<void> {
+    await this.redis.client.zadd(CAPTURE_PENDING_KEY, Date.now() + CAPTURE_SESSION_TTL_SEC * 1000, eventId);
+    await this.redis.setJson(`${CAPTURE_SEED_PREFIX}${eventId}`, { serverSeed }, CAPTURE_SESSION_TTL_SEC * 2);
+  }
+
+  private async clearPending(eventId: string): Promise<void> {
+    await this.redis.client.zrem(CAPTURE_PENDING_KEY, eventId).catch(() => undefined);
+    await this.redis.del(`${CAPTURE_SEED_PREFIX}${eventId}`);
   }
 
   async encounter(as: ChainIdentity, clientSeedInput?: string, lureTierInput?: number, zoneIdInput?: string) {
@@ -148,6 +227,7 @@ export class CaptureService {
       shinyChance,
     };
     await this.redis.setJson(this.sessionKey(eventId), session, CAPTURE_SESSION_TTL_SEC);
+    await this.trackPending(eventId, serverSeed);
 
     return {
       eventId,
@@ -232,15 +312,7 @@ export class CaptureService {
       idemKey: `${eventId}-attempt-${attemptNo}`,
     });
 
-    // 2) reveal the committed server seed (only the first attempt transitions COMMITTED -> REVEALED)
-    const random = await this.contract.getRandom(eventId);
-    if (random.status === 'COMMITTED') {
-      await this.contract.revealAndVerify(SYSTEM_IDENTITY, eventId, session.serverSeed, {
-        idemKey: `${eventId}-reveal`,
-      });
-    }
-
-    // 3) deterministic judgement from the verified stream
+    // 2) deterministic judgement from the stream (H9：判定期间不 reveal，首球不再泄露后续结果)
     const stream = new DeriveStream(session.serverSeed, session.clientSeed, eventId);
     const species = getSpecies(session.speciesId);
     if (!species) {
@@ -259,6 +331,9 @@ export class CaptureService {
         threshold: result.threshold,
       };
     }
+
+    // 3) 结算后揭示：投中（要铸宝可梦）才 Reveal；失败/放弃仍保持 COMMITTED，/fairness 不返回 serverSeed
+    await this.revealCommitted(eventId, session.serverSeed);
 
     // 4) mint the captured pokemon (consumes the random on-chain)
     const pokemonId = `p_${randomUUID()}`;
@@ -298,6 +373,7 @@ export class CaptureService {
       idemKey: `${pokemon.id}-reward-catch`,
     });
     await this.redis.del(this.sessionKey(eventId));
+    await this.clearPending(eventId);
     return { success: true as const, pokemon, catchReward: CATCH_REWARD_POINTS };
   }
 }

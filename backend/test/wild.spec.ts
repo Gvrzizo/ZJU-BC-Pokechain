@@ -362,8 +362,8 @@ describe('WildService (PvE 野怪战斗捕捉)', () => {
     // 野怪反击（命中判定走 n30007）
     expect(first.log.some((t) => t.events.some((e) => e.side === 'wild' && (e.kind === 'move' || e.kind === 'miss')))).toBe(true);
     expect(first.log.some((t) => t.events.some((e) => e.kind === 'ball-failed'))).toBe(true);
-    // 随机事件在第一次投球时揭示（COMMITTED -> REVEALED），失败重投不重复揭示
-    expect((await ctx.contract.getRandom(eventId)).status).toBe('REVEALED');
+    // H9：失败的投球保持 COMMITTED（只有投中/战斗终态才揭示）
+    expect((await ctx.contract.getRandom(eventId)).status).toBe('COMMITTED');
 
     const second = await ctx.wild.action(ash, started.sessionId, { type: 'ball', ballItemId: ball.id });
     expect(second.attempts).toBe(2);
@@ -444,7 +444,8 @@ describe('WildService (PvE 野怪战斗捕捉)', () => {
     expect(after.finished).toBe(true);
     expect(after.status).toBe('RAN');
     expect((await ctx.contract.getItem(ball.id)).quantity).toBe(2);
-    expect((await ctx.contract.getRandom(eventId)).status).toBe('COMMITTED');
+    // H9：战斗终态（逃跑）后揭示，供 /fairness 复核
+    expect((await ctx.contract.getRandom(eventId)).status).toBe('REVEALED');
   });
 
   it('expires after 15 minutes of inactivity (Redis TTL + TIMEOUT terminal state)', async () => {
@@ -466,6 +467,8 @@ describe('WildService (PvE 野怪战斗捕捉)', () => {
     expect(after.finished).toBe(true);
     expect(after.status).toBe('TIMEOUT');
     expect(after.log.some((t) => t.events.some((e) => e.kind === 'timeout'))).toBe(true);
+    // H9：超时也是终态，结算后揭示
+    expect((await ctx.contract.getRandom(eventId)).status).toBe('REVEALED');
   });
 
   it('rejects unknown sessions, foreign sessions and missing moveId/ballItemId', async () => {

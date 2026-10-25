@@ -1,11 +1,14 @@
 import { DeriveStream, sha256hex } from '../src/common/utils/crypto.util';
-import { CaptureService } from '../src/pokemon/capture.service';
+import { CAPTURE_SESSION_TTL_SEC, CaptureService } from '../src/pokemon/capture.service';
+import { FairnessController } from '../src/fairness/fairness.controller';
+import { SigningService } from '../src/battles/signing.service';
 import { deriveAttempt, deriveWild, deriveWildSpecimen } from '../src/pokemon/capture-derive';
 import { evolutionStage, getZone } from '../src/game-data/encounter.data';
 import { getSpecies } from '../src/game-data/species.data';
 import {
   SYSTEM_IDENTITY,
   makeChain,
+  makeConfig,
   makeRedis,
   mintBall,
   registerPlayers,
@@ -103,7 +106,7 @@ describe('CaptureService (mock chain)', () => {
     expect((await contract.getRandom(eventId)).status).toBe('CONSUMED');
   });
 
-  it('failed capture returns shakes, consumes the ball, keeps the event REVEALED for retry', async () => {
+  it('failed capture returns shakes, consumes the ball, keeps the event COMMITTED until settlement (H9)', async () => {
     const { chain, contract } = makeChain();
     const redis = makeRedis();
     const capture = new CaptureService(chain, contract, redis);
@@ -119,14 +122,61 @@ describe('CaptureService (mock chain)', () => {
     expect(res.shakes).toBeGreaterThanOrEqual(1);
     expect(res.shakes).toBeLessThanOrEqual(3);
     expect((await contract.getItem(ball.id)).quantity).toBe(1);
-    expect((await contract.getRandom(eventId)).status).toBe('REVEALED');
+    // H9：失败的投球不揭示——否则拿到 serverSeed 就能预判后续所有投球/AI
+    expect((await contract.getRandom(eventId)).status).toBe('COMMITTED');
 
-    // a second attempt on the same event must not re-reveal and uses the next block
+    // a second attempt on the same event uses the next block (still unrevealed)
     const res2 = await capture.attempt(ash, eventId, ball.id);
     const stream = new DeriveStream(SERVER_SEED, CLIENT_SEED, eventId);
     const derived2 = deriveAttempt(stream, 2, getSpecies(25).catchRate, 1);
     expect(res2.success).toBe(derived2.success);
     expect((await contract.getItem(ball.id)).quantity).toBe(0);
+  });
+
+  it('公平性接口：COMMITTED 阶段不返回 serverSeed，结算后揭示（H9）', async () => {
+    const { chain, contract } = makeChain();
+    const redis = makeRedis();
+    await redis.client.del('capture:pending');
+    const capture = new CaptureService(chain, contract, redis);
+    const fairness = new FairnessController(contract, new SigningService(makeConfig({ serverSigningKey: '' })));
+    await registerPlayers(contract, 'ash');
+    const ash = userIdentity('ash');
+
+    const enc = await capture.encounter(ash, CLIENT_SEED);
+    const before = await fairness.fairness(enc.eventId);
+    expect(before.revealed).toBe(false);
+    expect(before.event).toMatchObject({ status: 'COMMITTED', commitHash: enc.commitHash, serverSeed: '' });
+    expect(before.event.resultHash).toBe('');
+    expect(String((before as unknown as { note?: string }).note)).toContain('结算后');
+
+    // 等价于"投中/战斗终态"：揭示后接口返回完整种子与 resultHash
+    const session = await redis.getJson<{ serverSeed: string }>(`capture:${enc.eventId}`);
+    await capture.revealCommitted(enc.eventId, session!.serverSeed);
+    const after = await fairness.fairness(enc.eventId);
+    expect(after.revealed).toBe(true);
+    expect(after.event.serverSeed).toHaveLength(64);
+    expect(after.event.resultHash).toHaveLength(64);
+    await capture.finalizeEvent(enc.eventId, session!.serverSeed); // 清理 pending 登记，避免污染后续用例
+  });
+
+  it('放弃的遭遇（会话过期）由定时 sweep 揭示，不会永久 COMMITTED（H9）', async () => {
+    const { chain, contract } = makeChain();
+    const redis = makeRedis();
+    await redis.client.del('capture:pending');
+    for (const key of await redis.client.keys('capture:seed:*')) await redis.del(key);
+    const capture = new CaptureService(chain, contract, redis);
+    await registerPlayers(contract, 'ash');
+    const ash = userIdentity('ash');
+
+    const enc = await capture.encounter(ash, CLIENT_SEED);
+    expect((await contract.getRandom(enc.eventId)).status).toBe('COMMITTED');
+    expect(await redis.client.zcard('capture:pending')).toBe(1);
+
+    // 模拟会话到期：sweep 只处理 score <= now 的登记
+    const revealed = await capture.revealExpired(Date.now() + CAPTURE_SESSION_TTL_SEC * 1000 + 1);
+    expect(revealed).toBe(1);
+    expect((await contract.getRandom(enc.eventId)).status).toBe('REVEALED');
+    expect(await redis.client.zcard('capture:pending')).toBe(0);
   });
 
   it('rejects reveal with a wrong serverSeed (SEED_MISMATCH)', async () => {

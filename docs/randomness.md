@@ -43,6 +43,7 @@ Fabric 采用 **execute-order-validate（先执行-后排序-再验证）** 架�
  │ 决定遇敌种类/等级 → 返回预览（IV 等敏感位此时不揭晓）
  │
  │                          ② RevealAndVerify(eventId, serverSeed)
+ │                              （仅在结算后：捕捉投中 / 战斗终态 / 放弃后 sweep）
  │──────────────────────────────▶  链上重算 sha256(serverSeed) == commitHash？
  │                                 不等 → 抛 SEED_MISMATCH，状态不变（拒绝）
  │                                 相等 → 落盘 serverSeed，
@@ -56,6 +57,8 @@ Fabric 采用 **execute-order-validate（先执行-后排序-再验证）** 架�
  │
  │ ④ 任何人 GET /api/v1/fairness/:eventId 取全量数据本地复核（§7）
 ```
+
+> **揭示时机（H9，2026-10-25）**：捕捉/野怪战斗**不再在第一次投球时揭示**，改为结算后揭示——快速捕捉投中时、野怪战斗进入终态（CAUGHT/WILD_FAINTED/PLAYER_FAINTED/RAN/TIMEOUT）时、或玩家放弃后由后端 5 分钟 sweep 在会话过期时补揭示。`/fairness` 对 `COMMITTED` 事件只返回承诺与 clientSeed（`serverSeed` 为空、`revealed:false`），避免拿到种子后推算后续投球/AI 行为。
 
 ### 2.3 状态机
 
@@ -189,7 +192,7 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 
 页面路由 `/fairness`（`frontend/src/views/FairnessView.vue`），输入捕捉返回的 eventId（或战斗事件 `ev_battle_<battleId>`）：
 
-1. 拉取 `GET /api/v1/fairness/:eventId` → 返回链上 RandomCommit 全量（commitHash/serverSeed/clientSeed/resultHash/状态）、派生算法说明文本、服务端 secp256k1 公钥。
+1. 拉取 `GET /api/v1/fairness/:eventId` → 返回链上 RandomCommit（commitHash/clientSeed/resultHash/状态；**COMMITTED 阶段 serverSeed 为空且 `revealed:false`**）、派生算法说明文本、服务端 secp256k1 公钥。结算后再次查询才拿到 `serverSeed` 做完整复算。
 2. Web Crypto 重算 `sha256(serverSeed)`，与 commitHash 比对 —— 验证"揭示的种子就是承诺的种子"。
 3. 重算 `sha256("${serverSeed}|${clientSeed}|${eventId}")`，与 resultHash 比对 —— 验证"链上锚定的流身份"。
 4. 重算 HMAC-SHA256 派生流：捕捉事件按 §3 分块布局复核种类/等级/某次投掷的判定/IV/性格/闪光；战斗事件按 §4 顺序复核麻痹/命中/暴击/浮动/追加效果，并可用 `sha256(canonical(回合日志))==resultHash` 与 secp256k1 公钥验 serverSig；付费诱饵的 `event.meta`（`{zone,lureTier,cost}`）可与扣费交易、等级/闪光阈值变化互证，区域字段则是复算 n=0 加权抽样与 n=1 等级带的前置输入。
@@ -198,7 +201,7 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 ## 7. 局限性（诚实声明）
 
 1. **后端在揭示前看得到 serverSeed**。承诺-揭示保证"不能换、必须揭示"，但不保证"没偷看"：运营方内部人员理论上可在揭示前读取 Redis/内存中的种子，提前知道捕捉结果或战斗掷点（ insider threat ）。本系统用"会话 TTL、揭示后删除、日志不记种子"缩小暴露面，但无法根除。
-2. **拒绝揭示（reveal withholding）**：后端可以选择永不揭示（如预感到结果不利）。缓解：不揭示则 MintFromCapture/结算无法推进，玩家资产虽被锁定但可随时 Dispute/取消，且 COMMITTED 记录永久留在链上作为作恶证据；战斗侧有 2 分钟 SettleBattle 兜底与仲裁通道。
+2. **拒绝揭示（reveal withholding）**：后端可以选择永不揭示（如预感到结果不利）。缓解：不揭示则 MintFromCapture/结算无法推进，玩家资产虽被锁定但可随时 Dispute/取消，且 COMMITTED 记录永久留在链上作为作恶证据；战斗侧有 2 分钟 SettleBattle 兜底与仲裁通道；玩家放弃的捕捉由 `capture:pending` 每 5 分钟 sweep 在会话过期后补揭示（H9）。
 3. **单生成方**：随机性熵源集中在后端一处，本质上是"可审计的中心化随机"，而非"去中心化随机"。
 4. **浮点粒度**：uint64→double 的 2^-53 粒度损失（§2.4），对游戏无影响，但严格密码学抽签场景不可接受。
 

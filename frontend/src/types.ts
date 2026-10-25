@@ -559,6 +559,9 @@ export interface FairnessEvent {
 /** GET /fairness/:eventId 完整响应 */
 export interface FairnessResponse {
   event: FairnessEvent;
+  /** serverSeed 是否已揭示（H9：COMMITTED 阶段为 false，接口裁剪 serverSeed/resultHash） */
+  revealed?: boolean;
+  note?: string;
   derivation: Record<string, string>;
   serverPublicKey: string;
 }
