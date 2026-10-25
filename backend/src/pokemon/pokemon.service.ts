@@ -194,6 +194,21 @@ export class PokemonService implements OnModuleInit {
     return this.withHp(base);
   }
 
+  /**
+   * 详情（H1 / docs/review-2026-10-25.md）：**仅本人可读**。IV/EV/性格/羁绊属于私密养成数据，
+   * 非本人一律按「不存在」处理（404），不返回链上完整对象、也不泄露他人资产是否存在。
+   */
+  async getOneForUser(id: string, requester: string): Promise<PokemonView> {
+    // 不存在与「不是本人」返回同一个 404：调用方无法据此枚举他人的资产 id
+    const state = await this.contract.getPokemon(id).catch(() => null);
+    if (!state || state.ownerId !== requester) {
+      throw new AppException('NOT_FOUND', `pokemon ${id} does not exist`, HttpStatus.NOT_FOUND);
+    }
+    const base = withComputedStats(state);
+    base.renameCount = await this.renameCountOf(id);
+    return this.withHp(base);
+  }
+
   async pokedex(username: string) {
     const mine = await this.listMine(username);
     const owned = new Map<number, number>();

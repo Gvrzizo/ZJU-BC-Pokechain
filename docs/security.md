@@ -43,6 +43,7 @@
 | XSS | 前端 Vue 模板默认转义（无 `v-html` 渲染用户输入）；helmet 设置 CSP 等安全头 | `main.ts`、前端视图 |
 | CSRF | 认证走 `Authorization: Bearer` 头而非 Cookie，跨站表单无法携带；CORS 白名单（`CORS_ORIGINS`）精确列举来源 | `main.ts` |
 | 入参畸形 | 全局 `ValidationPipe({whitelist, transform})` + class-validator DTO，多余字段剥离、类型强转 | `main.ts`、各 dto |
+| 越权读（BOLA） | `GET /pokemon/:id` 只返回本人资产：非本人与不存在统一 404 `NOT_FOUND`（不泄露 IV/EV/性格，也不泄露资产是否存在）；队伍校验（房间/排位）另行去重，防止「同一只 ×6 条命」 | `pokemon.service::getOneForUser`、`battles.service::assertTeamUnique` |
 
 ### 1.4 私钥托管与风险声明
 

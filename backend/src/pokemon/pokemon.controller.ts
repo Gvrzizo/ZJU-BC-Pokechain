@@ -30,9 +30,10 @@ export class PokemonController {
     return this.pokemon.pokedex(user.username);
   }
 
+  /** 详情：仅本人（BOLA 防护，非本人 404；IV/EV/性格等私密数据不外泄）。 */
   @Get('pokemon/:id')
-  getOne(@Param('id') id: string) {
-    return this.pokemon.getOne(id);
+  getOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pokemon.getOneForUser(id, user.username);
   }
 
   /**
