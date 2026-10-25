@@ -86,15 +86,3 @@ export async function healTeam(): Promise<CenterHealResult> {
   const { data } = await http.post<CenterHealResult>('/pokemon/center/heal');
   return data;
 }
-
-export async function learnMove(
-  id: string,
-  moveId: string,
-  forgetMoveId?: string,
-): Promise<Pokemon> {
-  const { data } = await http.post<Pokemon>(
-    `/pokemon/${encodeURIComponent(id)}/moves/learn`,
-    { moveId, forgetMoveId },
-  );
-  return data;
-}

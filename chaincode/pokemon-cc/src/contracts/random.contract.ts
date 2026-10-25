@@ -1,5 +1,6 @@
 import { Context, Contract, Returns, Transaction } from 'fabric-contract-api';
 import { assertISO, fail, optionalMeta, requireHex, requireHex64, requireNonEmpty } from '../common/assert';
+import { requireRole } from '../common/cid';
 import { computeResultHash, sha256hex } from '../common/crypto';
 import { withIdempotency } from '../common/idempotency';
 import { RandPurpose, RandomCommit } from '../common/model';
@@ -56,6 +57,7 @@ export class RandomContract extends Contract {
     });
   }
 
+  /** 揭示（docs/chaincode-api.md §2.2）：**仅 system**——serverSeed 只有服务端持有。 */
   @Transaction()
   public async RevealAndVerify(
     ctx: Context,
@@ -65,6 +67,7 @@ export class RandomContract extends Contract {
     idemKey: string,
   ): Promise<string> {
     return withIdempotency(ctx, idemKey, nowISO, async () => {
+      requireRole(ctx, 'system');
       requireNonEmpty(eventId, 'eventId');
       requireNonEmpty(serverSeed, 'serverSeed');
       assertISO(nowISO, 'nowISO');

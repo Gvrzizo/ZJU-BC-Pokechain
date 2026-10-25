@@ -49,16 +49,6 @@ export class EvolveDto {
   stoneItemId?: string;
 }
 
-export class LearnMoveDto {
-  @IsString()
-  @IsNotEmpty()
-  moveId: string;
-
-  @IsOptional()
-  @IsString()
-  forgetMoveId?: string;
-}
-
 /**
  * 改名（docs/backend-api.md §2「改名」）：`name` 的完整校验（trim / 1-12 字符 / 拒绝控制字符与
  * `<>&"'`）在 `PokemonService.rename`（`pokemon-name.ts`）内做，DTO 只保证类型与非空。

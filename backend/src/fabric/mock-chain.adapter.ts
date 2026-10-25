@@ -472,11 +472,15 @@ export class MockChainAdapter extends ChainAdapter {
   }
 
   async revealAndVerify(
-    _as: ChainIdentity,
+    as: ChainIdentity,
     args: { eventId: string; serverSeed: string } & TxMeta,
   ): Promise<RandomCommitState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
+      // 链上 RevealAndVerify 仅 system（serverSeed 只在服务端）
+      if (as.role !== 'system') {
+        throw new CodedError('NOT_AUTHORIZED', 'only system can reveal a random event');
+      }
       const commit = this.mustGet<RandomCommitState>(`rand:${args.eventId}`, 'EVENT_NOT_FOUND', `random event ${args.eventId}`);
       if (commit.status !== 'COMMITTED') {
         throw new CodedError('INVALID_RANDOM_STATE', `random event ${args.eventId} is ${commit.status}, expected COMMITTED`);
@@ -518,7 +522,7 @@ export class MockChainAdapter extends ChainAdapter {
 
   // ---------------------------------------------------------------- PokemonContract
   async mintFromCapture(
-    _as: ChainIdentity,
+    as: ChainIdentity,
     args: {
       id: string;
       playerId: string;
@@ -535,6 +539,10 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<PokemonState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
+      // 链上 MintFromCapture 仅 system（铸造属性由后端从已验证随机流派生）
+      if (as.role !== 'system') {
+        throw new CodedError('NOT_AUTHORIZED', 'only system can mint from a capture');
+      }
       if (this.state.has(`pokemon:${args.id}`)) {
         throw new CodedError('POKEMON_EXISTS', `pokemon ${args.id} already exists`);
       }
@@ -606,10 +614,11 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<PokemonState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
-      const pokemon = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${args.id}`, 'POKEMON_NOT_FOUND', `pokemon ${args.id}`));
-      if (pokemon.ownerId !== as.userId && as.role !== 'system') {
-        throw new CodedError('NOT_OWNER', 'only the owner or system can apply growth');
+      // 链上 ApplyGrowth 仅 system：等级/EV/IV/物种/昵称都由后端校验成本后以 system 身份代签
+      if (as.role !== 'system') {
+        throw new CodedError('NOT_AUTHORIZED', 'only system can apply growth');
       }
+      const pokemon = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${args.id}`, 'POKEMON_NOT_FOUND', `pokemon ${args.id}`));
       if (pokemon.status !== 'IDLE') {
         throw new CodedError('ASSET_LOCKED', `pokemon ${args.id} is ${pokemon.status}`);
       }

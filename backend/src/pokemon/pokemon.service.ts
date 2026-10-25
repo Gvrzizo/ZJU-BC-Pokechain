@@ -6,7 +6,6 @@ import { AppException } from '../common/utils/errors';
 import { ChainEventsService } from '../fabric/chain-events.service';
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, GrowthPatch, PokemonState, SYSTEM_IDENTITY } from '../fabric/chain.types';
-import { getMove } from '../game-data/moves.data';
 import { zonesForSpecies } from '../game-data/encounter.data';
 import { EVOLUTIONS, getSpecies, SPECIES } from '../game-data/species.data';
 import { getItemType } from '../game-data/items.data';
@@ -512,24 +511,5 @@ export class PokemonService implements OnModuleInit {
     await this.redis.del(`cache:pokemon:${as.userId}`).catch(() => undefined);
     this.logger.log(`center heal for ${as.userId}: ${healed.length} pokemon, -${CENTER_HEAL_COST}P`);
     return { cost: CENTER_HEAL_COST, charged: true, points: player.points, healed };
-  }
-
-  async learnMove(as: ChainIdentity, id: string, moveId: string, forgetMoveId?: string) {
-    const pokemon = await this.mustOwn(as, id);
-    if (!getMove(moveId)) {
-      throw new AppException('UNKNOWN_MOVE', `move ${moveId} does not exist`, HttpStatus.BAD_REQUEST);
-    }
-    if (pokemon.moves.includes(moveId)) {
-      throw new AppException('MOVE_KNOWN', `already knows ${moveId}`, HttpStatus.CONFLICT);
-    }
-    let moves = [...pokemon.moves];
-    if (moves.length >= 4) {
-      if (!forgetMoveId || !moves.includes(forgetMoveId)) {
-        throw new AppException('FORGET_REQUIRED', 'knows 4 moves; provide a valid forgetMoveId', HttpStatus.BAD_REQUEST);
-      }
-      moves = moves.filter((m) => m !== forgetMoveId);
-    }
-    moves.push(moveId);
-    return this.withHp(withComputedStats(await this.contract.applyGrowth(as, id, { moves })));
   }
 }

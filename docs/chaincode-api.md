@@ -125,7 +125,7 @@ CreateBattle 时归一为 `{pokemonIds, items, points}` 并以此形态存储、
 | 交易 | 参数 | 规则 | 事件 |
 |---|---|---|---|
 | `Commit` | eventId, purpose, playerId, commitHash, clientSeed, nowISO, idemKey, meta? | eventId 不得已存在；commitHash 须为 64 位 hex；可选 `meta`（≤256 字节 UTF-8，缺省 `''`）存入记录供链下上下文留痕 | `RandomCommitted`（payload 含 meta） |
-| `RevealAndVerify` | eventId, serverSeed, nowISO, idemKey | 状态须 COMMITTED；重算 `sha256(serverSeed)==commitHash` 否则抛 `SEED_MISMATCH`；写入 serverSeed、`resultHash=sha256(serverSeed+"|"+clientSeed+"|"+eventId)`；状态→REVEALED | `RandomRevealed` |
+| `RevealAndVerify` | eventId, serverSeed, nowISO, idemKey | **仅 system**（serverSeed 只在服务端）；状态须 COMMITTED；重算 `sha256(serverSeed)==commitHash` 否则抛 `SEED_MISMATCH`；写入 serverSeed、`resultHash=sha256(serverSeed+"|"+clientSeed+"|"+eventId)`；状态→REVEALED | `RandomRevealed` |
 | `GetRandom` | eventId | 查询 | - |
 | （内部）`consumeRandom(ctx,eventId,purpose,playerId)` | - | 供同链码其他合约调用：须 REVEALED、purpose/playerId 匹配，→CONSUMED，返回 resultHash | - |
 
@@ -135,10 +135,10 @@ CreateBattle 时归一为 `{pokemonIds, items, points}` 并以此形态存储、
 ### 2.3 PokemonContract
 | 交易 | 参数 | 规则 | 事件 |
 |---|---|---|---|
-| `MintFromCapture` | id, playerId, speciesId, name, ivsJSON, nature, ability, shiny, movesJSON, dnaHash, eventId, nowISO, idemKey | `consumeRandom(eventId,'capture',playerId)` 成功才铸造；ivs 各值 0-31；**evs 初始全 0、bond 初始 50**；moves ≤4；初始 status=IDLE | `PokemonMinted` |
+| `MintFromCapture` | id, playerId, speciesId, name, ivsJSON, nature, ability, shiny, movesJSON, dnaHash, eventId, nowISO, idemKey | **仅 system**（铸造属性由后端从已验证随机流派生）；`consumeRandom(eventId,'capture',playerId)` 成功才铸造；ivs 各值 0-31；**evs 初始全 0、bond 初始 50**；moves ≤4；初始 status=IDLE | `PokemonMinted` |
 | `Transfer` | id, toId, nowISO, idemKey | 调用者=当前 owner（`hf.EnrollmentID` 匹配）；status=IDLE；toId 玩家存在；**易主时 bond 重置为 30**（转给自己不算易主） | `PokemonTransferred`（payload 含 bond） |
 | `BondUp` | pokemonIdsJSON, delta, reason, nowISO, idemKey | 仅 system；`pokemonIdsJSON` 为 id 数组（≤100 项、非空、不得重复）；每只 `bond += delta`（`delta` 1-50，safeInt），超过 255 截断；宝可梦须存在且非 `RELEASED`（锁定中可提升，违约抛 `POKEMON_NOT_FOUND` / `BAD_STATE`）；返回更新后的宝可梦数组 | `BondChanged`（每只一条） |
-| `ApplyGrowth` | id, growthJSON({level?,exp?,moves?,evs?,ivs?,speciesId?,name?}), nowISO, idemKey | owner 或 system；status=IDLE；level 1-100 单调不减；moves ≤4；**evs 六项齐全、单项 0-255、总和 ≤510（safeInt 校验，非法抛 `INVALID_PARAM`）**；**ivs 为六维子集（王冠类道具），每维 0-31 整数、`new >= old`，降低抛 `IV_DECREASE`** | `PokemonGrowth`（payload 含 level/exp/evs/ivs） |
+| `ApplyGrowth` | id, growthJSON({level?,exp?,moves?,evs?,ivs?,speciesId?,name?}), nowISO, idemKey | **仅 system**（后端扣费/校验学习表与进化条件后代签；玩家证书不能自改 level/EV/IV/species/name）；status=IDLE；level 1-100 单调不减；moves ≤4；**evs 六项齐全、单项 0-255、总和 ≤510（safeInt 校验，非法抛 `INVALID_PARAM`）**；**ivs 为六维子集（王冠类道具），每维 0-31 整数、`new >= old`，降低抛 `IV_DECREASE`** | `PokemonGrowth`（payload 含 level/exp/evs/ivs） |
 | `Release` | id, nowISO, idemKey | owner；status=IDLE；置 status=`RELEASED`、ownerId=""（保留记录供图鉴追溯，bond 不变） | `PokemonReleased` |
 | `GetPokemon` | id | 查询 | - |
 | `QueryByOwner` | ownerId | CouchDB 富查询 `docType=pokemon AND ownerId` | - |
@@ -205,6 +205,6 @@ Trade 的 `offer/request` 保持 `{pokemonIds, itemIds, points}` **整堆语义�
 
 ## 5. 单元测试要求（Jest + 手写 mock harness）
 
-测试桩为手写最小实现（`tests/helpers/harness.ts`：内存世界状态 + 事务写缓存，抛错即回滚，与 Fabric 交易语义一致；以 `mspId`/`role`/`hf.EnrollmentID` 属性模拟 Org1MSP（admin/system/player）与 Org2MSP（arbitrator/player）身份——玩家上下文用 `World.ctxAs(playerId)`，缺 `hf.EnrollmentID` 用 `World.ctx(mspId)` 验证拒绝路径），当前 93 用例。不用 `@theledger/fabric-mock-stub`：其依赖 `fabric-shim ^1.4` + TS3，与本工程 fabric-shim 2.5 / TS5 栈不兼容。
+测试桩为手写最小实现（`tests/helpers/harness.ts`：内存世界状态 + 事务写缓存，抛错即回滚，与 Fabric 交易语义一致；以 `mspId`/`role`/`hf.EnrollmentID` 属性模拟 Org1MSP（admin/system/player）与 Org2MSP（arbitrator/player）身份——玩家上下文用 `World.ctxAs(playerId)`，缺 `hf.EnrollmentID` 用 `World.ctx(mspId)` 验证拒绝路径），当前 95 用例。不用 `@theledger/fabric-mock-stub`：其依赖 `fabric-shim ^1.4` + TS3，与本工程 fabric-shim 2.5 / TS5 栈不兼容。
 
 覆盖：注册/铸币/转移/放生；Commit→Reveal→MintFromCapture 全流程（含 SEED_MISMATCH 拒绝）；EV 更新合法路径与单项 255/总和 510/负数/缺字段/非整数拒绝、旧记录无 `evs` 字段的兼容读取；**能力养成**（ApplyGrowth `ivs` 子集提升与 `IV_DECREASE`/越界/未知键/非整数/非对象拒绝且不落库）；**羁绊值 bond**（铸造默认 50、`Transfer` 易主重置 30、转给自己不重置、Trade 双方各自重置、Battle 赢家赢得的宝可梦重置而自有宝可梦保持、DRAW 不重置、`BondUp` 批量提升/255 截断/角色与参数校验/放生后拒绝/锁定中可提升、旧记录缺字段兼容）；**排位分 rating**（默认 1000、`UpdateRating` 仅 system 与 0/99999 边界、越界/非整数/不存在拒绝、旧记录缺字段兼容）；**道具堆叠归一**（mint 自动合并到最早堆叠、旧记录缺 `createdAt` 视为最早、锁定堆叠不参与、`MergeStacks` 权限与返回值、转移/交易不自动合并）；**部分数量押注**（原堆叠减量+确定性 id 子堆叠锁定、qty 越界/非正/重复/混用旧字段拒绝、旧 `itemIds` 归一为整堆、赢家收堆合并、DRAW 并回原堆叠、原堆叠易主时子堆叠独立恢复）；**随机承诺 meta**（存取、缺省空串、超 256 字节拒绝）；Trade 创建锁定→双方确认执行→余额与归属断言、取消解锁、过期退款、双花拒绝（锁定资产再 CreateTrade 抛 ASSET_LOCKED）；Battle 锁定→提交→确认结算（赢家得全部）、DRAW 退款、Forfeit、Dispute→Arbitrate、越权调用拒绝（非 owner 转移/非 arbitrator 仲裁/非 system 提交结果）、幂等键重放返回相同结果不重复变更。

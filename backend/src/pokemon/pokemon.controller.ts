@@ -7,7 +7,6 @@ import {
   AttemptDto,
   EncounterDto,
   EvolveDto,
-  LearnMoveDto,
   RenamePokemonDto,
   TrainDto,
 } from './dto/pokemon.dto';
@@ -87,10 +86,5 @@ export class PokemonController {
   @Post('pokemon/:id/release')
   release(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.pokemon.release(identityForUser(user), id);
-  }
-
-  @Post('pokemon/:id/moves/learn')
-  learnMove(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: LearnMoveDto) {
-    return this.pokemon.learnMove(identityForUser(user), id, dto.moveId, dto.forgetMoveId);
   }
 }

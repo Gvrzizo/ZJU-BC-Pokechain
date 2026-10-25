@@ -95,6 +95,29 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
     );
   });
 
+  test('MintFromCapture：仅 system；玩家证书不能铸造（FORBIDDEN），且随机事件不被消费', async () => {
+    await w.commitReveal('ev_forge', 'capture', 'u_ash');
+    await expectCode(
+      w.run(() =>
+        w.pokemon.MintFromCapture(
+          w.ctxAs('u_ash'), 'p_forge', 'u_ash', '150', 'Mewtwo', IVS_JSON, 'hardy', 'pressure', 'true', MOVES_JSON,
+          hash('dna-forge'), 'ev_forge', T2, 'idem-forge1',
+        ),
+      ),
+      'FORBIDDEN',
+    );
+    expect((await w.getRand('ev_forge')).status).toBe('REVEALED');
+    await expectCode(w.getPokemon('p_forge'), 'POKEMON_NOT_FOUND');
+    // system 仍可正常铸造（回归：随机事件未被前面的越权调用消费）
+    await w.run(() =>
+      w.pokemon.MintFromCapture(
+        w.systemCtx(), 'p_forge', 'u_ash', '25', '皮卡丘', IVS_JSON, 'hardy', 'static', 'false', MOVES_JSON,
+        hash('dna-forge'), 'ev_forge', T2, 'idem-forge2',
+      ),
+    );
+    expect((await w.getRand('ev_forge')).status).toBe('CONSUMED');
+  });
+
   test('Transfer：owner 转移成功；非 owner 抛 NOT_OWNER；toId 必须存在', async () => {
     await w.capturePokemon('p_1', 'u_ash');
     const p = JSON.parse(await w.run(() => w.pokemon.Transfer(w.ctxAs('u_ash'), 'p_1', 'u_gary', T3, 'idem-t1')));
@@ -113,22 +136,26 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
     expect(await w.getPokemon('p_1')).toMatchObject({ ownerId: 'u_ash', status: 'IDLE' });
   });
 
-  test('ApplyGrowth：owner 或 system；level 单调不减且 1-100；moves ≤4', async () => {
+  test('ApplyGrowth：仅 system；level 单调不减且 1-100；moves ≤4', async () => {
     await w.capturePokemon('p_1', 'u_ash');
-    let p = JSON.parse(await w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ level: 10, exp: 500 }), T3, 'idem-g1')));
+    let p = JSON.parse(await w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ level: 10, exp: 500 }), T3, 'idem-g1')));
     expect(p).toMatchObject({ level: 10, exp: 500 });
     p = JSON.parse(await w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ moves: ['thunderbolt'] }), T3, 'idem-g2')));
     expect(p.moves).toEqual(['thunderbolt']);
-    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ level: 9 }), T3, 'idem-g3')), 'INVALID_PARAM');
-    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ level: 101 }), T3, 'idem-g4')), 'INVALID_PARAM');
-    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_gary'), 'p_1', JSON.stringify({ level: 11 }), T3, 'idem-g5')), 'NOT_OWNER');
+    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ level: 9 }), T3, 'idem-g3')), 'INVALID_PARAM');
+    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ level: 101 }), T3, 'idem-g4')), 'INVALID_PARAM');
+    // owner 本人也不能直接写入（C3）：养成必须由后端校验成本后用 system 身份代签
+    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ level: 11 }), T3, 'idem-g5')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_gary'), 'p_1', JSON.stringify({ level: 11 }), T3, 'idem-g6')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.ctx(ORG1), 'p_1', JSON.stringify({ level: 11 }), T3, 'idem-g7')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.pokemon.ApplyGrowth(w.adminCtx(), 'p_1', JSON.stringify({ level: 11 }), T3, 'idem-g8')), 'FORBIDDEN');
   });
 
   test('ApplyGrowth：EV 更新合法路径 + 单项 0-255 / 总和 ≤510 校验', async () => {
     await w.capturePokemon('p_1', 'u_ash');
     const evs = { hp: 4, atk: 252, def: 0, spatk: 0, spdef: 0, speed: 252 };
     const p = JSON.parse(
-      await w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ evs }), T3, 'idem-ev1')),
+      await w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ evs }), T3, 'idem-ev1')),
     );
     expect(p.evs).toEqual(evs);
     expect(w.eventNames()).toContain('PokemonGrowth');
@@ -136,7 +163,7 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
     // 单项超 255
     await expectCode(
       w.run(() =>
-        w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ evs: { ...evs, atk: 256 } }), T3, 'idem-ev2'),
+        w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ evs: { ...evs, atk: 256 } }), T3, 'idem-ev2'),
       ),
       'INVALID_PARAM',
     );
@@ -144,7 +171,7 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
     await expectCode(
       w.run(() =>
         w.pokemon.ApplyGrowth(
-          w.ctxAs('u_ash'),
+          w.systemCtx(),
           'p_1',
           JSON.stringify({ evs: { hp: 255, atk: 255, def: 1, spatk: 0, spdef: 0, speed: 0 } }),
           T3,
@@ -156,14 +183,14 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
     // 负数 / 缺失字段 / 非整数
     await expectCode(
       w.run(() =>
-        w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ evs: { ...evs, speed: -4 } }), T3, 'idem-ev4'),
+        w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ evs: { ...evs, speed: -4 } }), T3, 'idem-ev4'),
       ),
       'INVALID_PARAM',
     );
     await expectCode(
       w.run(() =>
         w.pokemon.ApplyGrowth(
-          w.ctxAs('u_ash'),
+          w.systemCtx(),
           'p_1',
           JSON.stringify({ evs: { hp: 0, atk: 0, def: 0, spatk: 0, spdef: 0 } }),
           T3,
@@ -174,7 +201,7 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
     );
     await expectCode(
       w.run(() =>
-        w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ evs: { ...evs, atk: 12.5 } }), T3, 'idem-ev6'),
+        w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ evs: { ...evs, atk: 12.5 } }), T3, 'idem-ev6'),
       ),
       'INVALID_PARAM',
     );
@@ -185,7 +212,7 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
   test('ApplyGrowth：IV 变更（王冠类道具）——子集提升、未提及项不变、允许同值', async () => {
     await w.capturePokemon('p_1', 'u_ash');
     const grown = JSON.parse(
-      await w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ ivs: { hp: 31, speed: 20 } }), T3, 'idem-iv1')),
+      await w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ ivs: { hp: 31, speed: 20 } }), T3, 'idem-iv1')),
     );
     expect(grown.ivs).toEqual({ hp: 31, atk: 12, def: 8, spatk: 15, spdef: 14, speed: 20 });
     expect(w.eventNames()).toContain('PokemonGrowth');
@@ -194,7 +221,7 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
   test('ApplyGrowth：IV 只能升不能降（IV_DECREASE）；越界/未知键/非整数/非对象拒绝且不落库', async () => {
     await w.capturePokemon('p_1', 'u_ash');
     const grow = (ivs: unknown, key: string) =>
-      w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ ivs }), T3, key));
+      w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ ivs }), T3, key));
     await expectCode(grow({ hp: 9 }, 'idem-iv2'), 'IV_DECREASE');
     await expectCode(grow({ hp: 32 }, 'idem-iv3'), 'INVALID_PARAM');
     await expectCode(grow({ hp: -1 }, 'idem-iv4'), 'INVALID_PARAM');
@@ -218,7 +245,7 @@ describe('PokemonContract（捕捉铸造全流程）', () => {
     const loaded = await w.getPokemon('p_1');
     expect(loaded.evs).toEqual({ hp: 0, atk: 0, def: 0, spatk: 0, spdef: 0, speed: 0 });
     const grown = JSON.parse(
-      await w.run(() => w.pokemon.ApplyGrowth(w.ctxAs('u_ash'), 'p_1', JSON.stringify({ level: 6 }), T3, 'idem-legacy')),
+      await w.run(() => w.pokemon.ApplyGrowth(w.systemCtx(), 'p_1', JSON.stringify({ level: 6 }), T3, 'idem-legacy')),
     );
     expect(grown.evs).toEqual({ hp: 0, atk: 0, def: 0, spatk: 0, spdef: 0, speed: 0 });
   });

@@ -40,7 +40,8 @@ Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + r
 | POST | `/pokemon/:id/rename` | `{name}` **改名（昵称）**：第一次免费，之后每次 **50 积分**（`AddPoints(-50, reason='rename:<pokemonId>:<ordinal>')`）+ 链上 `ApplyGrowth({name})`。昵称 1-12 个字符（trim + 折叠空白后按码点计，中英文均可），拒绝控制字符与 `<>&"'`；非本人（含已放生）`NOT_OWNER`(403)、交易/对战锁定中 `ASSET_LOCKED`(409)、格式非法 `INVALID_NAME`(400)、余额不足 `INSUFFICIENT_POINTS`(400)。返回 `{name, renameCount, charged}`，见下「改名」 |
 | POST | `/pokemon/:id/release` | `Release`（前端二次确认）；成功后 +等级×1 积分（reason=`reward:release:<pokemonId>`，见 §10），并清掉该宝可梦的伤势键 |
 | POST | `/pokemon/center/heal` | **宝可梦中心**：全队回满，每次 **10 积分**（`AddPoints(-10, reason='heal:center')`）。只治疗本人 `IDLE` 的宝可梦；全员满血时**不扣费**（`charged=false`）。返回 `{cost, charged, points, healed:[{pokemonId,speciesId,name,before,after,maxHp}]}`（见下「伤势持久化」） |
-| POST | `/pokemon/:id/moves/learn` | `{moveId, forgetMoveId?}` → `ApplyGrowth(moves)` |
+
+**技能获取（2026-10-25 收紧）**：只有两条路径——**升级学习表**（`applyExp` 跨过学习等级时自动学会，见下「升级与进化」）与**技能机 TM**（`POST /items/:id/use` 的 `tm` 分支，消耗 1 个 TM）。原先的 `POST /pokemon/:id/moves/learn`（免费学任意技能）已下线，链上 `ApplyGrowth` 也只接受 system 证书，玩家无法绕过 TM/学习表改技能。
 
 **能力值计算（实现口径，第三世代官方公式，2026-09 经 Bulbapedia "Stat"/"Nature" 核实）**
 

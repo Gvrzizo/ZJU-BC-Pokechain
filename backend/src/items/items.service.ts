@@ -135,7 +135,8 @@ export class ItemsService {
         }
         moves.push(moveId);
         await this.contract.consumeItem(as, id, 1, 'use-tm');
-        const updated = await this.contract.applyGrowth(as, targetPokemonId!, { moves });
+        // 链上 ApplyGrowth 仅 system：TM 的「已消耗 + 学习表/招式校验」在前，写链由 system 代签
+        const updated = await this.contract.applyGrowth(SYSTEM_IDENTITY, targetPokemonId!, { moves });
         return { used: item.typeId, taught: moveId, pokemon: updated };
       }
       case 'other':

@@ -140,8 +140,9 @@ describe('CaptureService (mock chain)', () => {
       commitHash: sha256hex(SERVER_SEED),
       clientSeed: CLIENT_SEED,
     });
+    // 揭示只能由 system 发起（链上 RevealAndVerify 的权限）；serverSeed 不匹配仍是 SEED_MISMATCH
     await expect(
-      contract.revealAndVerify(ash, 'ev_mismatch', 'ff'.repeat(32)),
+      contract.revealAndVerify(SYSTEM_IDENTITY, 'ev_mismatch', 'ff'.repeat(32)),
     ).rejects.toThrow(/SEED_MISMATCH/);
   });
 
