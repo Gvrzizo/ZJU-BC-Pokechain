@@ -8,7 +8,7 @@ import { MockChainAdapter } from '../src/fabric/mock-chain.adapter';
 import { PokemonHpService } from '../src/pokemon/pokemon-hp.service';
 import { PokemonService } from '../src/pokemon/pokemon.service';
 import { PokemonRename } from '../src/pokemon/entities/pokemon-rename.entity';
-import { BondService } from '../src/ranked/bond.service';
+import { BondService } from '../src/bond/bond.service';
 import { PlayerBlockService } from '../src/users/player-block.service';
 import {
   ADMIN_IDENTITY,
@@ -47,7 +47,7 @@ export function makePokemonService(
   );
 }
 
-/** BondService 的最小构造（野怪战斗的羁绊挂钩，见 src/ranked/bond.service.ts）。
+/** BondService 的最小构造（野怪战斗的羁绊挂钩，见 src/bond/bond.service.ts）。
  * 传入 redis 时与调用方共享每日上限记账（bond:day:*）。 */
 export function makeBondService(contract: ContractService, redis: RedisService = makeRedis()): BondService {
   return new BondService(contract, redis);

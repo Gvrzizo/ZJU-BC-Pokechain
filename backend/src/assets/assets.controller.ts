@@ -1,10 +1,8 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { IsInt, IsNotEmpty, IsString, Length, Min } from 'class-validator';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Roles, Public } from '../common/decorators/api.decorators';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
-import { AuditLog } from '../admin/entities/audit-log.entity';
+import { AuditService } from '../admin/audit.service';
 import { AssetsService } from './assets.service';
 
 class RegisterAssetDto {
@@ -25,7 +23,7 @@ class RegisterAssetDto {
 export class AssetsController {
   constructor(
     private readonly assets: AssetsService,
-    @InjectRepository(AuditLog) private readonly audits: Repository<AuditLog>,
+    private readonly audits: AuditService,
   ) {}
 
   @Public()
@@ -38,9 +36,7 @@ export class AssetsController {
   @Post('register')
   async register(@CurrentUser() user: AuthUser, @Body() dto: RegisterAssetDto) {
     const asset = await this.assets.register(dto.uri, dto.sha256, dto.size, user.username);
-    await this.audits.save(
-      this.audits.create({ actor: user.username, action: 'assets.register', target: dto.uri, detail: { sha256: dto.sha256, size: dto.size } }),
-    );
+    await this.audits.record(user.username, 'assets.register', dto.uri, { sha256: dto.sha256, size: dto.size });
     return asset;
   }
 }

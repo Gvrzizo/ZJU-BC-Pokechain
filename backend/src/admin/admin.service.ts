@@ -1,19 +1,17 @@
 import { randomUUID } from 'crypto';
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { AppException } from '../common/utils/errors';
 import { sha256hex } from '../common/utils/crypto.util';
 import { ContractService } from '../fabric/contract.service';
 import { ADMIN_IDENTITY, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { getItemType } from '../game-data/items.data';
-import { AuditLog } from './entities/audit-log.entity';
+import { AuditService } from './audit.service';
 
 @Injectable()
 export class AdminService {
   constructor(
     private readonly contract: ContractService,
-    @InjectRepository(AuditLog) private readonly audits: Repository<AuditLog>,
+    private readonly audits: AuditService,
   ) {}
 
   async mintItem(actor: string, playerId: string, typeId: string, quantity: number) {
@@ -49,10 +47,10 @@ export class AdminService {
   }
 
   auditLogs(limit = 100) {
-    return this.audits.find({ order: { createdAt: 'DESC' }, take: Math.min(limit, 500) });
+    return this.audits.logs(limit);
   }
 
   private async audit(actor: string, action: string, target: string, detail: Record<string, unknown>) {
-    await this.audits.save(this.audits.create({ actor, action, target, detail }));
+    await this.audits.record(actor, action, target, detail);
   }
 }

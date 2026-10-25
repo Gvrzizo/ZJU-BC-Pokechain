@@ -1,15 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../common/redis/redis.service';
+import { utcDate } from '../common/utils/time.util';
 import { ContractService } from '../fabric/contract.service';
 import { SYSTEM_IDENTITY } from '../fabric/chain.types';
-import { BondChange } from './ranked.types';
-import { utcDate } from './bot';
 import {
   bondBatches,
   bondDailyAllowance,
   bondDailyKey,
   BOND_DAILY_TTL_SEC,
   pvpBondGrants,
+  BondChange,
   BondSide,
   WildBondKind,
   wildBondDelta,

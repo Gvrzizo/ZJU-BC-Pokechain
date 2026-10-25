@@ -1,5 +1,6 @@
 // 排位 / 羁绊链下状态（Redis）与对外契约，见 docs/backend-api.md §11。
 import type { ArenaPayout, ArenaSubsidyBlock } from './arena';
+import type { BondChange } from '../bond/bond';
 
 export type QueueState = 'QUEUED' | 'MATCH_PENDING' | 'MATCHED' | 'TIMEOUT' | 'ERROR';
 
@@ -116,18 +117,6 @@ export interface PendingBattleReward {
 
 export interface RatingChange {
   playerId: string;
-  before: number;
-  after: number;
-  delta: number;
-}
-
-/** 一只宝可梦的羁绊变化（仅列出真正被提升的） */
-export interface BondChange {
-  pokemonId: string;
-  speciesId: number;
-  name: string;
-  side: 'A' | 'B';
-  result: 'WIN' | 'LOSS' | 'DRAW';
   before: number;
   after: number;
   delta: number;
