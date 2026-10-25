@@ -14,6 +14,7 @@ import {
   setRunningShoes,
   stepDuration,
 } from '../running';
+import { getTouchDir, isTouchRunning, resetTouchInput } from '../touch-input';
 import {
   START_MAP_ID,
   T,
@@ -111,6 +112,7 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   init(data: { mapId?: string; spawn?: { x: number; y: number } }) {
+    resetTouchInput(); // 换图/重启场景不继承上一张图的触控方向
     const stored = readStoredSpawn();
     const requested = data?.mapId ?? stored?.mapId ?? START_MAP_ID;
     this.mapDef = getMapDef(requested);
@@ -158,11 +160,16 @@ export class OverworldScene extends Phaser.Scene {
     this.input.on(Phaser.Input.Events.POINTER_DOWN, () => this.advanceDialog());
 
     this.events.on(Phaser.Scenes.Events.RESUME, () => {
+      resetTouchInput();
       this.moving = false;
       this.running = false;
       this.busy = false;
       this.syncHud(false);
     });
+    // KeepAlive / 遇敌暂停 / 切页时清掉触控状态，避免指针丢失后角色自己走
+    this.events.on(Phaser.Scenes.Events.SLEEP, () => resetTouchInput());
+    this.events.on(Phaser.Scenes.Events.WAKE, () => resetTouchInput());
+    this.events.on(Phaser.Scenes.Events.SHUTDOWN, () => resetTouchInput());
 
     this.syncHud(true);
   }
@@ -229,11 +236,13 @@ export class OverworldScene extends Phaser.Scene {
     }
     if (this.busy || this.moving) return;
 
-    let dir: Facing | null = null;
-    if (this.cursors.left.isDown || this.wasd['A'].isDown) dir = 'left';
-    else if (this.cursors.right.isDown || this.wasd['D'].isDown) dir = 'right';
-    else if (this.cursors.up.isDown || this.wasd['W'].isDown) dir = 'up';
-    else if (this.cursors.down.isDown || this.wasd['S'].isDown) dir = 'down';
+    let dir: Facing | null = getTouchDir();
+    if (!dir) {
+      if (this.cursors.left.isDown || this.wasd['A'].isDown) dir = 'left';
+      else if (this.cursors.right.isDown || this.wasd['D'].isDown) dir = 'right';
+      else if (this.cursors.up.isDown || this.wasd['W'].isDown) dir = 'up';
+      else if (this.cursors.down.isDown || this.wasd['S'].isDown) dir = 'down';
+    }
 
     if (dir) {
       this.tryMove(dir);
@@ -244,9 +253,9 @@ export class OverworldScene extends Phaser.Scene {
     else this.player.anims.stop();
   }
 
-  /** 按住 Shift 且已拿到跑鞋 → 跑步（移动耗时减半、行走动画 ×2） */
+  /** 按住 Shift（或触控跑步开关）且已拿到跑鞋 → 跑步（移动耗时减半、行走动画 ×2） */
   private isRunningNow(): boolean {
-    return isRunning(this.shiftKey?.isDown ?? false, hasRunningShoes());
+    return isRunning((this.shiftKey?.isDown ?? false) || isTouchRunning(), hasRunningShoes());
   }
 
   private playWalkAnim(dir: Facing, running: boolean) {
@@ -402,6 +411,20 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
+   * 触控 A 键：对话打开时翻页，否则等同空格/Z 的交互。
+   * GameView 通过 `game.scene.getScene('OverworldScene').touchAction?.()` 调用；
+   * 行走中/请求中不响应，避免和键盘路径产生两套移动/交互逻辑。
+   */
+  touchAction(): void {
+    if (this.session) {
+      this.advanceDialog();
+      return;
+    }
+    if (this.moving || this.busy) return;
+    this.interact();
+  }
+
+  /**
    * 妈妈赠送跑鞋（起始镇）：对话结束才调 `POST /users/me/running-shoes`（幂等，重复领取返回已有的）。
    * 已经拿到过跑鞋时只说关心的话；领取成功后把状态同步给背包缓存与跑步逻辑（HUD 于是显示提示）。
    */
@@ -528,6 +551,7 @@ export class OverworldScene extends Phaser.Scene {
     if (Math.random() >= config.rate) return;
     this.syncHud(false); // 遇敌前把区域交给 CaptureOverlay（后端按 zoneId 决定野生池与等级）
     this.busy = true;
+    resetTouchInput(); // 进入 CaptureOverlay 后指针事件不再到达，先松开所有方向
     gameBus.emit(BUS_EVENTS.ENCOUNTER, { zoneId: this.mapDef.zoneId });
     this.scene.pause();
   }
@@ -546,6 +570,7 @@ export class OverworldScene extends Phaser.Scene {
 
   /** 捕捉流程结束：恢复行走 */
   resumeFromEncounter() {
+    resetTouchInput();
     this.busy = false;
     this.moving = false;
     this.scene.resume();

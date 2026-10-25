@@ -595,6 +595,20 @@ export interface FairnessEvent {
   status: 'COMMITTED' | 'REVEALED' | 'CONSUMED';
 }
 
+/** 战斗回放与签名（P2-3；仅 ev_battle_<battleId> 事件返回） */
+export interface FairnessBattle {
+  battleId: string;
+  /** 链上结果；平局为 'DRAW' */
+  winnerId: string;
+  /** sha256(canonical(turnLog))；回放日志缺失时为链上 resultHash */
+  resultHash: string;
+  /** DER hex（secp256k1 over sha256(resultHash bytes)） */
+  serverSig: string;
+  serverKeyId: string;
+  /** battle_logs.turns_json；缺失/旧记录为 null */
+  turnLog: unknown[] | null;
+}
+
 /** GET /fairness/:eventId 完整响应 */
 export interface FairnessResponse {
   event: FairnessEvent;
@@ -605,6 +619,8 @@ export interface FairnessResponse {
   serverPublicKey: string;
   /** 签名公钥指纹（H19；换钥后用于识别旧 serverSig 对应哪把公钥） */
   serverKeyId?: string;
+  /** 战斗事件额外披露的回放日志 + resultHash 签名（P2-3） */
+  battle?: FairnessBattle;
 }
 
 export interface ApiError {

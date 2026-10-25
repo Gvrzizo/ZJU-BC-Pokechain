@@ -1,8 +1,12 @@
-import { Controller, Get, NotFoundException, Param } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Optional, Param } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { ContractService } from '../fabric/contract.service';
 import { CAPTURE_DERIVATION_DOC } from '../pokemon/capture-derive';
 import { SigningService } from '../battles/signing.service';
+import { BattleLog } from '../battles/entities/battle-log.entity';
 import { Public } from '../common/decorators/api.decorators';
+import { buildBattleFairness, parseBattleEventId } from './fairness.battle';
 
 const BATTLE_DERIVATION_DOC =
   'battle randomness: rand(n)=HMAC-SHA256(key=serverSeed,msg=`${clientSeed}|${eventId}|${n}`)/2^64, ' +
@@ -15,6 +19,9 @@ export class FairnessController {
   constructor(
     private readonly contract: ContractService,
     private readonly signing: SigningService,
+    @Optional()
+    @InjectRepository(BattleLog)
+    private readonly battleLogs?: Repository<BattleLog>,
   ) {}
 
   /** Full commit-reveal disclosure + derivation recipe so anyone can recompute. */
@@ -27,6 +34,15 @@ export class FairnessController {
     // H9：结算前（COMMITTED）不返回 serverSeed/resultHash——否则首球后就能推算后续投球与 AI 行为。
     // 链上 COMMITTED 记录的 serverSeed 本来就是空串，这里再显式裁剪并给出 revealed 标记。
     const revealed = random.status === 'REVEALED' || random.status === 'CONSUMED';
+    // P2-3：战斗事件（ev_battle_<battleId>）额外披露回放日志与签名，供前端复算 + 验签。
+    const battleId = parseBattleEventId(eventId);
+    const battle = battleId
+      ? await buildBattleFairness(battleId, {
+          battleLogs: this.battleLogs,
+          contract: this.contract,
+          fallbackKeyId: this.signing.keyId,
+        })
+      : undefined;
     return {
       event: revealed ? random : { ...random, serverSeed: '', resultHash: '' },
       revealed,
@@ -41,6 +57,7 @@ export class FairnessController {
       },
       serverPublicKey: this.signing.publicKeyPem,
       serverKeyId: this.signing.keyId,
+      ...(battle ? { battle } : {}),
     };
   }
 }

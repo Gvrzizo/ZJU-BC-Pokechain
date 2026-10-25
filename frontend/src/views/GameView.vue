@@ -14,14 +14,18 @@ import { useRouter } from 'vue-router';
 import { createGame, destroyGame } from '@/game/createGame';
 import { gameBus, BUS_EVENTS } from '@/game/bus';
 import { RUNNING_SPEED_MULTIPLIER, setRunningShoes } from '@/game/running';
+import { resetTouchInput } from '@/game/touch-input';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useWorldStore } from '@/stores/world';
 import { useZoneStore } from '@/stores/zone';
 import CaptureOverlay from '@/components/CaptureOverlay.vue';
+import TouchControls from '@/components/TouchControls.vue';
 import WorldHud from '@/components/WorldHud.vue';
 
 const gameHost = ref<HTMLElement | null>(null);
 const capturing = ref(false);
+/** 触控层只在有触摸能力且不在捕捉流程时显示（SSR 首帧为 false） */
+const showTouch = ref(false);
 /** 首次拿到跑鞋的提示（HUD 里也常驻一条"按住 Shift 跑步"） */
 const runHint = ref('');
 const pokemonStore = usePokemonStore();
@@ -93,6 +97,24 @@ function boot() {
   game = createGame(gameHost.value, 'overworld');
 }
 
+/** 触控 A 键：交给场景处理（对话翻页 / 面向 NPC 交互），不复制场景逻辑 */
+function onTouchAction() {
+  const scene = game?.scene.getScene('OverworldScene') as
+    | { touchAction?: () => void }
+    | undefined;
+  scene?.touchAction?.();
+}
+
+function detectTouchDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (window.matchMedia?.('(pointer: coarse)').matches) return true;
+  } catch {
+    /* 老浏览器/隐私模式：继续看 maxTouchPoints */
+  }
+  return typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+}
+
 function teardown() {
   destroyGame(game);
   game = null;
@@ -106,6 +128,7 @@ function wake() {
 }
 
 onMounted(() => {
+  showTouch.value = detectTouchDevice();
   boot();
   gameBus.on(BUS_EVENTS.ENCOUNTER, onEncounter);
   gameBus.on(BUS_EVENTS.PLAYER_MOVED, onPlayerMoved);
@@ -119,6 +142,7 @@ onBeforeUnmount(() => {
   gameBus.off(BUS_EVENTS.PLAYER_MOVED, onPlayerMoved);
   gameBus.off(BUS_EVENTS.OPEN_SHOP, onOpenShop);
   gameBus.off(BUS_EVENTS.RUNNING_SHOES, onRunningShoes);
+  resetTouchInput();
   if (hintTimer) clearTimeout(hintTimer);
   hintTimer = null;
   teardown();
@@ -126,6 +150,8 @@ onBeforeUnmount(() => {
 
 onDeactivated(() => {
   sleepingSince = Date.now();
+  // 触控状态必须在 loop 停掉前清空：指针可能再也收不到 pointerup，否则回来后角色自己走
+  resetTouchInput();
   // sleep 主循环（update 不再执行）+ 暂停所有 Phaser 音频；画布保留，回来直接接上
   if (game) {
     game.loop.sleep();
@@ -156,6 +182,7 @@ onActivated(() => {
     <div class="game-wrap px-panel">
       <div ref="gameHost" class="game-host" />
       <WorldHud />
+      <TouchControls v-if="showTouch && !capturing" :visible="showTouch" @action="onTouchAction" />
       <CaptureOverlay v-if="capturing" @done="onCaptureDone" />
     </div>
     <div class="game-guide">
