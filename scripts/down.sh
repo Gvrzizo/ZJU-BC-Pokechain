@@ -27,6 +27,8 @@ else
   warnln "未找到 ${COMPOSE_FILE}，跳过 compose down"
 fi
 
+# ccaas 链码运行时（compose profile 服务；down 通常已移除，best-effort 兜底）
+docker rm -f pokechain-cc >/dev/null 2>&1 || true
 # 清理链码镜像（peer 构建的 dev-peer0.* 镜像），best-effort
 cc_images=$(docker images --format '{{.Repository}}' | grep '^dev-peer0' || true)
 if [ -n "${cc_images}" ]; then

@@ -22,7 +22,7 @@ docker compose up -d --build  # 启动 PostgreSQL/Redis/MinIO + 后端 + 前端�
 
 浏览器访问 http://localhost:8080 。**组员环境复刻的完整步骤（含真链模式与故障表）见 `docs/setup.md`。**
 
-真链模式（Fabric 网络 + 真实链码部署）：`./scripts/up.sh`（含服务身份 enroll）→ `CC_VERSION=1.2 CC_SEQUENCE=3 ./scripts/deployCC.sh`（Docker 28+ 自动走 ccaas）→ `./scripts/real-chain-smoke.sh <用户>` → `docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build`。
+真链模式（Fabric 网络 + 真实链码部署）：`./scripts/up.sh`（含服务身份 enroll）→ `./scripts/deployCC.sh`（新网络默认 1.0/1；旧 ledger 需递增 `CC_VERSION`/`CC_SEQUENCE`；Docker 28+ 自动走 ccaas）→ `./scripts/real-chain-smoke.sh <用户>` → `docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build`。
 
 详细文档见 `docs/`：
 

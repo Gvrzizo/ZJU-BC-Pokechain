@@ -459,7 +459,7 @@ TM 800（原 1500：360 个野生种里约 88% 已有 ≥90 威力招式，高�
 |---|---|---|
 | GET | `/assets/manifest` | 前端资源清单 `[{uri, sha256, size}]`（MinIO 签名 URL，前端下载后校验哈希） |
 | POST | `/assets/register` | admin：登记资源 `metadataHash+URI` |
-| GET | `/fairness/:eventId` | 返回 RandomCommit + 派生算法说明 + `serverPublicKey`/`serverKeyId`（公钥指纹），供任何人复核。**H9：`COMMITTED` 阶段不返回 `serverSeed`/`resultHash`**（响应带 `revealed:false` 与说明），结算后（`REVEALED`/`CONSUMED`）才返回完整数据；战斗事件在结算时揭示。**H19**：`SERVER_SIGNING_KEY` 固定时 `serverKeyId` 跨重启不变，`battle_logs.serverKeyId` 记录当次签名密钥 |
+| GET | `/fairness/:eventId` | 返回 RandomCommit + 派生算法说明 + `serverPublicKey`/`serverKeyId`（公钥指纹），供任何人复核。**H9：`COMMITTED` 阶段不返回 `serverSeed`/`resultHash`**（响应带 `revealed:false` 与说明），结算后（`REVEALED`/`CONSUMED`）才返回完整数据；战斗事件在结算时揭示。**H19**：`SERVER_SIGNING_KEY` 固定时 `serverKeyId` 跨重启不变，`battle_logs.serverKeyId` 记录当次签名密钥。**P2-3 战斗披露**：`eventId` 形如 `ev_battle_<battleId>` 时额外返回 `battle:{battleId, winnerId（链上）, resultHash（battle_logs 的回合日志哈希，缺失时回退链上）, serverSig（DER hex）, serverKeyId, turnLog（battle_logs.turns_json，缺失为 null）}`；前端用 `sha256(canonicalize(turnLog))` 复算 resultHash 并用 secp256k1 验签（签名为对 `sha256(resultHash bytes)` 的 ECDSA DER）。`COMMITTED`/随机事件本身仍按 H9 裁剪 |
 | GET | `/leaderboard` | 积分榜（Redis ZSET 缓存；监听链上 `PointsChanged`/`PlayerRegistered`/`BattleSettled`，事件里的 `playerId`/`playerA`/`playerB`/`winnerId`/`fromId`/`toId` 都会触发重读对应玩家余额刷新） |
 
 ## 7. PostgreSQL 表（链下）

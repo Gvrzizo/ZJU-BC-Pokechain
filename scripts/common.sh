@@ -62,9 +62,4 @@ cleanupChaincodeContainers() {
     warnln "清理残留链码容器：${cc_containers}"
     echo "${cc_containers}" | xargs -r docker rm -f >/dev/null 2>&1 || true
   fi
-  # ccaas 链码运行时（deployCC.sh 以 compose profile 启动，名字固定）
-  if docker ps -a --format '{{.Names}}' | grep -qx 'pokechain-cc'; then
-    warnln "清理 ccaas 链码容器：pokechain-cc"
-    docker rm -f pokechain-cc >/dev/null 2>&1 || true
-  fi
 }

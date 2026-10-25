@@ -54,7 +54,7 @@ docker compose down -v       # 彻底清空（链状态/账号全没），之后
 
 ```bash
 ./scripts/up.sh               # 起双组织网络+通道；末尾自动 enroll system/admin 服务身份（幂等）
-CC_VERSION=1.2 CC_SEQUENCE=3 ./scripts/deployCC.sh   # 部署链码；Docker 28+ 自动走 ccaas（pokechain-cc 容器）
+./scripts/deployCC.sh         # 部署链码（新网络用默认 1.0/1；Docker 28+ 自动走 ccaas）
 ./scripts/real-chain-smoke.sh <已注册用户名>          # 先验 querycommitted + GetPlayer
 CERT_ENC_KEY=$(openssl rand -hex 32) \
   docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build

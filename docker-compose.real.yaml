@@ -13,6 +13,9 @@
 
 services:
   backend:
+    # 以宿主 UID 运行，才能读取 scripts/enroll-system.sh 生成的 0600 服务私钥
+    # （默认 1000；非 1000 用户用 HOST_UID=$(id -u) docker compose ...）
+    user: "${HOST_UID:-1000}"
     environment:
       FABRIC_MOCK: "false"
       FABRIC_CERT_STORE_DIR: /app/.fabric-certs

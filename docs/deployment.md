@@ -145,9 +145,10 @@ docker run -d --name frontend --network pokechain-app -p 8080:80 pokechain-front
 ### 4.2 部署链码（node / ccaas 自动选择）
 
 ```bash
-# 首次部署（默认 version=1.0 sequence=1）
+# 首次部署（新网络：默认 version=1.0 sequence=1）
 ./scripts/deployCC.sh
-# 已有旧定义时升级（本仓库评审环境已到 1.1/sequence 2）
+# 已有旧定义时升级（sequence 必须 +1；本仓库评审环境的 ledger 已到 1.1/sequence 2，
+# 因此本轮用 1.2/sequence 3；换一台机器请按 querycommitted 的实际值递增）
 CC_VERSION=1.2 CC_SEQUENCE=3 ./scripts/deployCC.sh
 ```
 
@@ -241,7 +242,8 @@ MINIO_MOCK=true        # 或接真实 MinIO
 ```bash
 # 本地路径：按 §3.2 第 3–4 步，启动前 export 上表变量（FABRIC_MOCK=false）
 # 容器路径：叠加真链覆盖文件（只读挂载 organizations 与 .fabric-certs，接入 pokechain_net）
-CERT_ENC_KEY=$(openssl rand -hex 32) \
+# 覆盖文件默认以宿主 UID 1000 运行 backend（读取 0600 服务私钥）；非 1000 用户：
+HOST_UID=$(id -u) CERT_ENC_KEY=$(openssl rand -hex 32) \
   docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build
 ```
 
@@ -300,6 +302,8 @@ BASE_URL=http://localhost:3000 ./scripts/e2e-smoke.sh
 | 端口被占用（7050/7051/7054/8054/9051，或 3000/5173/5432/6379） | 上次未停干净/端口冲突 | `sudo lsof -i :<端口>` 找进程；Fabric 侧先 `./scripts/down.sh` |
 | `x509: certificate is valid for ... not localhost` | 旧配置生成的证书无 localhost SAN | `./scripts/down.sh --purge && ./scripts/up.sh` 重建（勿在生产这么干） |
 | 链码部署卡在 install/首次调用很慢 | node 模式下 peer 容器内 npm install + tsc 构建 | 正常现象，等数分钟；看 `docker logs dev-peer0.org1...`；npm 源慢属网络问题，耐心重试 |
+| `up.sh` 报 `container name "/couchdb1" is already in use` | 之前用其他 compose 项目/评审覆盖文件起过 CouchDB（如 `pokechain-review-couchdb1`）仍占用容器名 | `docker rm -f couchdb0 couchdb1` 或先 `./scripts/down.sh`；确认 peer 连的是当前 `pokechain_net` 内的 CouchDB |
+| 真链容器后端报 `EACCES` 读 `system-key.pem` | 容器内 UID 与宿主证书文件 owner 不一致（密钥 0600） | `HOST_UID=$(id -u) docker compose -f docker-compose.yaml -f docker-compose.real.yaml up -d --build`（覆盖文件默认 1000） |
 | `chaincode install failed ... write unix @->/run/docker.sock: broken pipe` | Docker 28+ 与 Fabric 2.5 node builder 不兼容 | `deployCC.sh` 会自动改用 ccaas（`CC_LANG=auto`）；确认 `docker ps` 有 `pokechain-cc`，日志见 `docker logs pokechain-cc` |
 | `connection to pokechain-cc:19999 failed / no such host` | ccaas 容器没起或不在 `pokechain_net` | `CC_VERSION=... CC_SEQUENCE=... ./scripts/deployCC.sh` 重建容器；`docker network inspect pokechain_net` 确认容器已加入 |
 | 真链注册报 403（CA register 失败） | 注册请求里手写了 `hf.EnrollmentID` | 代码已修正（C4a，只注册 `role`）；旧版本请升级后端 |
