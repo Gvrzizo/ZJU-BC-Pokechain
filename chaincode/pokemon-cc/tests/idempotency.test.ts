@@ -35,17 +35,17 @@ describe('幂等性（idemKey 重放不重复变更）', () => {
     await w.capturePokemon('p_1', 'u_ash');
     const offer = JSON.stringify({ pokemonIds: [], itemIds: [], points: 100 });
     const request = JSON.stringify({ pokemonIds: [], itemIds: [], points: 0 });
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', offer, request, '2026-01-02T00:00:00.000Z', T2, 'idem-ct-r'));
-    const c1 = await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', T3, 'idem-cf-a'));
-    const c1replay = await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', T3, 'idem-cf-a'));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', offer, request, '2026-01-02T00:00:00.000Z', T2, 'idem-ct-r'));
+    const c1 = await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', T3, 'idem-cf-a'));
+    const c1replay = await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', T3, 'idem-cf-a'));
     expect(c1replay).toBe(c1);
-    const c2 = await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_gary', T3, 'idem-cf-b'));
-    const c2replay = await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_gary', T3, 'idem-cf-b'));
+    const c2 = await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_gary', T3, 'idem-cf-b'));
+    const c2replay = await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_gary', T3, 'idem-cf-b'));
     expect(c2replay).toBe(c2);
     expect((await w.getPlayer('u_ash')).points).toBe(900);
     expect((await w.getPlayer('u_gary')).points).toBe(1100);
     // 交易已 EXECUTED，换新 idemKey 再确认抛 TRADE_NOT_OPEN
-    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_gary', T3, 'idem-cf-b2')), 'TRADE_NOT_OPEN');
+    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_gary', T3, 'idem-cf-b2')), 'TRADE_NOT_OPEN');
   });
 
   test('幂等记录写入 idemp:<key>，docType=idemp', async () => {

@@ -17,6 +17,16 @@ export function getRole(ctx: Context): string {
   return ctx.clientIdentity.getAttributeValue('role') || 'player';
 }
 
+/**
+ * CA 在 ecert 中自动写入的登记身份：`hf.EnrollmentID`（= 注册时的 id.name）。
+ * 本项目 `playerId === username === enrollmentID`，因此它是"用户是谁"的链上唯一依据
+ * （docs/chaincode-api.md §0.2、docs/security.md §1.2）。
+ * 手工签发的证书可能没有该属性：返回空串，由调用方按"非本人"拒绝，不回退 mspId。
+ */
+export function getEnrollmentId(ctx: Context): string {
+  return ctx.clientIdentity.getAttributeValue('hf.EnrollmentID') ?? '';
+}
+
 export function requireRole(ctx: Context, ...roles: string[]): string {
   const role = getRole(ctx);
   if (!roles.includes(role)) {

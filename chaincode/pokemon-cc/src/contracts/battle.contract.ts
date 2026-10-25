@@ -1,7 +1,7 @@
 import { Context, Contract, Returns, Transaction } from 'fabric-contract-api';
 import { assertISO, checkedAmount, fail, requireHex64, requireNonEmpty } from '../common/assert';
 import { parseWagerBundle, validatePokemonAssets } from '../common/bundle';
-import { getMspId, getRole, requireArbitrator, requireRole } from '../common/cid';
+import { getEnrollmentId, getRole, requireArbitrator, requireRole } from '../common/cid';
 import { canonicalJson, sha256hex } from '../common/crypto';
 import { withIdempotency } from '../common/idempotency';
 import { Battle, BOND_RESET_ON_TRANSFER, Item, ItemStackRef, WagerBundle } from '../common/model';
@@ -217,9 +217,9 @@ export class BattleContract extends Contract {
       const a = await loadPlayer(ctx, playerA);
       const b = await loadPlayer(ctx, playerB);
       if (getRole(ctx) !== 'system') {
-        const msp = getMspId(ctx);
-        if (msp !== a.mspId && msp !== b.mspId) {
-          fail('FORBIDDEN', 'CreateBattle requires system or a battle party');
+        const caller = getEnrollmentId(ctx);
+        if (!caller || (caller !== playerA && caller !== playerB)) {
+          fail('FORBIDDEN', `CreateBattle requires system or a battle party (caller ${caller || '<none>'})`);
         }
       }
       const wagerA = parseWagerBundle(wagerAJSON, 'wagerA');

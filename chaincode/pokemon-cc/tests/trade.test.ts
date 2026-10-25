@@ -24,7 +24,7 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
   });
 
   test('CreateTrade：校验并锁定全部资产（LOCKED_TRADE/lockRef），积分不动，写 manifestHash', async () => {
-    const res = JSON.parse(await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t1')));
+    const res = JSON.parse(await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t1')));
     expect(res.status).toBe('OPEN');
     expect(res.manifestHash).toMatch(/^[0-9a-f]{64}$/);
     expect((await w.getPokemon('p_1')).status).toBe('LOCKED_TRADE');
@@ -38,40 +38,40 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
   });
 
   test('CreateTrade：双花拒绝——锁定资产再 CreateTrade 抛 ASSET_LOCKED', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t2'));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t2'));
     const offer2 = JSON.stringify({ pokemonIds: ['p_1'], itemIds: [], points: 0 });
     await expectCode(
-      w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_2', 'u_ash', 'u_gary', offer2, EMPTY, EXPIRES, T2, 'idem-t3')),
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_2', 'u_ash', 'u_gary', offer2, EMPTY, EXPIRES, T2, 'idem-t3')),
       'ASSET_LOCKED',
     );
   });
 
   test('CreateTrade：非 fromId 本人创建抛 NOT_OWNER；资产不属于对应方抛 NOT_OWNER；余额不足抛 INSUFFICIENT_POINTS', async () => {
     await expectCode(
-      w.run(() => w.trade.CreateTrade(w.ctx(ORG2), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t4')),
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_gary'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t4')),
       'NOT_OWNER',
     );
     // offer 里放了属于 gary 的 p_2
     const badOffer = JSON.stringify({ pokemonIds: ['p_2'], itemIds: [], points: 0 });
     await expectCode(
-      w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_2', 'u_ash', 'u_gary', badOffer, EMPTY, EXPIRES, T2, 'idem-t5')),
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_2', 'u_ash', 'u_gary', badOffer, EMPTY, EXPIRES, T2, 'idem-t5')),
       'NOT_OWNER',
     );
     // ash 只有 1000 分
     const richOffer = JSON.stringify({ pokemonIds: [], itemIds: [], points: 1001 });
     await expectCode(
-      w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_3', 'u_ash', 'u_gary', richOffer, EMPTY, EXPIRES, T2, 'idem-t6')),
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_3', 'u_ash', 'u_gary', richOffer, EMPTY, EXPIRES, T2, 'idem-t6')),
       'INSUFFICIENT_POINTS',
     );
   });
 
   test('ConfirmTrade：双方确认后同一交易内原子执行——归属与积分交换、资产解锁、EXECUTED', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t7'));
-    const afterFirst = JSON.parse(await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', T3, 'idem-t8')));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t7'));
+    const afterFirst = JSON.parse(await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', T3, 'idem-t8')));
     expect(afterFirst.status).toBe('OPEN');
     expect(afterFirst.confirmations).toEqual({ from: true, to: false });
     expect((await w.getPokemon('p_1')).status).toBe('LOCKED_TRADE');
-    const done = JSON.parse(await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_gary', T3, 'idem-t9')));
+    const done = JSON.parse(await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_gary', T3, 'idem-t9')));
     expect(done.status).toBe('EXECUTED');
     // 归属交换
     expect((await w.getPokemon('p_1')).ownerId).toBe('u_gary');
@@ -85,11 +85,11 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
   });
 
   test('ConfirmTrade：执行时余额不足整体回滚——交易仍 OPEN、资产仍锁定、确认标志不残留', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_PTS, REQUEST_PTS, EXPIRES, T2, 'idem-t10'));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_PTS, REQUEST_PTS, EXPIRES, T2, 'idem-t10'));
     // gary 把积分转走，执行时付不起 request.points=200
-    await w.run(() => w.player.TransferPoints(w.ctx(ORG2), 'u_gary', 'u_eve', '900', T2, 'idem-drain'));
-    await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', T3, 'idem-t11'));
-    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_gary', T3, 'idem-t12')), 'INSUFFICIENT_POINTS');
+    await w.run(() => w.player.TransferPoints(w.ctxAs('u_gary'), 'u_gary', 'u_eve', '900', T2, 'idem-drain'));
+    await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', T3, 'idem-t11'));
+    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_gary', T3, 'idem-t12')), 'INSUFFICIENT_POINTS');
     const trade = await w.getTrade('t_1');
     expect(trade.status).toBe('OPEN');
     expect(trade.confirmations).toEqual({ from: true, to: false });
@@ -98,14 +98,36 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
   });
 
   test('ConfirmTrade：非当事人抛 NOT_PARTY；冒名当事人（mspId 不符）抛 NOT_OWNER', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t13'));
-    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_eve', T3, 'idem-t14')), 'NOT_PARTY');
-    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_ash', T3, 'idem-t15')), 'NOT_OWNER');
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t13'));
+    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_eve', T3, 'idem-t14')), 'NOT_PARTY');
+    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_ash', T3, 'idem-t15')), 'NOT_OWNER');
+  });
+
+  test('ConfirmTrade/CancelTrade：同组织其他玩家不能替当事人确认/取消（NOT_OWNER）', async () => {
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t-forge0'));
+    // u_eve 与 gary 同属 Org2MSP：只看 mspId 会被放行，故必须按 hf.EnrollmentID 拒绝
+    await expectCode(
+      w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_eve', ORG2), 't_1', 'u_gary', T3, 'idem-t-forge1')),
+      'NOT_OWNER',
+    );
+    await expectCode(
+      w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_eve', ORG2), 't_1', 'u_ash', T3, 'idem-t-forge2')),
+      'NOT_OWNER',
+    );
+    await expectCode(
+      w.run(() => w.trade.CancelTrade(w.ctxAs('u_eve', ORG2), 't_1', 'u_gary', T3, 'idem-t-forge3')),
+      'NOT_OWNER',
+    );
+    // 缺 hf.EnrollmentID 的证书同样拒绝
+    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', T3, 'idem-t-forge4')), 'NOT_OWNER');
+    const trade = await w.getTrade('t_1');
+    expect(trade.status).toBe('OPEN');
+    expect(trade.confirmations).toEqual({ from: false, to: false });
   });
 
   test('CancelTrade：任一方取消，解锁全部资产 → CANCELLED', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t16'));
-    const res = JSON.parse(await w.run(() => w.trade.CancelTrade(w.ctx(ORG2), 't_1', 'u_gary', T3, 'idem-t17')));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t16'));
+    const res = JSON.parse(await w.run(() => w.trade.CancelTrade(w.ctxAs('u_gary'), 't_1', 'u_gary', T3, 'idem-t17')));
     expect(res.status).toBe('CANCELLED');
     expect((await w.getPokemon('p_1')).status).toBe('IDLE');
     expect((await w.getPokemon('p_1')).lockRef).toBe('');
@@ -113,13 +135,13 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
     expect((await w.getPokemon('p_2')).status).toBe('IDLE');
     expect(w.eventNames()).toContain('TradeCancelled');
     // 终态后不可再确认
-    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', T3, 'idem-t18')), 'TRADE_NOT_OPEN');
+    await expectCode(w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', T3, 'idem-t18')), 'TRADE_NOT_OPEN');
   });
 
   test('ExpireTrade：未到期抛 TRADE_NOT_EXPIRED；到期任何人可触发，解锁 → EXPIRED', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t19'));
-    await expectCode(w.run(() => w.trade.ExpireTrade(w.ctx(ORG2), 't_1', T3, 'idem-t20')), 'TRADE_NOT_EXPIRED');
-    const res = JSON.parse(await w.run(() => w.trade.ExpireTrade(w.ctx(ORG2), 't_1', EXPIRES, 'idem-t21')));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t19'));
+    await expectCode(w.run(() => w.trade.ExpireTrade(w.ctxAs('u_gary'), 't_1', T3, 'idem-t20')), 'TRADE_NOT_EXPIRED');
+    const res = JSON.parse(await w.run(() => w.trade.ExpireTrade(w.ctxAs('u_gary'), 't_1', EXPIRES, 'idem-t21')));
     expect(res.status).toBe('EXPIRED');
     expect((await w.getPokemon('p_1')).status).toBe('IDLE');
     expect((await w.getItem('i_1')).status).toBe('IDLE');
@@ -127,8 +149,8 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
   });
 
   test('ConfirmTrade：确认时已过期 → 转 EXPIRED 并解锁，不执行', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t22'));
-    const res = JSON.parse(await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', EXPIRES, 'idem-t23')));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t22'));
+    const res = JSON.parse(await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', EXPIRES, 'idem-t23')));
     expect(res.status).toBe('EXPIRED');
     expect((await w.getPokemon('p_1')).status).toBe('IDLE');
     expect((await w.getPlayer('u_ash')).points).toBe(1000);
@@ -136,7 +158,7 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
   });
 
   test('QueryByPlayer：from/to 双向可查', async () => {
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t24'));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, T2, 'idem-t24'));
     const ashTrades = JSON.parse(await w.run(() => w.trade.QueryByPlayer(w.systemCtx(), 'u_ash')));
     const garyTrades = JSON.parse(await w.run(() => w.trade.QueryByPlayer(w.systemCtx(), 'u_gary')));
     const eveTrades = JSON.parse(await w.run(() => w.trade.QueryByPlayer(w.systemCtx(), 'u_eve')));
@@ -147,7 +169,7 @@ describe('TradeContract（双方确认 + 原子结算）', () => {
 
   test('已用时间戳确定性：nowISO 非法抛 INVALID_TIME', async () => {
     await expectCode(
-      w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, 'not-a-time', 'idem-t25')),
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', OFFER_FULL, REQUEST_FULL, EXPIRES, 'not-a-time', 'idem-t25')),
       'INVALID_TIME',
     );
   });

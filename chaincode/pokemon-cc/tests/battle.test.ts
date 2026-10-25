@@ -81,19 +81,24 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     );
     const emptyA = JSON.stringify({ pokemonIds: [], itemIds: [], points: 0 });
     const h2 = w.wagerHash('u_ash', 'u_gary', { pokemonIds: [], itemIds: [], points: 0 }, { pokemonIds: [], itemIds: [], points: 0 });
-    // 第三方组织身份（既非 system 也非当事人）创建被拒
+    // 非当事人的普通玩家（A、B 之外的 C）创建被拒
     await expectCode(
-      w.run(() => w.battle.CreateBattle(w.ctx('Org3MSP'), 'b_3', 'u_ash', 'u_gary', emptyA, emptyA, h2, T2, 'idem-cb3')),
+      w.run(() => w.battle.CreateBattle(w.ctxAs('u_eve'), 'b_3', 'u_ash', 'u_gary', emptyA, emptyA, h2, T2, 'idem-cb3')),
+      'FORBIDDEN',
+    );
+    // 无 hf.EnrollmentID 的证书同样被拒（不回退 mspId）
+    await expectCode(
+      w.run(() => w.battle.CreateBattle(w.ctx(ORG1), 'b_4', 'u_ash', 'u_gary', emptyA, emptyA, h2, T2, 'idem-cb4')),
       'FORBIDDEN',
     );
   });
 
   test('ActivateBattle/SubmitResult：仅 system；状态机 CREATED→ACTIVE→RESULT_SUBMITTED', async () => {
     await createBattle(w);
-    await expectCode(w.run(() => w.battle.ActivateBattle(w.ctx(ORG1), 'b_1', T2, 'idem-a1')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.battle.ActivateBattle(w.ctxAs('u_ash'), 'b_1', T2, 'idem-a1')), 'FORBIDDEN');
     await expectCode(w.run(() => w.battle.SubmitResult(w.systemCtx(), 'b_1', 'u_ash', RESULT_HASH, SIG, T2, 'idem-s0')), 'BAD_STATE');
     await activateBattle(w);
-    await expectCode(w.run(() => w.battle.SubmitResult(w.ctx(ORG2), 'b_1', 'u_ash', RESULT_HASH, SIG, T3, 'idem-s1')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.battle.SubmitResult(w.ctxAs('u_gary'), 'b_1', 'u_ash', RESULT_HASH, SIG, T3, 'idem-s1')), 'FORBIDDEN');
     await expectCode(w.run(() => w.battle.SubmitResult(w.systemCtx(), 'b_1', 'u_eve', RESULT_HASH, SIG, T3, 'idem-s2')), 'INVALID_WINNER');
     await submitResult(w, 'u_ash');
     const b = await w.getBattle('b_1');
@@ -106,10 +111,10 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     await createBattle(w);
     await activateBattle(w);
     await submitResult(w, 'u_ash');
-    const afterA = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctx(ORG1), 'b_1', 'u_ash', T3, 'idem-cr1')));
+    const afterA = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_ash'), 'b_1', 'u_ash', T3, 'idem-cr1')));
     expect(afterA.status).toBe('RESULT_SUBMITTED');
     expect(afterA.result.confirmations).toEqual({ A: true, B: false });
-    const done = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctx(ORG2), 'b_1', 'u_gary', T3, 'idem-cr2')));
+    const done = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_gary'), 'b_1', 'u_gary', T3, 'idem-cr2')));
     expect(done.status).toBe('SETTLED');
     expect(done.settledAt).toBe(T3);
     // 赢家 ash 得双方押注资产
@@ -130,12 +135,31 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     expect(w.eventNames()).toEqual(expect.arrayContaining(['BattleConfirmed', 'BattleSettled']));
   });
 
+  test('ConfirmResult/Dispute：同组织其他玩家不能替当事人确认/争议（NOT_OWNER）', async () => {
+    await createBattle(w);
+    await activateBattle(w);
+    await submitResult(w, 'u_ash');
+    // u_eve 与 ash 同属 Org1MSP：只看 mspId 会被放行，故必须按 hf.EnrollmentID 拒绝
+    await expectCode(
+      w.run(() => w.battle.ConfirmResult(w.ctxAs('u_eve'), 'b_1', 'u_ash', T3, 'idem-cr-forge1')),
+      'NOT_OWNER',
+    );
+    await expectCode(
+      w.run(() => w.battle.ConfirmResult(w.ctx(ORG1), 'b_1', 'u_ash', T3, 'idem-cr-forge2')),
+      'NOT_OWNER',
+    );
+    expect((await w.getBattle('b_1')).result.confirmations).toEqual({ A: false, B: false });
+    // 争议入口同样按本人校验（非当事人先被 NOT_PARTY 拦下）
+    await expectCode(w.run(() => w.battle.Dispute(w.ctxAs('u_eve'), 'b_1', 'u_ash', 'x', T3, 'idem-d-forge')), 'NOT_OWNER');
+    expect((await w.getBattle('b_1')).status).toBe('RESULT_SUBMITTED');
+  });
+
   test('DRAW：各自取回押注资产与 escrow 积分，不记胜负', async () => {
     await createBattle(w);
     await activateBattle(w);
     await submitResult(w, 'DRAW');
-    await w.run(() => w.battle.ConfirmResult(w.ctx(ORG1), 'b_1', 'u_ash', T3, 'idem-cr3'));
-    const done = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctx(ORG2), 'b_1', 'u_gary', T3, 'idem-cr4')));
+    await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_ash'), 'b_1', 'u_ash', T3, 'idem-cr3'));
+    const done = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_gary'), 'b_1', 'u_gary', T3, 'idem-cr4')));
     expect(done.status).toBe('SETTLED');
     expect((await w.getPokemon('p_1')).ownerId).toBe('u_ash');
     expect((await w.getPokemon('p_2')).ownerId).toBe('u_gary');
@@ -179,21 +203,21 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     expect((await w.getPlayer('u_ash')).wins).toBe(1);
     expect((await w.getPlayer('u_gary')).losses).toBe(1);
     expect(w.eventNames()).toContain('BattleSettled');
-    await expectCode(w.run(() => w.battle.Forfeit(w.ctx(ORG1), 'b_1', 'u_gary', 'x', T3, 'idem-f2')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.battle.Forfeit(w.ctxAs('u_ash'), 'b_1', 'u_gary', 'x', T3, 'idem-f2')), 'FORBIDDEN');
   });
 
   test('Dispute→Arbitrate（赢家结局）：仅 Org2 arbitrator 可仲裁', async () => {
     await createBattle(w);
     await activateBattle(w);
     await submitResult(w, 'u_gary');
-    const disputed = JSON.parse(await w.run(() => w.battle.Dispute(w.ctx(ORG1), 'b_1', 'u_ash', 'result looks wrong', T3, 'idem-d1')));
+    const disputed = JSON.parse(await w.run(() => w.battle.Dispute(w.ctxAs('u_ash'), 'b_1', 'u_ash', 'result looks wrong', T3, 'idem-d1')));
     expect(disputed.status).toBe('DISPUTED');
     expect(disputed.disputeReason).toBe('result looks wrong');
     // 资产保持锁定冻结
     expect((await w.getPokemon('p_1')).status).toBe('LOCKED_BATTLE');
     // 非 arbitrator：普通玩家与 Org2 非 arbitrator 身份都被拒
-    await expectCode(w.run(() => w.battle.Arbitrate(w.ctx(ORG1), 'b_1', 'u_ash', 'note', T4, 'idem-ar1')), 'FORBIDDEN');
-    await expectCode(w.run(() => w.battle.Arbitrate(w.ctx(ORG2), 'b_1', 'u_ash', 'note', T4, 'idem-ar2')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.battle.Arbitrate(w.ctxAs('u_ash'), 'b_1', 'u_ash', 'note', T4, 'idem-ar1')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.battle.Arbitrate(w.ctx(ORG2, 'player', 'u_eve'), 'b_1', 'u_ash', 'note', T4, 'idem-ar2')), 'FORBIDDEN');
     await expectCode(w.run(() => w.battle.Arbitrate(w.systemCtx(), 'b_1', 'u_ash', 'note', T4, 'idem-ar3')), 'FORBIDDEN');
     // arbitrator 判 ash 胜
     const done = JSON.parse(await w.run(() => w.battle.Arbitrate(w.arbitratorCtx(), 'b_1', 'u_ash', 'evidence reviewed', T4, 'idem-ar4')));
@@ -207,7 +231,7 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
   test('Dispute→Arbitrate（REFUND）：全额退款 → REFUNDED', async () => {
     await createBattle(w);
     await activateBattle(w);
-    await w.run(() => w.battle.Dispute(w.ctx(ORG2), 'b_1', 'u_gary', 'server timeout', T3, 'idem-d2'));
+    await w.run(() => w.battle.Dispute(w.ctxAs('u_gary'), 'b_1', 'u_gary', 'server timeout', T3, 'idem-d2'));
     const done = JSON.parse(await w.run(() => w.battle.Arbitrate(w.arbitratorCtx(), 'b_1', 'REFUND', 'match void', T4, 'idem-ar5')));
     expect(done.status).toBe('REFUNDED');
     expect((await w.getPokemon('p_1')).ownerId).toBe('u_ash');
@@ -222,19 +246,19 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
   test('Dispute：非当事人抛 NOT_PARTY；已 SETTLED 不可争议', async () => {
     await createBattle(w);
     await activateBattle(w);
-    await expectCode(w.run(() => w.battle.Dispute(w.ctx(ORG1), 'b_1', 'u_eve', 'not my battle', T3, 'idem-d3')), 'NOT_PARTY');
+    await expectCode(w.run(() => w.battle.Dispute(w.ctxAs('u_ash'), 'b_1', 'u_eve', 'not my battle', T3, 'idem-d3')), 'NOT_PARTY');
     await submitResult(w, 'u_ash');
     await w.run(() => w.battle.SettleBattle(w.systemCtx(), 'b_1', T4, 'idem-sb9'));
-    await expectCode(w.run(() => w.battle.Dispute(w.ctx(ORG1), 'b_1', 'u_ash', 'too late', T4, 'idem-d4')), 'BAD_STATE');
+    await expectCode(w.run(() => w.battle.Dispute(w.ctxAs('u_ash'), 'b_1', 'u_ash', 'too late', T4, 'idem-d4')), 'BAD_STATE');
   });
 
   test('对战锁定期间资产不可转移/交易（ASSET_LOCKED）', async () => {
     await createBattle(w);
-    await expectCode(w.run(() => w.pokemon.Transfer(w.ctx(ORG1), 'p_1', 'u_gary', T3, 'idem-lk1')), 'ASSET_LOCKED');
+    await expectCode(w.run(() => w.pokemon.Transfer(w.ctxAs('u_ash'), 'p_1', 'u_gary', T3, 'idem-lk1')), 'ASSET_LOCKED');
     const offer = JSON.stringify({ pokemonIds: ['p_1'], itemIds: [], points: 0 });
     const empty = JSON.stringify({ pokemonIds: [], itemIds: [], points: 0 });
     await expectCode(
-      w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_9', 'u_ash', 'u_gary', offer, empty, '2026-01-02T00:00:00.000Z', T3, 'idem-lk2')),
+      w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_9', 'u_ash', 'u_gary', offer, empty, '2026-01-02T00:00:00.000Z', T3, 'idem-lk2')),
       'ASSET_LOCKED',
     );
   });
@@ -313,8 +337,8 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     );
     await activateBattle(w, 'b_win');
     await submitResult(w, 'u_ash', 'b_win');
-    await w.run(() => w.battle.ConfirmResult(w.ctx(ORG1), 'b_win', 'u_ash', T3, 'idem-cr-w1'));
-    const done = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctx(ORG2), 'b_win', 'u_gary', T3, 'idem-cr-w2')));
+    await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_ash'), 'b_win', 'u_ash', T3, 'idem-cr-w1'));
+    const done = JSON.parse(await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_gary'), 'b_win', 'u_gary', T3, 'idem-cr-w2')));
     expect(done.status).toBe('SETTLED');
     // ash 的 7（原堆叠）+ gary 的 2 + 子堆叠 3 = 12，全部并入最早创建的 i_10
     expect(await w.getItem('i_10')).toMatchObject({ ownerId: 'u_ash', quantity: 12, status: 'IDLE', lockRef: '' });
@@ -347,8 +371,8 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
       w.battle.CreateBattle(w.systemCtx(), 'b_ref', 'u_ash', 'u_gary', JSON.stringify(wagerA), WAGER_B_JSON, wagerHash, T2, 'idem-cb-ref'),
     );
     // 原堆叠（剩下的 7）在对战期间被转走 → 退款时无法并回
-    await w.run(() => w.item.TransferItem(w.ctx(ORG1), 'i_10', 'u_gary', T2, 'idem-ti-ref'));
-    await w.run(() => w.battle.Dispute(w.ctx(ORG2), 'b_ref', 'u_gary', 'x', T3, 'idem-d-ref'));
+    await w.run(() => w.item.TransferItem(w.ctxAs('u_ash'), 'i_10', 'u_gary', T2, 'idem-ti-ref'));
+    await w.run(() => w.battle.Dispute(w.ctxAs('u_gary'), 'b_ref', 'u_gary', 'x', T3, 'idem-d-ref'));
     const done = JSON.parse(await w.run(() => w.battle.Arbitrate(w.arbitratorCtx(), 'b_ref', 'REFUND', 'void', T4, 'idem-ar-ref')));
     expect(done.status).toBe('REFUNDED');
     expect(await w.getItem('i_10')).toMatchObject({ ownerId: 'u_gary', quantity: 7, status: 'IDLE' });

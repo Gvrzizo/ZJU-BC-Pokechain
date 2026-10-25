@@ -25,7 +25,7 @@ docker compose up -d --build && ./scripts/seed-demo.sh
 ```
 注意：`frontend/public/assets/vendor/`（版权素材）、`network/organizations`、`network/bin` 不在 git 内；跳过素材也能跑（前端回退程序化占位图）。人类读者的完整版见 `docs/setup.md`。
 
-**本轮验证（2026-10-25）**：重新摆放镇/草原/森林/海岸/孤岛树木，纠正此前把树底连接块叠成第三行的错误；完整大树为 2×2、小树为 1×2，使用显式位置和同一份碰撞占地，取消残格补半截树冠。实测链码 88 单测（8 套）、后端 367 单测（31 套）、前端 200 单测（33 个文件）全绿，另有 4 项离线 Python 切片回归测试全绿，前端构建通过；本地前端容器已重建并浏览器复核树木布局。此前 2026-10-21 已验证三端构建、端到端 25/25；2026-10-18 的免测试例外仅属于此前改造。视觉约定与生成提示词见 `docs/visual-design.md`、`frontend/art/prompts.json`。
+**本轮验证（2026-10-25）**：重新摆放镇/草原/森林/海岸/孤岛树木，纠正此前把树底连接块叠成第三行的错误；完整大树为 2×2、小树为 1×2，使用显式位置和同一份碰撞占地，取消残格补半截树冠。实测链码 93 单测（8 套）、后端 367 单测（31 套）、前端 200 单测（33 个文件）全绿，另有 4 项离线 Python 切片回归测试全绿，前端构建通过；本地前端容器已重建并浏览器复核树木布局。此前 2026-10-21 已验证三端构建、端到端 25/25；2026-10-18 的免测试例外仅属于此前改造。视觉约定与生成提示词见 `docs/visual-design.md`、`frontend/art/prompts.json`。
 
 **更新纪律（强制）**：任何改动合并前，必须同步更新本 `AGENTS.md` 的相关段落——结构/命令/**测试数**/架构决策四项，
 以及受影响模块的清单与页面列表；**子代理任务完成后由主代理核对**本文件是否与代码一致（实测跑一遍三套 `npm test` 并更新计数）。
@@ -36,7 +36,7 @@ docker compose up -d --build && ./scripts/seed-demo.sh
 
 ```bash
 # 链码
-cd chaincode/pokemon-cc && npm test && npm run build      # 88 单测（8 套）+ tsc
+cd chaincode/pokemon-cc && npm test && npm run build      # 93 单测（8 套）+ tsc
 # 后端
 cd backend && npm run build && npm test                   # nest build + 367 单测（31 套，内存 mock，免外部服务）
 cd backend && npm run seed                                # 演示数据（需先 build；PG/Redis 可达，mock 模式）；npm run seed:dev 免构建
@@ -59,7 +59,7 @@ BASE_URL=http://localhost:3100 ./scripts/e2e-smoke.sh     # 打本地实例（�
 2. **承诺-揭示随机数**：`Commit(serverSeed 的 sha256)` 必须先于任何结果使用上链 → `RevealAndVerify` 链上重算 → 派生流 `HMAC-SHA256(key=serverSeed, msg=clientSeed|eventId|n)`，前 8 字节大端 / 2^64。分块布局见 `backend/src/pokemon/capture-derive.ts` 与 `docs/randomness.md`。
 3. **幂等**：所有变更交易带 `idemKey`，`idemp:<key>` 命中直接返回首次结果。后端 ContractService 统一注入。
 4. **资产状态机**：`IDLE | LOCKED_TRADE | LOCKED_BATTLE`（+宝可梦 `RELEASED`）。锁定资产拒绝转移/消耗/再锁定（`ASSET_LOCKED`）。结算走 BattleContract 内部统一 settle 入口，失败整体回滚，无部分结算。
-5. **身份模型**：角色 `player|admin|system|arbitrator` 存 CA 属性；链码用 CID `getAttrValue('role')` + mspId 校验；仲裁要求 Org2MSP + arbitrator。后端托管用户 X.509（AES-256-GCM 存 PG），以用户证书代发交易；system 服务身份用于 CreateBattle/SubmitResult 等。
+5. **身份模型**：角色 `player|admin|system|arbitrator` 存 CA 属性；链码用 CID `getAttrValue('role')` + mspId 校验；仲裁要求 Org2MSP + arbitrator。**「本人」校验用 CA 自动写入的 `hf.EnrollmentID`（= 注册用户名 = 链上 `playerId`，`common/cid.ts::getEnrollmentId`），不用 mspId**——所有玩家同属 Org1MSP，按组织校验等于没校验；缺该属性的证书一律 `NOT_OWNER`，不回退 mspId。`RegisterPlayer` 仅 `admin|system`（防抢注 username）。后端托管用户 X.509（AES-256-GCM 存 PG），以用户证书代发交易；system 服务身份用于 CreateBattle/SubmitResult 等。
 6. **双链模式**：后端 `ChainAdapter` 抽象有 Fabric 与 Mock 两实现（`FABRIC_MOCK=true` 默认）。Mock 完整复刻链码语义（真实 sha256/HMAC），课堂演示与单测都走它——**改链码行为时必须同步改 MockChainAdapter 与两边测试**。Mock 世界状态存 Redis（键前缀 `mockchain:`，`backend/src/fabric/mock-chain.store.ts`），seed 进程 / backend 进程 / 重跑共享同一份状态；单测不传 store 时退回纯内存。
 7. **错误约定**：链码 `throw new Error('CODE: message')`（全大写蛇形码），后端过滤器透传为 `{statusCode, code, message}`。前端 axios 拦截器自动注入 `X-Nonce`/`X-Timestamp`（防重放）与 JWT。
 8. **能力值体系**：链上只存种族值表 + IV(0-31) + EV(单项 0-255/总和 ≤510) + 等级 + 性格，最终六项能力值按第三世代官方公式在链下算（`backend/src/game-data/stats.ts`，含 25 种性格 ±10% 修正；HP 不吃性格），战斗 HP 上限/速度/伤害 A/D 与 API `stats` 字段都用该最终值；**羁绊加成**：非 HP 五项再 ×(1 + bond/255 × 5%)（满羁绊 +5%，向下取整，`computeStats` 的 bond 参数，PvP/野怪战斗均已接入；API 返回 `bondBonus` 百分比）。改公式须同步链码 EV 校验、MockChainAdapter、前端展示与文档。详见 `docs/backend-api.md` §2「能力值计算」。

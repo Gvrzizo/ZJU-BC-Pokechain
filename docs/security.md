@@ -11,21 +11,25 @@
 |---|---|---|
 | Web 会话 | JWT access（15min）+ refresh（7d），refresh 白名单存 Redis `refresh:<uid>:<jti>`，刷新即轮换旧 jti 作废；登出吊销 | `backend/src/auth/auth.service.ts` |
 | 口令存储 | argon2 哈希（`argon2` 包），登录 `argon2.verify`；口令永不出后端、永不记日志 | 同上 |
-| 链上身份 | Fabric CA 注册+enroll 得 X.509；`role` 属性以 ecert 形式写入证书，链码 CID `getAttrValue('role')` 读取 | `backend/src/fabric/fabric-ca.service.ts`、`chaincode/.../common/cid.ts` |
+| 链上身份 | Fabric CA 注册+enroll 得 X.509；`role` 属性以 ecert 形式写入证书，链码 CID `getAttrValue('role')` 读取；**用户身份**由 CA 自动写入的 `hf.EnrollmentID`（= 注册用户名 = 链上 `playerId`）确定 | `backend/src/fabric/fabric-ca.service.ts`、`chaincode/.../common/cid.ts` |
 | 组织归属 | MSP：玩家/运营 Org1MSP，仲裁 Org2MSP；`requireArbitrator` = Org2MSP ∧ role=arbitrator | `network/configtx.yaml`、cid.ts |
 
 ### 1.2 权限矩阵与越权校验
 
 | 操作 | 允许的链上角色 | 链码强制点 |
 |---|---|---|
-| RegisterPlayer 代发 / GrantRole | admin | `PlayerContract` requireRole |
+| RegisterPlayer 代发 | admin, system（后端注册/seed 用 `ADMIN_IDENTITY`，防抢注 username） | `PlayerContract` requireRole |
+| GrantRole | admin | `PlayerContract` requireRole |
 | AddPoints / MintItem | admin, system | 同上 |
-| Transfer / TransferPoints / ConsumeItem | owner 本人（mspId 匹配）或 system | `assertCallerIsPlayer` |
+| Transfer / TransferPoints / ConsumeItem / TransferItem / MergeStacks | owner 本人（`hf.EnrollmentID` == `playerId`）或 system | `assertCallerIsPlayer` |
 | RevealAndVerify / MintFromCapture / ActivateBattle / SubmitResult / SettleBattle / Forfeit | system | requireRole('system') |
-| ConfirmTrade / ConfirmResult / Dispute | 当事人 | NOT_PARTY 检查 |
+| ConfirmTrade / ConfirmResult / Dispute | 当事人**本人**（`hf.EnrollmentID` 匹配） | NOT_PARTY + `assertCallerIsPlayer` |
+| CreateBattle | system 或当事人本人（`hf.EnrollmentID` ∈ {playerA, playerB}） | `getEnrollmentId` 校验 |
 | Arbitrate | Org2MSP + arbitrator | `requireArbitrator` |
 
 越权防护在**两层独立实施**：Web 层 `@Roles()` 守卫挡掉非 admin/arbitrator 的 HTTP 调用；链码层 CID 再校验一次——即使后端被绕过（如直接拿到 peer 背书），链码仍会拒绝越权交易。单测覆盖"非 owner 转移/非 arbitrator 仲裁/非 system 提交结果"全部拒绝路径。
+
+**本人校验（2026-10-25 修复 C1）**：`assertCallerIsPlayer` 比较证书 `hf.EnrollmentID` 与 `player.playerId`，**不再比较 mspId**——所有普通玩家同属 Org1MSP，按组织校验等于「任意玩家可冒充任意玩家」。`hf.EnrollmentID` 由 Fabric CA 在 enroll 时自动写入 ecert，**不得**作为自定义属性显式注册（会被 CA 403 拒绝）；手工签发、缺少该属性的证书一律抛 `NOT_OWNER`，属预期安全行为，旧玩家记录无需迁移（`playerId` 即 enrollment ID）。
 
 ### 1.3 API 防线
 

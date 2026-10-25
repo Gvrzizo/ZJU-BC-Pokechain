@@ -312,6 +312,10 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<PlayerState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
+      // 链上 RegisterPlayer 仅 admin/system（防抢注 username；后端注册走 ADMIN_IDENTITY）
+      if (as.role !== 'admin' && as.role !== 'system') {
+        throw new CodedError('FORBIDDEN', 'RegisterPlayer requires role admin or system');
+      }
       const key = `player:${args.playerId}`;
       const existing = this.get<PlayerState>(key);
       if (existing) return existing;
