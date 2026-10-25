@@ -1,0 +1,46 @@
+{
+  "name": "trade_request_stolen_before_confirm",
+  "description": "request 资产在执行前被转走 → 执行抛 NOT_OWNER 整体回滚，交易保持 OPEN",
+  "steps": [
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_stolen", "ownerId": "bob" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "createTrade",
+      "as": "alice",
+      "args": {
+        "id": "t_stolen",
+        "fromId": "alice",
+        "toId": "bob",
+        "offer": { "pokemonIds": [], "itemIds": [], "points": 0 },
+        "request": { "pokemonIds": ["p_stolen"], "itemIds": [], "points": 0 }
+      },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "transferPokemon",
+      "as": "bob",
+      "args": { "id": "p_stolen", "toId": "carol" },
+      "expect": { "ok": true },
+      "state": [{ "kind": "pokemonOwner", "id": "p_stolen", "equals": "carol" }]
+    },
+    {
+      "op": "confirmTrade",
+      "as": "alice",
+      "args": { "id": "t_stolen", "playerId": "alice" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "confirmTrade",
+      "as": "bob",
+      "args": { "id": "t_stolen", "playerId": "bob" },
+      "expect": { "ok": false, "code": "NOT_OWNER" },
+      "state": [
+        { "kind": "tradeStatus", "id": "t_stolen", "equals": "OPEN" },
+        { "kind": "pokemonOwner", "id": "p_stolen", "equals": "carol" }
+      ]
+    }
+  ]
+}

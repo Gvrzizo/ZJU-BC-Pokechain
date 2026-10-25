@@ -1,0 +1,64 @@
+{
+  "name": "error_codes",
+  "description": "常见错误码与链码一致：入参/余额/时间窗/对局状态/不存在/等级回退",
+  "steps": [
+    {
+      "op": "transferPoints",
+      "as": "alice",
+      "args": { "fromId": "alice", "toId": "bob", "amount": 0 },
+      "expect": { "ok": false, "code": "INVALID_PARAM" }
+    },
+    {
+      "op": "transferPoints",
+      "as": "alice",
+      "args": { "fromId": "alice", "toId": "bob", "amount": 5000 },
+      "expect": { "ok": false, "code": "INSUFFICIENT_POINTS" },
+      "state": [{ "kind": "playerPoints", "playerId": "alice", "equals": 1000 }]
+    },
+    {
+      "op": "createTrade",
+      "as": "alice",
+      "args": {
+        "id": "t_ttl",
+        "fromId": "alice",
+        "toId": "bob",
+        "offer": { "pokemonIds": [], "itemIds": [], "points": 0 },
+        "request": { "pokemonIds": [], "itemIds": [], "points": 0 },
+        "expiresAt": "2026-01-09T00:00:00.000Z"
+      },
+      "expect": { "ok": false, "code": "INVALID_PARAM" }
+    },
+    {
+      "op": "createBattle",
+      "args": {
+        "id": "b_same",
+        "playerA": "alice",
+        "playerB": "alice",
+        "wagerA": { "pokemonIds": [], "items": [], "points": 0 },
+        "wagerB": { "pokemonIds": [], "items": [], "points": 0 }
+      },
+      "expect": { "ok": false, "code": "SAME_PLAYER" }
+    },
+    {
+      "op": "cancelBattle",
+      "args": { "id": "b_missing", "reason": "n/a" },
+      "expect": { "ok": false, "code": "BATTLE_NOT_FOUND" }
+    },
+    {
+      "op": "applyGrowth",
+      "args": { "id": "p_missing", "growth": { "level": 10 } },
+      "expect": { "ok": false, "code": "POKEMON_NOT_FOUND" }
+    },
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_err", "ownerId": "alice" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "applyGrowth",
+      "args": { "id": "p_err", "growth": { "level": 1 } },
+      "expect": { "ok": false, "code": "INVALID_PARAM" },
+      "state": [{ "kind": "pokemonLevel", "id": "p_err", "equals": 5 }]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "name": "idempotency_replay",
+  "description": "同一 idemKey 重放返回首次结果且不重复变更状态",
+  "steps": [
+    {
+      "op": "addPoints",
+      "args": { "playerId": "alice", "delta": 100, "reason": "vector", "idemKey": "idem-add" },
+      "expect": { "ok": true },
+      "state": [{ "kind": "playerPoints", "playerId": "alice", "equals": 1100 }]
+    },
+    {
+      "op": "addPoints",
+      "args": { "playerId": "alice", "delta": 100, "reason": "vector", "idemKey": "idem-add" },
+      "expect": { "ok": true },
+      "state": [{ "kind": "playerPoints", "playerId": "alice", "equals": 1100 }]
+    },
+    {
+      "op": "transferPoints",
+      "as": "alice",
+      "args": { "fromId": "alice", "toId": "bob", "amount": 30, "idemKey": "idem-transfer" },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "playerPoints", "playerId": "alice", "equals": 1070 },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 1030 }
+      ]
+    },
+    {
+      "op": "transferPoints",
+      "as": "alice",
+      "args": { "fromId": "alice", "toId": "bob", "amount": 30, "idemKey": "idem-transfer" },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "playerPoints", "playerId": "alice", "equals": 1070 },
+        { "kind": "playerPoints", "playerId": "bob", "equals": 1030 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "wager_hash_mismatch",
+  "description": "wagerHash 与归一化押注包不一致 → WAGER_HASH_MISMATCH；同一资产出现在双方押注 → INVALID_PARAM",
+  "steps": [
+    {
+      "op": "createBattle",
+      "args": {
+        "id": "b_bad_hash",
+        "playerA": "alice",
+        "playerB": "bob",
+        "wagerA": { "pokemonIds": [], "items": [], "points": 0 },
+        "wagerB": { "pokemonIds": [], "items": [], "points": 0 },
+        "wagerHash": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expect": { "ok": false, "code": "WAGER_HASH_MISMATCH" }
+    },
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_dup", "ownerId": "alice" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "createBattle",
+      "args": {
+        "id": "b_dup",
+        "playerA": "alice",
+        "playerB": "bob",
+        "wagerA": { "pokemonIds": ["p_dup"], "items": [], "points": 0 },
+        "wagerB": { "pokemonIds": ["p_dup"], "items": [], "points": 0 }
+      },
+      "expect": { "ok": false, "code": "INVALID_PARAM" },
+      "state": [{ "kind": "pokemonStatus", "id": "p_dup", "equals": "IDLE" }]
+    }
+  ]
+}

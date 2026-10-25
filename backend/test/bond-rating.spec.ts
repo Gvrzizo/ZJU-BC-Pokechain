@@ -130,7 +130,7 @@ describe('mock chain: Pokemon.bond (chaincode-api.md §1 Pokemon)', () => {
     }
     expect((await contract.getPokemon(pika.id)).bond).toBe(255);
 
-    await expect(contract.bondUp(userIdentity('ash'), [pika.id], 10, 'cheat')).rejects.toThrow(/NOT_AUTHORIZED/);
+    await expect(contract.bondUp(userIdentity('ash'), [pika.id], 10, 'cheat')).rejects.toThrow(/FORBIDDEN/);
     await expect(contract.bondUp(SYSTEM_IDENTITY, [pika.id], 0, 'walk')).rejects.toThrow(/INVALID_PARAM/);
     await expect(contract.bondUp(SYSTEM_IDENTITY, [pika.id], 51, 'walk')).rejects.toThrow(/INVALID_PARAM/);
     await expect(contract.bondUp(SYSTEM_IDENTITY, [], 10, 'walk')).rejects.toThrow(/INVALID_PARAM/);
@@ -166,8 +166,8 @@ describe('mock chain: Player.rating (chaincode-api.md §1 Player)', () => {
     await registerPlayers(contract, 'ash');
     expect((await contract.updateRating(SYSTEM_IDENTITY, 'ash', 0, 'placement')).rating).toBe(0);
     expect((await contract.updateRating(SYSTEM_IDENTITY, 'ash', 99999, 'battle-win')).rating).toBe(99999);
-    await expect(contract.updateRating(userIdentity('ash'), 'ash', 1200, 'cheat')).rejects.toThrow(/NOT_AUTHORIZED/);
-    await expect(contract.updateRating(ADMIN_IDENTITY, 'ash', 1200, 'cheat')).rejects.toThrow(/NOT_AUTHORIZED/);
+    await expect(contract.updateRating(userIdentity('ash'), 'ash', 1200, 'cheat')).rejects.toThrow(/FORBIDDEN/);
+    await expect(contract.updateRating(ADMIN_IDENTITY, 'ash', 1200, 'cheat')).rejects.toThrow(/FORBIDDEN/);
     await expect(contract.updateRating(SYSTEM_IDENTITY, 'ash', -1, 'bad')).rejects.toThrow(/INVALID_PARAM/);
     await expect(contract.updateRating(SYSTEM_IDENTITY, 'ash', 100000, 'bad')).rejects.toThrow(/INVALID_PARAM/);
     await expect(contract.updateRating(SYSTEM_IDENTITY, 'nobody', 1200, 'bad')).rejects.toThrow(/PLAYER_NOT_FOUND/);

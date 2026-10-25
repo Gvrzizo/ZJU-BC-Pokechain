@@ -304,7 +304,7 @@ export class MockChainAdapter extends ChainAdapter {
 
   private assertSafeInt(n: number, field: string): void {
     if (!Number.isSafeInteger(n)) {
-      throw new CodedError('INVALID_AMOUNT', `${field} must be a safe integer, got ${n}`);
+      throw new CodedError('INVALID_PARAM', `${field} must be a safe integer, got ${n}`);
     }
   }
 
@@ -320,8 +320,9 @@ export class MockChainAdapter extends ChainAdapter {
         throw new CodedError('FORBIDDEN', 'RegisterPlayer requires role admin or system');
       }
       const key = `player:${args.playerId}`;
-      const existing = this.get<PlayerState>(key);
-      if (existing) return existing;
+      if (this.get<PlayerState>(key)) {
+        throw new CodedError('PLAYER_EXISTS', `player ${args.playerId} is already registered`);
+      }
       const player: PlayerState = {
         docType: 'player',
         playerId: args.playerId,
@@ -347,7 +348,7 @@ export class MockChainAdapter extends ChainAdapter {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
       if (as.role !== 'admin') {
-        throw new CodedError('NOT_ADMIN', 'only admin can grant roles');
+        throw new CodedError('FORBIDDEN', 'only admin can grant roles');
       }
       const player = this.mustGet<PlayerState>(`player:${args.playerId}`, 'PLAYER_NOT_FOUND', `player ${args.playerId}`);
       player.role = args.role as PlayerState['role'];
@@ -369,7 +370,7 @@ export class MockChainAdapter extends ChainAdapter {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
       if (as.role !== 'system') {
-        throw new CodedError('NOT_AUTHORIZED', 'only system can update the rating');
+        throw new CodedError('FORBIDDEN', 'only system can update the rating');
       }
       if (!Number.isSafeInteger(args.newRating) || args.newRating < 0 || args.newRating > RATING_MAX) {
         throw new CodedError('INVALID_PARAM', `newRating must be a safe integer 0-${RATING_MAX}, got ${args.newRating}`);
@@ -405,7 +406,7 @@ export class MockChainAdapter extends ChainAdapter {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
       if (as.role !== 'admin' && as.role !== 'system') {
-        throw new CodedError('NOT_AUTHORIZED', 'only admin/system can add points');
+        throw new CodedError('FORBIDDEN', 'only admin/system can add points');
       }
       return this.changePoints(args.playerId, args.delta, args.reason);
     });
@@ -421,7 +422,7 @@ export class MockChainAdapter extends ChainAdapter {
         throw new CodedError('NOT_OWNER', 'caller must be the sender');
       }
       if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
-        throw new CodedError('INVALID_AMOUNT', 'amount must be a positive integer');
+        throw new CodedError('INVALID_PARAM', 'amount must be a positive integer');
       }
       this.mustGet<PlayerState>(`player:${args.toId}`, 'PLAYER_NOT_FOUND', `player ${args.toId}`);
       this.changePoints(args.fromId, -args.amount, 'transfer-out');
@@ -446,10 +447,10 @@ export class MockChainAdapter extends ChainAdapter {
     return this.idempotent(idemKey, nowISO, () => {
       const key = `rand:${args.eventId}`;
       if (this.state.has(key)) {
-        throw new CodedError('EVENT_EXISTS', `random event ${args.eventId} already exists`);
+        throw new CodedError('RAND_EXISTS', `random event ${args.eventId} already exists`);
       }
       if (!/^[0-9a-f]{64}$/.test(args.commitHash)) {
-        throw new CodedError('INVALID_COMMIT_HASH', 'commitHash must be 64 lowercase hex chars');
+        throw new CodedError('INVALID_HASH', 'commitHash must be 64 lowercase hex chars');
       }
       const meta = args.meta ?? '';
       if (Buffer.byteLength(meta, 'utf8') > 256) {
@@ -482,11 +483,11 @@ export class MockChainAdapter extends ChainAdapter {
     return this.idempotent(idemKey, nowISO, () => {
       // 链上 RevealAndVerify 仅 system（serverSeed 只在服务端）
       if (as.role !== 'system') {
-        throw new CodedError('NOT_AUTHORIZED', 'only system can reveal a random event');
+        throw new CodedError('FORBIDDEN', 'only system can reveal a random event');
       }
-      const commit = this.mustGet<RandomCommitState>(`rand:${args.eventId}`, 'EVENT_NOT_FOUND', `random event ${args.eventId}`);
+      const commit = this.mustGet<RandomCommitState>(`rand:${args.eventId}`, 'RAND_NOT_FOUND', `random event ${args.eventId}`);
       if (commit.status !== 'COMMITTED') {
-        throw new CodedError('INVALID_RANDOM_STATE', `random event ${args.eventId} is ${commit.status}, expected COMMITTED`);
+        throw new CodedError('BAD_STATE', `random event ${args.eventId} is ${commit.status}, expected COMMITTED`);
       }
       if (sha256hex(args.serverSeed) !== commit.commitHash) {
         throw new CodedError('SEED_MISMATCH', 'sha256(serverSeed) does not match commitHash');
@@ -501,22 +502,25 @@ export class MockChainAdapter extends ChainAdapter {
   }
 
   async getRandom(eventId: string): Promise<RandomCommitState> {
-    const commit = this.mustGet<RandomCommitState>(`rand:${eventId}`, 'EVENT_NOT_FOUND', `random event ${eventId}`);
+    const commit = this.mustGet<RandomCommitState>(`rand:${eventId}`, 'RAND_NOT_FOUND', `random event ${eventId}`);
     if (commit.meta === undefined) commit.meta = ''; // meta 字段上线前的旧记录
     return commit;
   }
 
   /** Internal: mirrors RandomContract.consumeRandom in the chaincode. */
   private consumeRandom(eventId: string, purpose: string, playerId: string): string {
-    const commit = this.mustGet<RandomCommitState>(`rand:${eventId}`, 'EVENT_NOT_FOUND', `random event ${eventId}`);
+    const commit = this.mustGet<RandomCommitState>(`rand:${eventId}`, 'RAND_NOT_FOUND', `random event ${eventId}`);
+    if (commit.status === 'CONSUMED') {
+      throw new CodedError('RAND_CONSUMED', `random event ${eventId} is already consumed`);
+    }
     if (commit.status !== 'REVEALED') {
-      throw new CodedError('RANDOM_NOT_REVEALED', `random event ${eventId} is ${commit.status}, expected REVEALED`);
+      throw new CodedError('RAND_NOT_REVEALED', `random event ${eventId} is ${commit.status}, expected REVEALED`);
     }
     if (commit.purpose !== purpose) {
       throw new CodedError('PURPOSE_MISMATCH', `random event purpose ${commit.purpose} != ${purpose}`);
     }
     if (commit.playerId !== playerId) {
-      throw new CodedError('PLAYER_MISMATCH', `random event belongs to ${commit.playerId}, not ${playerId}`);
+      throw new CodedError('RAND_PLAYER_MISMATCH', `random event belongs to ${commit.playerId}, not ${playerId}`);
     }
     commit.status = 'CONSUMED';
     this.put(`rand:${eventId}`, commit);
@@ -544,18 +548,18 @@ export class MockChainAdapter extends ChainAdapter {
     return this.idempotent(idemKey, nowISO, () => {
       // 链上 MintFromCapture 仅 system（铸造属性由后端从已验证随机流派生）
       if (as.role !== 'system') {
-        throw new CodedError('NOT_AUTHORIZED', 'only system can mint from a capture');
+        throw new CodedError('FORBIDDEN', 'only system can mint from a capture');
       }
       if (this.state.has(`pokemon:${args.id}`)) {
         throw new CodedError('POKEMON_EXISTS', `pokemon ${args.id} already exists`);
       }
       for (const [k, v] of Object.entries(args.ivs)) {
         if (!Number.isInteger(v) || v < 0 || v > 31) {
-          throw new CodedError('INVALID_IV', `iv ${k}=${v} out of range 0-31`);
+          throw new CodedError('INVALID_PARAM', `iv ${k}=${v} out of range 0-31`);
         }
       }
       if (args.moves.length > 4) {
-        throw new CodedError('TOO_MANY_MOVES', 'a pokemon can know at most 4 moves');
+        throw new CodedError('INVALID_PARAM', 'a pokemon can know at most 4 moves');
       }
       this.consumeRandom(args.eventId, 'capture', args.playerId);
       this.mustGet<PlayerState>(`player:${args.playerId}`, 'PLAYER_NOT_FOUND', `player ${args.playerId}`);
@@ -619,7 +623,7 @@ export class MockChainAdapter extends ChainAdapter {
     return this.idempotent(idemKey, nowISO, () => {
       // 链上 ApplyGrowth 仅 system：等级/EV/IV/物种/昵称都由后端校验成本后以 system 身份代签
       if (as.role !== 'system') {
-        throw new CodedError('NOT_AUTHORIZED', 'only system can apply growth');
+        throw new CodedError('FORBIDDEN', 'only system can apply growth');
       }
       const pokemon = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${args.id}`, 'POKEMON_NOT_FOUND', `pokemon ${args.id}`));
       if (pokemon.status !== 'IDLE') {
@@ -628,20 +632,20 @@ export class MockChainAdapter extends ChainAdapter {
       const g = args.growth;
       if (g.level !== undefined) {
         if (!Number.isInteger(g.level) || g.level < 1 || g.level > 100) {
-          throw new CodedError('INVALID_LEVEL', 'level must be an integer 1-100');
+          throw new CodedError('INVALID_PARAM', 'level must be an integer 1-100');
         }
         if (g.level < pokemon.level) {
-          throw new CodedError('LEVEL_REGRESSION', `level cannot decrease (${pokemon.level} -> ${g.level})`);
+          throw new CodedError('INVALID_PARAM', `level cannot decrease (${pokemon.level} -> ${g.level})`);
         }
         pokemon.level = g.level;
       }
       if (g.exp !== undefined) {
         this.assertSafeInt(g.exp, 'exp');
-        if (g.exp < 0) throw new CodedError('INVALID_EXP', 'exp must be non-negative');
+        if (g.exp < 0) throw new CodedError('INVALID_PARAM', 'exp must be non-negative');
         pokemon.exp = g.exp;
       }
       if (g.moves !== undefined) {
-        if (g.moves.length > 4) throw new CodedError('TOO_MANY_MOVES', 'a pokemon can know at most 4 moves');
+        if (g.moves.length > 4) throw new CodedError('INVALID_PARAM', 'a pokemon can know at most 4 moves');
         pokemon.moves = [...g.moves];
       }
       if (g.evs !== undefined) {
@@ -684,7 +688,7 @@ export class MockChainAdapter extends ChainAdapter {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
       if (as.role !== 'system') {
-        throw new CodedError('NOT_AUTHORIZED', 'only system can raise bond');
+        throw new CodedError('FORBIDDEN', 'only system can raise bond');
       }
       if (!Array.isArray(args.pokemonIds) || args.pokemonIds.length === 0) {
         throw new CodedError('INVALID_PARAM', 'pokemonIds must be a non-empty array');
@@ -786,13 +790,13 @@ export class MockChainAdapter extends ChainAdapter {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
       if (as.role !== 'admin' && as.role !== 'system') {
-        throw new CodedError('NOT_AUTHORIZED', 'only admin/system can mint items');
+        throw new CodedError('FORBIDDEN', 'only admin/system can mint items');
       }
       if (this.state.has(`item:${args.id}`)) {
         throw new CodedError('ITEM_EXISTS', `item ${args.id} already exists`);
       }
       this.assertSafeInt(args.quantity, 'quantity');
-      if (args.quantity < 0) throw new CodedError('INVALID_AMOUNT', 'quantity must be non-negative');
+      if (args.quantity < 0) throw new CodedError('INVALID_PARAM', 'quantity must be non-negative');
       this.mustGet<PlayerState>(`player:${args.playerId}`, 'PLAYER_NOT_FOUND', `player ${args.playerId}`);
       const item: ItemState = {
         docType: 'item',
@@ -857,7 +861,7 @@ export class MockChainAdapter extends ChainAdapter {
         throw new CodedError('ASSET_LOCKED', `item ${args.id} is ${item.status}`);
       }
       if (!Number.isSafeInteger(args.quantity) || args.quantity <= 0) {
-        throw new CodedError('INVALID_AMOUNT', 'quantity must be a positive integer');
+        throw new CodedError('INVALID_PARAM', 'quantity must be a positive integer');
       }
       if (item.quantity < args.quantity) {
         throw new CodedError('INSUFFICIENT_QUANTITY', `item ${args.id} has ${item.quantity}, need ${args.quantity}`);
@@ -990,7 +994,7 @@ export class MockChainAdapter extends ChainAdapter {
       this.assertSafeInt(args.offer.points, 'from.points');
       this.assertSafeInt(args.request.points, 'to.points');
       if (args.offer.points < 0 || args.request.points < 0) {
-        throw new CodedError('INVALID_AMOUNT', 'points must be non-negative');
+        throw new CodedError('INVALID_PARAM', 'points must be non-negative');
       }
       if (from.points < args.offer.points) {
         throw new CodedError('INSUFFICIENT_POINTS', `player ${args.fromId} balance ${from.points} cannot cover ${args.offer.points}`);
@@ -1066,8 +1070,8 @@ export class MockChainAdapter extends ChainAdapter {
   private executeTrade(trade: TradeState): void {
     const snapshot = new Map(this.state);
     try {
-      const from = this.mustGet<PlayerState>(`player:${trade.fromId}`);
-      const to = this.mustGet<PlayerState>(`player:${trade.toId}`);
+      const from = this.mustGet<PlayerState>(`player:${trade.fromId}`, 'PLAYER_NOT_FOUND', `player ${trade.fromId}`);
+      const to = this.mustGet<PlayerState>(`player:${trade.toId}`, 'PLAYER_NOT_FOUND', `player ${trade.toId}`);
       if (trade.offer.points > 0 && from.points < trade.offer.points) {
         throw new CodedError('INSUFFICIENT_POINTS', `from ${trade.fromId} cannot cover offer points`);
       }
@@ -1080,7 +1084,7 @@ export class MockChainAdapter extends ChainAdapter {
       this.put(`player:${trade.toId}`, to);
 
       for (const id of trade.offer.pokemonIds) {
-        const p = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`));
+        const p = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`, 'POKEMON_NOT_FOUND', `pokemon ${id}`));
         if (p.ownerId !== trade.toId) p.bond = BOND_RESET_ON_TRANSFER;
         p.ownerId = trade.toId;
         p.status = 'IDLE';
@@ -1088,7 +1092,7 @@ export class MockChainAdapter extends ChainAdapter {
         this.put(`pokemon:${id}`, p);
       }
       for (const id of trade.request.pokemonIds) {
-        const p = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`));
+        const p = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`, 'POKEMON_NOT_FOUND', `pokemon ${id}`));
         // request 创建时不再锁定：执行前被转走/放生 → NOT_OWNER，被别的单锁住 → ASSET_LOCKED
         if (p.ownerId !== trade.toId) {
           throw new CodedError('NOT_OWNER', `pokemon ${id} is owned by ${p.ownerId}, not ${trade.toId}`);
@@ -1103,14 +1107,14 @@ export class MockChainAdapter extends ChainAdapter {
         this.put(`pokemon:${id}`, p);
       }
       for (const id of trade.offer.itemIds) {
-        const i = this.mustGet<ItemState>(`item:${id}`);
+        const i = this.mustGet<ItemState>(`item:${id}`, 'ITEM_NOT_FOUND', `item ${id}`);
         i.ownerId = trade.toId;
         i.status = 'IDLE';
         i.lockRef = '';
         this.put(`item:${id}`, i);
       }
       for (const id of trade.request.itemIds) {
-        const i = this.mustGet<ItemState>(`item:${id}`);
+        const i = this.mustGet<ItemState>(`item:${id}`, 'ITEM_NOT_FOUND', `item ${id}`);
         if (i.ownerId !== trade.toId) {
           throw new CodedError('NOT_OWNER', `item ${id} is owned by ${i.ownerId}, not ${trade.toId}`);
         }
@@ -1250,7 +1254,7 @@ export class MockChainAdapter extends ChainAdapter {
     return this.idempotent(idemKey, nowISO, () => {
       const isParty = as.userId === args.playerA || as.userId === args.playerB;
       if (as.role !== 'system' && !isParty) {
-        throw new CodedError('NOT_AUTHORIZED', 'only system or a battle party can create the battle');
+        throw new CodedError('FORBIDDEN', 'only system or a battle party can create the battle');
       }
       if (args.playerA === args.playerB) {
         throw new CodedError('SAME_PLAYER', 'playerA and playerB must differ');
@@ -1274,8 +1278,8 @@ export class MockChainAdapter extends ChainAdapter {
       if (this.state.has(`battle:${args.id}`)) {
         throw new CodedError('BATTLE_EXISTS', `battle ${args.id} already exists`);
       }
-      const a = this.mustGet<PlayerState>(`player:${args.playerA}`);
-      const b = this.mustGet<PlayerState>(`player:${args.playerB}`);
+      const a = this.mustGet<PlayerState>(`player:${args.playerA}`, 'PLAYER_NOT_FOUND', `player ${args.playerA}`);
+      const b = this.mustGet<PlayerState>(`player:${args.playerB}`, 'PLAYER_NOT_FOUND', `player ${args.playerB}`);
       if (a.points < wagerA.points) {
         throw new CodedError('INSUFFICIENT_POINTS', `player ${args.playerA} cannot cover wager`);
       }
@@ -1316,10 +1320,10 @@ export class MockChainAdapter extends ChainAdapter {
   async activateBattle(as: ChainIdentity, args: { id: string } & TxMeta): Promise<BattleState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
-      if (as.role !== 'system') throw new CodedError('NOT_AUTHORIZED', 'only system can activate a battle');
+      if (as.role !== 'system') throw new CodedError('FORBIDDEN', 'only system can activate a battle');
       const battle = this.mustGet<BattleState>(`battle:${args.id}`, 'BATTLE_NOT_FOUND', `battle ${args.id}`);
       if (battle.status !== 'CREATED') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}, expected CREATED`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} is ${battle.status}, expected CREATED`);
       }
       battle.status = 'ACTIVE';
       this.put(`battle:${battle.id}`, battle);
@@ -1334,10 +1338,10 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<BattleState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
-      if (as.role !== 'system') throw new CodedError('NOT_AUTHORIZED', 'only system can submit a result');
+      if (as.role !== 'system') throw new CodedError('FORBIDDEN', 'only system can submit a result');
       const battle = this.mustGet<BattleState>(`battle:${args.id}`, 'BATTLE_NOT_FOUND', `battle ${args.id}`);
       if (battle.status !== 'ACTIVE') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}, expected ACTIVE`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} is ${battle.status}, expected ACTIVE`);
       }
       if (args.winnerId !== 'DRAW' && args.winnerId !== battle.playerA && args.winnerId !== battle.playerB) {
         throw new CodedError('INVALID_WINNER', 'winnerId must be a party or DRAW');
@@ -1367,7 +1371,7 @@ export class MockChainAdapter extends ChainAdapter {
         throw new CodedError('NOT_PARTY', 'caller must equal playerId');
       }
       if (battle.status !== 'RESULT_SUBMITTED') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}, expected RESULT_SUBMITTED`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} is ${battle.status}, expected RESULT_SUBMITTED`);
       }
       if (args.playerId === battle.playerA) battle.result.confirmations.A = true;
       else battle.result.confirmations.B = true;
@@ -1383,11 +1387,11 @@ export class MockChainAdapter extends ChainAdapter {
   async settleBattle(as: ChainIdentity, args: { id: string } & TxMeta): Promise<BattleState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
-      if (as.role !== 'system') throw new CodedError('NOT_AUTHORIZED', 'only system can settle a battle');
+      if (as.role !== 'system') throw new CodedError('FORBIDDEN', 'only system can settle a battle');
       const battle = this.mustGet<BattleState>(`battle:${args.id}`, 'BATTLE_NOT_FOUND', `battle ${args.id}`);
       if (battle.status === 'SETTLED' || battle.status === 'REFUNDED') return battle;
       if (battle.status !== 'RESULT_SUBMITTED') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}, expected RESULT_SUBMITTED`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} is ${battle.status}, expected RESULT_SUBMITTED`);
       }
       return this.settleInternal(battle, battle.result.winnerId, nowISO, 'SETTLED');
     });
@@ -1400,10 +1404,10 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<BattleState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
-      if (as.role !== 'system') throw new CodedError('NOT_AUTHORIZED', 'only system can cancel a battle');
+      if (as.role !== 'system') throw new CodedError('FORBIDDEN', 'only system can cancel a battle');
       const battle = this.mustGet<BattleState>(`battle:${args.id}`, 'BATTLE_NOT_FOUND', `battle ${args.id}`);
       if (battle.status !== 'CREATED') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}, expected CREATED`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} is ${battle.status}, expected CREATED`);
       }
       this.emit('BattleCancelled', {
         id: battle.id,
@@ -1412,6 +1416,13 @@ export class MockChainAdapter extends ChainAdapter {
         playerB: battle.playerB,
       });
       const settled = this.settleInternal(battle, 'REFUND', nowISO, 'REFUNDED');
+      this.emit('BattleSettled', {
+        id: battle.id,
+        winnerId: 'REFUND',
+        playerA: battle.playerA,
+        playerB: battle.playerB,
+        via: 'CancelBattle',
+      });
       settled.result.winnerId = 'REFUND';
       settled.result.resultHash = sha256hex(`cancel|${battle.id}|${args.reason}`);
       settled.result.serverSubmitted = true;
@@ -1427,10 +1438,10 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<BattleState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
-      if (as.role !== 'system') throw new CodedError('NOT_AUTHORIZED', 'only system can forfeit a battle');
+      if (as.role !== 'system') throw new CodedError('FORBIDDEN', 'only system can forfeit a battle');
       const battle = this.mustGet<BattleState>(`battle:${args.id}`, 'BATTLE_NOT_FOUND', `battle ${args.id}`);
       if (battle.status !== 'ACTIVE' && battle.status !== 'RESULT_SUBMITTED') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} is ${battle.status}`);
       }
       if (args.loserId !== battle.playerA && args.loserId !== battle.playerB) {
         throw new CodedError('NOT_PARTY', 'loserId must be a battle party');
@@ -1441,6 +1452,7 @@ export class MockChainAdapter extends ChainAdapter {
         battle.result.resultHash = sha256hex(`forfeit|${battle.id}|${args.loserId}|${args.reason}`);
         battle.result.serverSubmitted = true;
       }
+      battle.arbiterNote = `FORFEIT: ${args.reason}`;
       this.emit('BattleForfeited', { id: battle.id, loserId: args.loserId, reason: args.reason });
       return this.settleInternal(battle, winner, nowISO, 'SETTLED');
     });
@@ -1460,7 +1472,7 @@ export class MockChainAdapter extends ChainAdapter {
         throw new CodedError('NOT_PARTY', 'caller must equal playerId');
       }
       if (battle.status === 'SETTLED' || battle.status === 'REFUNDED') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} already settled`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} already settled`);
       }
       battle.status = 'DISPUTED';
       battle.disputeReason = args.reason;
@@ -1477,11 +1489,11 @@ export class MockChainAdapter extends ChainAdapter {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
       if (as.mspId !== 'Org2MSP' || as.role !== 'arbitrator') {
-        throw new CodedError('NOT_ARBITRATOR', 'only an Org2 arbitrator can arbitrate');
+        throw new CodedError('FORBIDDEN', 'only an Org2 arbitrator can arbitrate');
       }
       const battle = this.mustGet<BattleState>(`battle:${args.id}`, 'BATTLE_NOT_FOUND', `battle ${args.id}`);
       if (battle.status !== 'DISPUTED') {
-        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}, expected DISPUTED`);
+        throw new CodedError('BAD_STATE', `battle ${args.id} is ${battle.status}, expected DISPUTED`);
       }
       battle.arbiterNote = args.arbiterNote;
       this.emit('BattleArbitrated', { id: battle.id, outcome: args.outcome, arbiter: as.userId });
@@ -1492,7 +1504,7 @@ export class MockChainAdapter extends ChainAdapter {
         return this.settleInternal(battle, 'REFUND', nowISO, 'REFUNDED');
       }
       if (args.outcome !== battle.playerA && args.outcome !== battle.playerB) {
-        throw new CodedError('INVALID_OUTCOME', 'outcome must be a winnerId, DRAW or REFUND');
+        throw new CodedError('INVALID_WINNER', 'outcome must be a winnerId, DRAW or REFUND');
       }
       battle.result.winnerId = args.outcome;
       return this.settleInternal(battle, args.outcome, nowISO, 'SETTLED');
@@ -1508,8 +1520,8 @@ export class MockChainAdapter extends ChainAdapter {
   ): BattleState {
     const snapshot = new Map(this.state);
     try {
-      const a = this.mustGet<PlayerState>(`player:${battle.playerA}`);
-      const b = this.mustGet<PlayerState>(`player:${battle.playerB}`);
+      const a = this.mustGet<PlayerState>(`player:${battle.playerA}`, 'PLAYER_NOT_FOUND', `player ${battle.playerA}`);
+      const b = this.mustGet<PlayerState>(`player:${battle.playerB}`, 'PLAYER_NOT_FOUND', `player ${battle.playerB}`);
       const beforeA = a.points;
       const beforeB = b.points;
       const escrowTotal = battle.escrow.pointsA + battle.escrow.pointsB;
@@ -1521,7 +1533,7 @@ export class MockChainAdapter extends ChainAdapter {
 
       const givePokemon = (wager: WagerBundle, toOwner: string) => {
         for (const id of wager.pokemonIds) {
-          const p = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`));
+          const p = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`, 'POKEMON_NOT_FOUND', `pokemon ${id}`));
           // 易主即归零：押注宝可梦被对手赢走时 bond 重置为 30（赢家自有宝可梦保持）
           if (p.ownerId !== toOwner) p.bond = BOND_RESET_ON_TRANSFER;
           p.ownerId = toOwner;
@@ -1594,7 +1606,7 @@ export class MockChainAdapter extends ChainAdapter {
       // 与链码一致：结算也发双方 PointsChanged，排行榜监听器据此刷新真链/ Mock 分数
       this.emit('PointsChanged', { playerId: a.playerId, delta: a.points - beforeA, reason: `battle:${battle.id}`, points: a.points });
       this.emit('PointsChanged', { playerId: b.playerId, delta: b.points - beforeB, reason: `battle:${battle.id}`, points: b.points });
-      return this.mustGet<BattleState>(`battle:${battle.id}`);
+      return this.mustGet<BattleState>(`battle:${battle.id}`, 'BATTLE_NOT_FOUND', `battle ${battle.id}`);
     } catch (err) {
       this.state.clear();
       for (const [k, v] of snapshot) this.state.set(k, v);

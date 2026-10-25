@@ -1,0 +1,45 @@
+{
+  "name": "battle_cancel_refund",
+  "description": "H5：CREATED 对局 CancelBattle 全额退款；已 ACTIVE 不能取消",
+  "steps": [
+    {
+      "op": "mintPokemon",
+      "args": { "id": "p_cancel", "ownerId": "alice" },
+      "expect": { "ok": true }
+    },
+    {
+      "op": "createBattle",
+      "args": {
+        "id": "bc",
+        "playerA": "alice",
+        "playerB": "bob",
+        "wagerA": { "pokemonIds": ["p_cancel"], "items": [], "points": 100 },
+        "wagerB": { "pokemonIds": [], "items": [], "points": 0 }
+      },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "playerPoints", "playerId": "alice", "equals": 900 },
+        { "kind": "pokemonStatus", "id": "p_cancel", "equals": "LOCKED_BATTLE" }
+      ]
+    },
+    {
+      "op": "cancelBattle",
+      "args": { "id": "bc", "reason": "startup failed" },
+      "expect": { "ok": true },
+      "state": [
+        { "kind": "battleStatus", "id": "bc", "equals": "REFUNDED" },
+        { "kind": "battleWinner", "id": "bc", "equals": "REFUND" },
+        { "kind": "battleResultHash", "id": "bc", "equals": "da54fed17cfcd08920eeb5b1e843a1923218766ced669fb9f531ff06370a8529" },
+        { "kind": "battleArbiterNote", "id": "bc", "equals": "CANCEL: startup failed" },
+        { "kind": "playerPoints", "playerId": "alice", "equals": 1000 },
+        { "kind": "pokemonStatus", "id": "p_cancel", "equals": "IDLE" },
+        { "kind": "pokemonOwner", "id": "p_cancel", "equals": "alice" }
+      ]
+    },
+    {
+      "op": "activateBattle",
+      "args": { "id": "bc" },
+      "expect": { "ok": false, "code": "BAD_STATE" }
+    }
+  ]
+}

@@ -49,8 +49,8 @@ describe('链码铸造/揭示/养成权限（C2/C3）', () => {
       clientSeed: CLIENT_SEED,
       meta: '',
     });
-    await expect(contract.revealAndVerify(ash, 'ev_perm', SERVER_SEED)).rejects.toThrow(/NOT_AUTHORIZED/);
-    await expect(contract.revealAndVerify(ADMIN_IDENTITY, 'ev_perm', SERVER_SEED)).rejects.toThrow(/NOT_AUTHORIZED/);
+    await expect(contract.revealAndVerify(ash, 'ev_perm', SERVER_SEED)).rejects.toThrow(/FORBIDDEN/);
+    await expect(contract.revealAndVerify(ADMIN_IDENTITY, 'ev_perm', SERVER_SEED)).rejects.toThrow(/FORBIDDEN/);
     expect((await contract.getRandom('ev_perm')).status).toBe('COMMITTED');
     await contract.revealAndVerify(SYSTEM_IDENTITY, 'ev_perm', SERVER_SEED);
     expect((await contract.getRandom('ev_perm')).status).toBe('REVEALED');
@@ -70,7 +70,7 @@ describe('链码铸造/揭示/养成权限（C2/C3）', () => {
       });
     await commit('ev_mint');
     await contract.revealAndVerify(SYSTEM_IDENTITY, 'ev_mint', SERVER_SEED);
-    await expect(contract.mintFromCapture(ash, captureArgs('ev_mint'))).rejects.toThrow(/NOT_AUTHORIZED/);
+    await expect(contract.mintFromCapture(ash, captureArgs('ev_mint'))).rejects.toThrow(/FORBIDDEN/);
     expect((await contract.getRandom('ev_mint')).status).toBe('REVEALED');
     // system 仍可铸造（收服/新手礼包的真实路径）
     const minted = await contract.mintFromCapture(SYSTEM_IDENTITY, captureArgs('ev_mint'));
@@ -89,7 +89,7 @@ describe('链码铸造/揭示/养成权限（C2/C3）', () => {
       { speciesId: 151 },
       { name: 'Mew' },
     ]) {
-      await expect(contract.applyGrowth(ash, mon.id, growth)).rejects.toThrow(/NOT_AUTHORIZED/);
+      await expect(contract.applyGrowth(ash, mon.id, growth)).rejects.toThrow(/FORBIDDEN/);
     }
     expect(await contract.getPokemon(mon.id)).toMatchObject({ level: 20, speciesId: 25, name: 'pikachu' });
 

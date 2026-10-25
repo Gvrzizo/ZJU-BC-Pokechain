@@ -138,7 +138,7 @@ describe('Battle wager settlement & arbitration (mock chain)', () => {
     // a normal player cannot arbitrate
     await expect(
       contract.arbitrateBattle(userIdentity('gary'), 'b_disp', 'REFUND', 'no'),
-    ).rejects.toThrow(/NOT_ARBITRATOR/);
+    ).rejects.toThrow(/FORBIDDEN/);
 
     const arbiter = userIdentity('arbiter', 'arbitrator', 'Org2MSP');
     const refunded = await contract.arbitrateBattle(arbiter, 'b_disp', 'REFUND', 'rng review inconclusive');
@@ -162,13 +162,13 @@ describe('Battle wager settlement & arbitration (mock chain)', () => {
     expect((await contract.getPlayer('gary')).wins).toBe(1);
   });
 
-  it('only system may submit results (NOT_AUTHORIZED)', async () => {
+  it('only system may submit results (FORBIDDEN)', async () => {
     const { contract } = makeChain();
     await registerPlayers(contract, 'ash', 'gary');
     await createActiveBattle(contract, 'b_auth');
     await expect(
       contract.submitBattleResult(userIdentity('ash'), 'b_auth', 'ash', 'r'.repeat(64), 'sig'),
-    ).rejects.toThrow(/NOT_AUTHORIZED/);
+    ).rejects.toThrow(/FORBIDDEN/);
   });
 });
 
