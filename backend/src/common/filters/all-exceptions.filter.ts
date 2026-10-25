@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { splitCodedMessage } from '../utils/errors';
+import { splitCodedMessage, httpStatusForCode } from '../utils/errors';
 
 /**
  * Unified error shape: { statusCode, code, message }.
@@ -40,6 +40,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     let { code, message } = splitCodedMessage(raw);
+
+    // 链码/适配器异常只有 code、没有 status：按 H8 的语义表映射（未收录保持 500）
+    if (!(exception instanceof HttpException)) {
+      const mapped = httpStatusForCode(code);
+      if (mapped !== undefined) {
+        statusCode = mapped;
+      } else {
+        const hinted = (exception as { statusCode?: unknown })?.statusCode;
+        if (typeof hinted === 'number' && hinted >= 400 && hinted < 500) statusCode = hinted;
+      }
+    }
+
     if (code === 'INTERNAL_ERROR') {
       // map common framework errors to stable codes
       if (statusCode === HttpStatus.UNAUTHORIZED) code = 'UNAUTHORIZED';

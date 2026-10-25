@@ -1,20 +1,11 @@
 import { randomUUID } from 'crypto';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { sha256hex } from '../common/utils/crypto.util';
-import { AppException } from '../common/utils/errors';
+import { AppException, httpStatusForCode, splitCodedMessage } from '../common/utils/errors';
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, ItemState, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { getItemType } from '../game-data/items.data';
 import { SHOP_MAX_QTY, sellableItem, shopCatalog, shopPrice } from './shop.data';
-
-/** 链上错误的对外 HTTP 语义（链上错误本身只有 code；未收录的原样抛出 → 500 + code）。 */
-const CHAIN_ERROR_STATUS: Readonly<Record<string, HttpStatus>> = {
-  INSUFFICIENT_POINTS: HttpStatus.BAD_REQUEST,
-  INSUFFICIENT_QUANTITY: HttpStatus.CONFLICT,
-  ASSET_LOCKED: HttpStatus.CONFLICT,
-  NOT_OWNER: HttpStatus.FORBIDDEN,
-  ITEM_NOT_FOUND: HttpStatus.NOT_FOUND,
-};
 
 /**
  * 道具商店（docs/backend-api.md §3「道具获取途径」）：积分 ↔ 道具的双向闭环。
@@ -31,12 +22,12 @@ const CHAIN_ERROR_STATUS: Readonly<Record<string, HttpStatus>> = {
 export class ShopService {
   constructor(private readonly contract: ContractService) {}
 
-  /** 链上错误 → 对外约定的 HTTP 状态；未收录的错误原样抛出。 */
+  /** 链上错误 → 对外约定的 HTTP 状态（统一表见 common/utils/errors.ts）；未收录的原样抛出。 */
   private chainError(err: unknown): Error {
     const code = (err as { code?: string })?.code ?? '';
-    const status = CHAIN_ERROR_STATUS[code];
+    const status = httpStatusForCode(code);
     if (status === undefined) return err as Error;
-    return new AppException(code, (err as Error)?.message ?? String(err), status);
+    return new AppException(code, splitCodedMessage((err as Error)?.message ?? String(err)).message, status);
   }
 
   /** 商品表 + 我的积分（前端商店页一次拉全）。 */

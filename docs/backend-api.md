@@ -3,7 +3,7 @@
 Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + refresh 7d，Redis 存 refresh 白名单）。
 防重放：变更类请求头带 `X-Nonce: <uuid>` + `X-Timestamp`，Redis `nonce:<uuid>` SET NX EX 300，重复拒绝 409。
 限流：Redis 滑动窗口，默认 100 req/min/用户，登录接口 10 req/min/IP。
-统一错误：`{ "statusCode":401, "code":"NOT_OWNER", "message":"..." }`。
+统一错误：`{ "statusCode":401, "code":"NOT_OWNER", "message":"..." }`。链码/适配器抛出的 `CODE: message` 本身没有 HTTP status，全局过滤器按 `backend/src/common/utils/errors.ts::CHAIN_HTTP_STATUS` 映射为稳定语义（权限 403、锁定/状态冲突 409、入参/余额 400、实体不存在 404；业务层已抛 `AppException` 的路径以自带 status 为准）；未收录的 code 保持 500，避免把真 bug 伪装成 4xx（H8，2026-10-25）。
 
 ## 1. Auth / Users
 
