@@ -156,9 +156,9 @@ CreateBattle 时归一为 `{pokemonIds, items, points}` 并以此形态存储、
 ### 2.5 TradeContract（双方确认 + 原子结算）
 | 交易 | 参数 | 规则 | 事件 |
 |---|---|---|---|
-| `CreateTrade` | id, fromId, toId, offerJSON, requestJSON, expiresAt, nowISO, idemKey | 调用者=fromId 本人（`hf.EnrollmentID` 匹配）；逐项校验双方资产存在、归各自所有、status=IDLE；points 校验余额；锁定全部资产（→LOCKED_TRADE, lockRef=id），from/to 积分不动仅在执行时划转；manifestHash=sha256(canonical(offer,request,from,to)) | `TradeCreated` |
-| `ConfirmTrade` | id, playerId, nowISO, idemKey | 仅 from/to 且须本人（`hf.EnrollmentID` 匹配，替对方确认抛 `NOT_OWNER`）；OPEN 且未过期（nowISO<expiresAt 否则→EXPIRED 并解锁）；双方均确认后**同一交易内原子执行**：交换宝可梦/道具 owner、划转积分（from 收 request.points、付 offer.points，逐项校验余额不足则整体回滚抛错）、资产解锁→IDLE、**双方宝可梦 bond 均重置为 30**、status=EXECUTED | `TradeConfirmed` / `TradeExecuted` |
-| `CancelTrade` | id, playerId, nowISO, idemKey | OPEN 时 from/to 任一方本人可取消（`hf.EnrollmentID` 匹配）；解锁全部资产；→CANCELLED | `TradeCancelled` |
+| `CreateTrade` | id, fromId, toId, offerJSON, requestJSON, expiresAt, nowISO, idemKey | 调用者=fromId 本人（`hf.EnrollmentID` 匹配）；逐项校验双方资产存在、归各自所有、status=IDLE；points 校验余额；**只锁 offer**（→LOCKED_TRADE, lockRef=id），**request 仅预检不锁定**（否则任何人凭资产 id 即可锁住他人资产）；`expiresAt - nowISO ≤ 7 天`（否则 `INVALID_PARAM`，`Date.parse` 确定性解析）；from/to 积分不动仅在执行时划转；manifestHash=sha256(canonical(offer,request,from,to)) | `TradeCreated` |
+| `ConfirmTrade` | id, playerId, nowISO, idemKey | 仅 from/to 且须本人（`hf.EnrollmentID` 匹配，替对方确认抛 `NOT_OWNER`）；OPEN 且未过期（nowISO<expiresAt 否则→EXPIRED 并解锁）；双方均确认后**同一交易内原子执行**：先校验 request 资产仍归 toId 且 `IDLE` 或**被本交易锁定**（旧交易兼容），否则抛 `NOT_OWNER`/`ASSET_LOCKED` 整体回滚（offer 仍锁定、交易仍 OPEN）；交换宝可梦/道具 owner、划转积分（from 收 request.points、付 offer.points，余额不足同样整体回滚）、资产解锁→IDLE、**双方宝可梦 bond 均重置为 30**、status=EXECUTED | `TradeConfirmed` / `TradeExecuted` |
+| `CancelTrade` | id, playerId, nowISO, idemKey | OPEN 时 from/to 任一方本人可取消（`hf.EnrollmentID` 匹配）；解锁双方资产（新交易 request 未锁→自动跳过；旧交易 request 仍锁→一并解锁）；→CANCELLED | `TradeCancelled` |
 | `ExpireTrade` | id, nowISO, idemKey | 任何人可触发；nowISO≥expiresAt 且 OPEN；解锁；→EXPIRED | `TradeExpired` |
 | `GetTrade` / `QueryByPlayer` | id / playerId | 查询（后者富查询 fromId/toId） | - |
 
@@ -205,6 +205,6 @@ Trade 的 `offer/request` 保持 `{pokemonIds, itemIds, points}` **整堆语义�
 
 ## 5. 单元测试要求（Jest + 手写 mock harness）
 
-测试桩为手写最小实现（`tests/helpers/harness.ts`：内存世界状态 + 事务写缓存，抛错即回滚，与 Fabric 交易语义一致；以 `mspId`/`role`/`hf.EnrollmentID` 属性模拟 Org1MSP（admin/system/player）与 Org2MSP（arbitrator/player）身份——玩家上下文用 `World.ctxAs(playerId)`，缺 `hf.EnrollmentID` 用 `World.ctx(mspId)` 验证拒绝路径），当前 95 用例。不用 `@theledger/fabric-mock-stub`：其依赖 `fabric-shim ^1.4` + TS3，与本工程 fabric-shim 2.5 / TS5 栈不兼容。
+测试桩为手写最小实现（`tests/helpers/harness.ts`：内存世界状态 + 事务写缓存，抛错即回滚，与 Fabric 交易语义一致；以 `mspId`/`role`/`hf.EnrollmentID` 属性模拟 Org1MSP（admin/system/player）与 Org2MSP（arbitrator/player）身份——玩家上下文用 `World.ctxAs(playerId)`，缺 `hf.EnrollmentID` 用 `World.ctx(mspId)` 验证拒绝路径），当前 100 用例。不用 `@theledger/fabric-mock-stub`：其依赖 `fabric-shim ^1.4` + TS3，与本工程 fabric-shim 2.5 / TS5 栈不兼容。
 
 覆盖：注册/铸币/转移/放生；Commit→Reveal→MintFromCapture 全流程（含 SEED_MISMATCH 拒绝）；EV 更新合法路径与单项 255/总和 510/负数/缺字段/非整数拒绝、旧记录无 `evs` 字段的兼容读取；**能力养成**（ApplyGrowth `ivs` 子集提升与 `IV_DECREASE`/越界/未知键/非整数/非对象拒绝且不落库）；**羁绊值 bond**（铸造默认 50、`Transfer` 易主重置 30、转给自己不重置、Trade 双方各自重置、Battle 赢家赢得的宝可梦重置而自有宝可梦保持、DRAW 不重置、`BondUp` 批量提升/255 截断/角色与参数校验/放生后拒绝/锁定中可提升、旧记录缺字段兼容）；**排位分 rating**（默认 1000、`UpdateRating` 仅 system 与 0/99999 边界、越界/非整数/不存在拒绝、旧记录缺字段兼容）；**道具堆叠归一**（mint 自动合并到最早堆叠、旧记录缺 `createdAt` 视为最早、锁定堆叠不参与、`MergeStacks` 权限与返回值、转移/交易不自动合并）；**部分数量押注**（原堆叠减量+确定性 id 子堆叠锁定、qty 越界/非正/重复/混用旧字段拒绝、旧 `itemIds` 归一为整堆、赢家收堆合并、DRAW 并回原堆叠、原堆叠易主时子堆叠独立恢复）；**随机承诺 meta**（存取、缺省空串、超 256 字节拒绝）；Trade 创建锁定→双方确认执行→余额与归属断言、取消解锁、过期退款、双花拒绝（锁定资产再 CreateTrade 抛 ASSET_LOCKED）；Battle 锁定→提交→确认结算（赢家得全部）、DRAW 退款、Forfeit、Dispute→Arbitrate、越权调用拒绝（非 owner 转移/非 arbitrator 仲裁/非 system 提交结果）、幂等键重放返回相同结果不重复变更。

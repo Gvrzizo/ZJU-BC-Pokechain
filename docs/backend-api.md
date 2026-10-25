@@ -302,10 +302,12 @@ p = min(1, a / 255)                                                   // 大师�
 
 ## 4. 交易
 
+> **锁资产语义（2026-10-25 修复 C5）**：创建交易只锁发起方的 `offer`；`request` 在创建时只预检归属与 `IDLE`，确认执行时才在同一笔交易内校验并交换。取消/过期仍解锁双方（兼容旧交易里被锁的 `request`）。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/trades` | `{toPlayerId, offer:{pokemonIds,itemIds,points}, request:{...}, ttlSeconds}` → `CreateTrade`（服务端算 manifestHash、expiresAt） |
-| POST | `/trades/:id/confirm` | 双方各调一次 `ConfirmTrade`；第二次确认时链上原子执行 |
+| POST | `/trades` | `{toPlayerId, offer:{pokemonIds,itemIds,points}, request:{...}, ttlSeconds}` → `CreateTrade`（服务端算 manifestHash、expiresAt）。**`ttlSeconds` 上限 7 天**（`@Max(7*24*3600)`，链码同样兜底），且**只锁定发起方的 `offer`**——`request` 只做归属/IDLE 预检，接收方在确认前仍可自由使用/转移（2026-10-25 修复 C5） |
+| POST | `/trades/:id/confirm` | 双方各调一次 `ConfirmTrade`；第二次确认时链上原子执行。若此时 `request` 资产已被转走/锁定，整笔回滚：抛 `NOT_OWNER`/`ASSET_LOCKED`，发起方 `offer` 保持锁定、交易仍 `OPEN` |
 | POST | `/trades/:id/cancel` | `CancelTrade` |
 | GET | `/trades/:id` / GET `/trades?box=in|out` | 查询 |
 
