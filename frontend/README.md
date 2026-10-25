@@ -64,7 +64,7 @@ python3 frontend/tools/build-world-assets.py --source /path/to/pokeemerald
 | `sprites/building-*-v2.png` | 中心/商店 128×128，民居 160×160 | 原作完整建筑，按门锚点与碰撞格对齐 |
 | `sprites/battle-grass-v2.png` | 240×112 | 原作草地战斗背景，游戏中 4 倍显示 |
 
-总计 5 张图集、51 张独立图片。`tiles` 值为行优先的瓦片索引（不是单行列号），`columns: 16`；`autotiles` 给出道路/沙地/水岸的 3×3 原作过渡块，按象限拼接；`wallTiles` 是岩壁的完整 3×3 方向块，不裁成四角。树木保留 2×3 六格（含树根），放不下时用完整灌木。`wall` 表示连续山壁，`rock` 表示独立巨石；陆地巨石以原作前景叠在地面，不带海水底色。图集主体保留原作完整 metatile ID；塔内追加两格原作图层组合，1024 保留为陆地巨石组合。旧 v1 manifest 和 32×32 主角仍兼容。
+总计 5 张图集、51 张独立图片。`tiles` 值为行优先的瓦片索引（不是单行列号），`columns: 16`；`autotiles` 给出道路/沙地/水岸的 3×3 原作过渡块，按象限拼接；`wallTiles` 是岩壁的完整 3×3 方向块，不裁成四角。`maps/trees.ts` 按明确坐标摆放树木（`MapDef.trees`），碰撞与图片共用占地；大树 2×2（468/469 + 484/485 收口），小树 1×2（14 + 22），不能把林带连接块 476/477 再叠成第三行。边界用完整大树，内部小树少量点缀；整棵放不下时留空，不补半截小树矩阵。`wall` 表示连续山壁，`rock` 表示独立巨石；陆地巨石以原作前景叠在地面，不带海水底色。图集主体保留原作完整 metatile ID；塔内追加两格原作图层组合，1024 保留为陆地巨石组合。旧 v1 manifest 和 32×32 主角仍兼容。
 
 ```jsonc
 {
@@ -239,7 +239,7 @@ src/
   stores/      pinia：auth（JWT 持久化）、assets（manifest/占位状态）、pokemon、battle（WS 驱动实时态）、zone（区域等级带）、world（当前地图/坐标/横幅）
   locales/     zh.ts / en.ts 词典（386 宝可梦 + 43 技能 + 12 道具 + 25 性格 + UI 文案）
   composables/ useI18n（t/monName/moveName/itemName/natureName，语言存 localStorage，默认中文）
-  game/        Phaser：scenes/BootScene、OverworldScene（多地图引擎）、BattleScene；maps/（地图数据 + 瓦片语义 + 传送查询）、gates.ts（传说区钥匙）、dialog.ts + ui/DialogBox.ts（对话框）、world-assets.ts / world-textures.ts（world 素材契约与程序化瓦片）、native-map.ts / world-art.ts（原作地形/完整建筑拼接）、character-art.ts（缺图人物回退）、net/BattleSocket.ts、textures.ts、mon-assets.ts、cries.ts、bus.ts
+  game/        Phaser：scenes/BootScene、OverworldScene（多地图引擎）、BattleScene；maps/（地图数据 + 瓦片语义 + 显式完整树木布局 + 传送查询）、gates.ts（传说区钥匙）、dialog.ts + ui/DialogBox.ts（对话框）、world-assets.ts / world-textures.ts（world 素材契约与程序化瓦片）、native-map.ts / world-art.ts（原作地形/完整建筑拼接）、character-art.ts（缺图人物回退）、net/BattleSocket.ts、textures.ts、mon-assets.ts、cries.ts、bus.ts
   ui/          像素风组件：PixelButton、PixelDialog、HpBar、SpriteIcon、ItemIcon + ItemArtwork（道具图标 + 自绘回退）、PixelIcon（导航图标）
   components/  CaptureOverlay、WorldHud、WagerPicker、ItemActionRow
   views/       14 个路由页面（含登录/注册）
@@ -252,4 +252,4 @@ public/
 
 ## 丰缘视觉改造与地图修复（2026-10-25）
 
-原作资源优先，GPT Image 补充专用素材，完整说明见 [visual-design.md](../docs/visual-design.md)。本轮前端实测 195 单测 / 32 文件 + 4 项 Python 切片测试通过，vue-tsc + Vite 构建通过，并完成地图/页面浏览器检查。nginx 同时监听 IPv4/IPv6，world manifest 禁用缓存、图片带内容哈希更新。
+原作资源优先，GPT Image 补充专用素材，完整说明见 [visual-design.md](../docs/visual-design.md)。本轮前端实测 200 单测 / 33 文件 + 4 项 Python 切片测试通过，vue-tsc + Vite 构建通过，并完成地图/页面浏览器检查。nginx 同时监听 IPv4/IPv6，world manifest 禁用缓存、图片带内容哈希更新。

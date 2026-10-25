@@ -2,6 +2,7 @@ import { BIRTH_ISLAND, MAGMA, RUINS, SEAFLOOR, SKY_PILLAR_1F, SKY_PILLAR_2F, SOU
 import { CAVE, COAST, FOREST, ROUTE_GRASS, ROUTE_MID, ROUTE_NORTH, VOLCANO } from './routes';
 import { T, isBlockedIndex, type TileId } from './tiles';
 import { TOWN } from './town';
+import { arrangeTrees } from './trees';
 import type { BiomeId, MapDef, MapId } from './types';
 
 /** 各生物群系的"地面"瓦片：NPC 脚下被树/岩压住时还原成它 */
@@ -43,6 +44,7 @@ const RAW_MAPS: Record<MapId, MapDef> = {
 /**
  * 让地图数据自洽（顺手挡掉"路牌忘了铺 sign 瓦片""NPC 被随机树压住"这类低级问题）：
  * 路牌 / 建筑门按对象清单铺对应瓦片，NPC 脚下的阻挡瓦片还原成该生物群系的地面。
+ * 树木预留掩码最后交给 trees.ts，按完整树形与明确位置同时生成图片占地和碰撞。
  */
 function normalizeMap(map: MapDef): MapDef {
   const ground = T[BIOME_GROUND[map.biome]];
@@ -53,6 +55,7 @@ function normalizeMap(map: MapDef): MapDef {
       map.grid[obj.y][obj.x] = ground;
     }
   }
+  arrangeTrees(map);
   return map;
 }
 

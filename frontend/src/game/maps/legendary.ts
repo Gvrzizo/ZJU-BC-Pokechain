@@ -272,9 +272,7 @@ function buildSouthernIsland(): number[][] {
   blob(g, T.sand, 10, 7.5, 6.4, 4, rng, { jitter: 0.14, onlyOn: 'water' });
   blob(g, T.grass, 10, 7.5, 4.4, 2.6, rng, { jitter: 0.16, onlyOn: 'sand' });
   altar(g, 10, 8, 4);
-  for (const [x, y] of [[5, 5], [14, 5], [5, 10], [14, 10], [7, 4], [12, 4], [7, 11], [12, 11]] as const) {
-    setTile(g, x, y, T.tree);
-  }
+  // 树木由 trees.ts 在完整草地上成棵摆放，不把单格树冠压在海水/沙滩上。
   // 连接岛内落点与码头，潮线不会在两者之间留一格水。
   fillRect(g, 9, 10, 2, 3, T.sand);
   // 南面的栈桥（船）

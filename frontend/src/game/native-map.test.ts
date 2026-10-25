@@ -6,7 +6,7 @@ import type { WorldTilesetSpec } from './world-assets';
 const spec: WorldTilesetSpec = { biomes: ['town'], image: 'town.png', columns: 16,
   tiles: { grass: 1, path: 473, tree: 14, rock: 1024, door: 97, sign: 27 },
   wallTiles: [104, 105, 106, 112, 113, 114, 120, 121, 122] };
-const small = (grid: number[][]): MapDef => ({ ...MAPS.town, width: grid[0].length, height: grid.length, grid, objects: [], warps: [] });
+const small = (grid: number[][]): MapDef => ({ ...MAPS.town, width: grid[0].length, height: grid.length, grid, trees: [], objects: [], warps: [] });
 
 describe('原作地图渲染计划', () => {
   it('已映射的草地直接取原作图集，不再覆盖为自绘图形', () => {
@@ -28,16 +28,22 @@ describe('原作地图渲染计划', () => {
     expect(transitionQuadrants(patch, true, false, true, false)).toEqual([472, 474, 472, 474]);
   });
 
-  it('整棵原作树保留树根的第三行，只覆盖六个实际阻挡格', () => {
-    const map = small([[T.tree, T.tree, T.grass], [T.tree, T.tree, T.tree], [T.tree, T.tree, T.grass]]);
+  it('完整大树为两行，底部使用收口树根，不把连接块再叠成第二层树冠', () => {
+    const map = { ...small([[T.tree, T.tree], [T.tree, T.tree]]), trees: [{ x: 0, y: 0, size: 'large' as const }] };
     const commands = mapBlits(map, spec);
-    expect(commands.map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([468, 469, 476, 477, 484, 485, 1, 14, 1]);
-    expect(new Set(commands.map(b => `${b.dx},${b.dy}`)).size).toBe(9);
+    expect(commands.slice(4).map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([468, 469, 484, 485]);
+    expect(new Set(commands.map(b => `${b.dx},${b.dy}`)).size).toBe(4);
   });
 
-  it('不足三行的树丛使用完整灌木，不会截断大树', () => {
-    const commands = mapBlits(small([[T.tree, T.tree], [T.tree, T.tree]]), spec);
-    expect(commands.map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([14, 14, 14, 14]);
+  it('小树按明确位置绘制树冠和树干两格，不把半截树冠铺成矩阵', () => {
+    const map = { ...small([[T.tree], [T.tree]]), trees: [{ x: 0, y: 0, size: 'small' as const }] };
+    const commands = mapBlits(map, spec);
+    expect(commands.slice(2).map(b => b.sy / 32 * 16 + b.sx / 32)).toEqual([14, 22]);
+    expect(commands.slice(2).map(b => [b.dy, b.dh])).toEqual([[0,32], [32,32]]);
+  });
+
+  it('没有完整树木位置的残格还原草地，不自动补半截小树', () => {
+    expect(mapBlits(small([[T.tree]]), spec)).toEqual(mapBlits(small([[T.grass]]), spec));
   });
 
   it('相邻陆地石块保留完整巨石，不会拼成岩壁或使用海底礁石', () => {

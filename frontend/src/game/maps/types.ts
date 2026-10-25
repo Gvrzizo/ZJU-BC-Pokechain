@@ -126,6 +126,8 @@ export interface MapDef {
   height: number;
   /** 语义瓦片索引二维数组（`grid[y][x]`，值 = `tiles.ts` 的索引） */
   grid: number[][];
+  /** 完整树木的左上角与尺寸；碰撞格与绘制共同使用，禁止从残余格猜树形。 */
+  trees?: TreePlacement[];
   /** 室内/特殊区的环境压暗层（全图叠加，纯视觉） */
   ambient?: { color: number; alpha: number };
   encounter?: EncounterDef;
@@ -135,6 +137,10 @@ export interface MapDef {
   spawn: TilePoint;
   /** 进入地图时横幅的副标题（缺省用区域提示） */
   intro?: string;
+}
+
+export interface TreePlacement extends TilePoint {
+  size: 'large' | 'small';
 }
 
 export function isNpc(obj: MapObject): obj is NpcDef {

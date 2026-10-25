@@ -39,7 +39,6 @@ export function mapBlits(map: MapDef, spec?: WorldTilesetSpec, buildings: Readon
     blit(index ?? tile, x, y, index === undefined ? 'fallback' : 'native');
   };
   const wet = (v: number | undefined) => v === T.water || v === T.deepWater;
-  const trees = new Set<string>();
   const coveredBuildings = new Set<string>();
   const buildingCommands: MapBlit[] = [];
   // Footprint is identical to town's collision grid; no scaling or hand-drawn replacement roofs.
@@ -71,15 +70,7 @@ export function mapBlits(map: MapDef, spec?: WorldTilesetSpec, buildings: Readon
       continue;
     }
     if (native && outdoor && tile === T.tree) {
-      if (trees.has(`${x},${y}`)) continue;
-      // The original tree includes a third row containing its trunk and shadow.
-      const footprint = [0, 1, 2, 3, 4, 5].map(i => [x + i % 2, y + Math.floor(i / 2)]);
-      if (footprint.every(([xx, yy]) => at(xx, yy) === T.tree && !trees.has(`${xx},${yy}`))) {
-        [468, 469, 476, 477, 484, 485].forEach((index, q) => {
-          const xx = x + q % 2; const yy = y + Math.floor(q / 2);
-          trees.add(`${xx},${yy}`); blit(index, xx, yy);
-        });
-      } else blit(14, x, y);
+      semantic(T.grass, x, y);
       continue;
     }
     if (native && tile === T.wall && spec.wallTiles && map.biome !== 'town') {
@@ -100,6 +91,11 @@ export function mapBlits(map: MapDef, spec?: WorldTilesetSpec, buildings: Readon
       continue;
     }
     semantic(tile, x, y);
+  }
+  if (native && outdoor) for (const tree of map.trees ?? []) {
+    // 476/477 join another forest row; 484/485 close a tree with its trunk and ground shadow.
+    const rows = tree.size === 'large' ? [[468, 469], [484, 485]] : [[14], [22]];
+    rows.forEach((row, dy) => row.forEach((index, dx) => blit(index, tree.x + dx, tree.y + dy)));
   }
   if (native && !outdoor) {
     for (let y = 1; y < map.height; y++) for (let x = 0; x < map.width; x++) {
