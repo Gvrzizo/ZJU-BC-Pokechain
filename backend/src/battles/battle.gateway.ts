@@ -137,6 +137,9 @@ export class BattleGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     client.data.battles = [...new Set([...(client.data.battles ?? []), battleId])];
     this.manager.enterBattle(battleId, username);
     client.emit('battle:state', { battleId, state: battle.engine.publicState(), you: battle.playerA === username ? 'A' : 'B' });
+    // H15：刷新/重连后补发当前回合，否则前端要等下一次 battle:turn 才恢复出招按钮
+    const turn = this.manager.currentTurn(battleId);
+    if (turn) client.emit('battle:turn', { battleId, ...turn });
   }
 
   @SubscribeMessage('battle:action')

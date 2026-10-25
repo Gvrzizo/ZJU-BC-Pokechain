@@ -239,6 +239,10 @@ export class PokemonService implements OnModuleInit {
     if (pokemon.ownerId !== as.userId) {
       throw new AppException('NOT_OWNER', `pokemon ${id} is not yours`, HttpStatus.FORBIDDEN);
     }
+    // H7：训练/改名/进化/放生等写入必须在消耗道具或扣积分之前拒绝锁定资产
+    if (pokemon.status !== 'IDLE') {
+      throw new AppException('ASSET_LOCKED', `pokemon ${id} is ${pokemon.status}`, HttpStatus.CONFLICT);
+    }
     return pokemon;
   }
 
@@ -287,9 +291,6 @@ export class PokemonService implements OnModuleInit {
   async rename(as: ChainIdentity, id: string, rawName: string): Promise<RenameResult> {
     const name = normalizePokemonName(rawName);
     const pokemon = await this.mustOwn(as, id);
-    if (pokemon.status !== 'IDLE') {
-      throw new AppException('ASSET_LOCKED', `pokemon ${id} is ${pokemon.status}`, HttpStatus.CONFLICT);
-    }
     const record = await this.renames.findOne({ where: { pokemonId: id } });
     const renamed = record?.count ?? 0;
     if (name === pokemon.name) {

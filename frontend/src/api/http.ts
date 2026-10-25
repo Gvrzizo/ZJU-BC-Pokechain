@@ -13,12 +13,17 @@ const MUTATING = new Set(['post', 'put', 'patch', 'delete']);
 
 let refreshing: Promise<string> | null = null;
 
-async function refreshAccessToken(): Promise<string> {
+/** H17：refresh 不能沿用全局 15s（首屏守卫 await 它，挂起会把全站卡在 loading）。 */
+export const REFRESH_TIMEOUT_MS = 5000;
+
+export async function refreshAccessToken(): Promise<string> {
   const auth = useAuthStore();
   if (!auth.refreshToken) throw new Error('NO_REFRESH_TOKEN');
-  const { data } = await axios.post(`${API_BASE}/auth/refresh`, {
-    refreshToken: auth.refreshToken,
-  });
+  const { data } = await axios.post(
+    `${API_BASE}/auth/refresh`,
+    { refreshToken: auth.refreshToken },
+    { timeout: REFRESH_TIMEOUT_MS },
+  );
   auth.setTokens(data.accessToken, data.refreshToken);
   return data.accessToken as string;
 }

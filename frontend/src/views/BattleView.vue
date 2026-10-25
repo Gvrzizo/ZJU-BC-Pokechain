@@ -151,12 +151,14 @@ const myMon = computed(() => {
   return s ? (s.team[s.active] ?? null) : null;
 });
 
-const isMyTurn = computed(
-  () =>
-    Boolean(battleStore.turn?.awaitingPlayerIds.includes(auth.user?.username ?? '')) &&
-    !battleStore.end &&
-    !mySide.value?.acted,
-);
+const isMyTurn = computed(() => {
+  if (battleStore.end || mySide.value?.acted) return false;
+  const username = auth.user?.username ?? '';
+  if (battleStore.turn) return battleStore.turn.awaitingPlayerIds.includes(username);
+  // H15 兜底：刷新后 battle:turn 快照还没到，先按 state 推断（未行动即轮到我），
+  // 避免错误地禁用出招按钮直到下一次 30s 回合。
+  return Boolean(battleStore.state && !battleStore.state.finished);
+});
 
 const turnPct = computed(() =>
   battleStore.entry

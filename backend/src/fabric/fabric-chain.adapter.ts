@@ -275,6 +275,10 @@ export class FabricChainAdapter extends ChainAdapter implements OnModuleInit, On
     const m = this.meta(args);
     return this.submit(as, 'BattleContract:SettleBattle', [args.id, m.nowISO, m.idemKey]);
   }
+  async cancelBattle(as: ChainIdentity, args: { id: string; reason: string } & TxMeta): Promise<BattleState> {
+    const m = this.meta(args);
+    return this.submit(as, 'BattleContract:CancelBattle', [args.id, args.reason, m.nowISO, m.idemKey]);
+  }
   async forfeitBattle(as: ChainIdentity, args: { id: string; loserId: string; reason: string } & TxMeta): Promise<BattleState> {
     const m = this.meta(args);
     return this.submit(as, 'BattleContract:Forfeit', [args.id, args.loserId, args.reason, m.nowISO, m.idemKey]);

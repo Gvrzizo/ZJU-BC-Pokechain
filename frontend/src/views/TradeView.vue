@@ -8,6 +8,7 @@ import type { Trade, TradeAssets } from '@/types';
 import ItemIcon from '@/ui/ItemIcon.vue';
 import PixelButton from '@/ui/PixelButton.vue';
 import PixelDialog from '@/ui/PixelDialog.vue';
+import { myTradeConfirmed } from '@/components/trade-confirm';
 
 const auth = useAuthStore();
 const store = usePokemonStore();
@@ -100,9 +101,8 @@ async function doCancel(trade: Trade) {
 }
 
 function myConfirmed(trade: Trade): boolean {
-  const me = auth.user?.id;
-  if (!me) return false;
-  return trade.fromId === me ? trade.confirmations.from : trade.confirmations.to;
+  // H14：fromId/toId 是 username（链上 playerId），不是 UUID
+  return myTradeConfirmed(trade, auth.user?.username);
 }
 </script>
 

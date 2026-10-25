@@ -25,6 +25,8 @@ export interface ActiveBattle {
   entryTimer?: NodeJS.Timeout;
   entryDeadline: number;
   turnTimer?: NodeJS.Timeout;
+  /** 当前待结算回合（重连/刷新后由网关补发 battle:turn，H15） */
+  turn?: { awaitingPlayerIds: string[]; deadline: number };
   disconnectTimers: Map<string, NodeJS.Timeout>;
   finalized: boolean;
 }
@@ -201,9 +203,17 @@ export class BattleManagerService {
     if (!state.A.acted && !battle.engine.finished) awaiting.push(battle.playerA);
     if (!state.B.acted && !battle.engine.finished) awaiting.push(battle.playerB);
     const deadline = Date.now() + this.turnTimeoutMs;
+    battle.turn = { awaitingPlayerIds: awaiting, deadline };
     battle.turnTimer = setTimeout(() => void this.onTurnTimeout(battle), this.turnTimeoutMs);
     battle.turnTimer.unref?.();
     this.events.emit('turn', battle.battleId, { awaitingPlayerIds: awaiting, deadline });
+  }
+
+  /** 当前待结算回合（H15：battle:join 时补发，刷新后仍能看到该谁出招与剩余时间）。 */
+  currentTurn(battleId: string): { awaitingPlayerIds: string[]; deadline: number } | undefined {
+    const battle = this.active.get(battleId);
+    if (!battle || battle.finalized || battle.engine.finished) return undefined;
+    return battle.turn;
   }
 
   private async onTurnTimeout(battle: ActiveBattle): Promise<void> {
@@ -323,6 +333,7 @@ export class BattleManagerService {
           turnsJson: battle.engine.log as unknown as unknown[],
           resultHash,
           serverSig,
+          serverKeyId: this.signing.keyId,
         }),
       );
     } catch (err) {
@@ -353,8 +364,8 @@ export class BattleManagerService {
 
   /**
    * 对账结算：本地引擎已丢失（后端重启/崩溃）时的链上收尾，供房间对账调用。
-   * 链码没有 abort 交易，只能走受支持的路径：
-   *   CREATED → ActivateBattle；ACTIVE → SubmitResult(DRAW)；RESULT_SUBMITTED → 直接 SettleBattle。
+   * 链上没有 abort 交易，只能走受支持的路径：
+   *   CREATED → CancelBattle（全额退款，H5）；ACTIVE → SubmitResult(DRAW)；RESULT_SUBMITTED → 直接 SettleBattle。
    * DRAW 把双方 escrow 与锁定资产原路退回——服务端已无法证明胜负时唯一公平的结果。
    * `note`（如 server-restart）写进 resultHash 前缀：链上 result 没有备注字段，
    * 这样在任何复核里都能认出这不是引擎产出的对局结果。幂等，可重复调用。
@@ -365,8 +376,10 @@ export class BattleManagerService {
     if (chain.status === 'SETTLED' || chain.status === 'REFUNDED') return chain;
     if (chain.status === 'DISPUTED') return chain; // 仲裁流程接管，资产保持冻结
     if (chain.status === 'CREATED') {
-      await this.contract.activateBattle(SYSTEM_IDENTITY, battleId, { idemKey: `${battleId}-reconcile-activate` });
-    } else if (chain.status !== 'ACTIVE' && chain.status !== 'RESULT_SUBMITTED') {
+      // 从未开打的对局不需要伪造 DRAW 结果：直接取消并原路退款（REFUNDED）
+      return this.contract.cancelBattle(SYSTEM_IDENTITY, battleId, note, { idemKey: `${battleId}-reconcile-cancel` });
+    }
+    if (chain.status !== 'ACTIVE' && chain.status !== 'RESULT_SUBMITTED') {
       return chain;
     }
     if (chain.status !== 'RESULT_SUBMITTED') {

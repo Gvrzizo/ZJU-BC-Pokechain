@@ -117,6 +117,9 @@ async function lockedWagerItem(ctx: Context, ref: ItemStackRef, battleId: string
 async function settle(ctx: Context, battle: Battle, outcome: string, nowISO: string): Promise<void> {
   const a = await loadPlayer(ctx, battle.playerA);
   const b = await loadPlayer(ctx, battle.playerB);
+  // 排行榜缓存靠 PointsChanged 刷新（H4）：结算前后差额算 delta，DRAW/REFUND 为 0 但余额仍推送
+  const beforeA = a.points;
+  const beforeB = b.points;
   const wageredPoke = [...battle.wagerA.pokemonIds, ...battle.wagerB.pokemonIds];
   const items = [];
   for (const ref of [...wagerItemRefs(battle.wagerA), ...wagerItemRefs(battle.wagerB)]) {
@@ -183,6 +186,19 @@ async function settle(ctx: Context, battle: Battle, outcome: string, nowISO: str
   }
   await savePlayer(ctx, a);
   await savePlayer(ctx, b);
+  // 结算也必须发 PointsChanged：否则真链排行榜（监听链上事件）会一直停留在旧分数。
+  emit(ctx, 'PointsChanged', {
+    playerId: a.playerId,
+    delta: a.points - beforeA,
+    balance: a.points,
+    reason: `battle:${battle.id}`,
+  });
+  emit(ctx, 'PointsChanged', {
+    playerId: b.playerId,
+    delta: b.points - beforeB,
+    balance: b.points,
+    reason: `battle:${battle.id}`,
+  });
   battle.settledAt = nowISO;
 }
 
@@ -348,7 +364,12 @@ export class BattleContract extends Contract {
       if (battle.result.confirmations.A && battle.result.confirmations.B) {
         await settle(ctx, battle, battle.result.winnerId, nowISO);
         battle.status = 'SETTLED';
-        emit(ctx, 'BattleSettled', { id, winnerId: battle.result.winnerId });
+        emit(ctx, 'BattleSettled', {
+          id,
+          winnerId: battle.result.winnerId,
+          playerA: battle.playerA,
+          playerB: battle.playerB,
+        });
       }
       await saveBattle(ctx, battle);
       return JSON.stringify(battle);
@@ -368,7 +389,47 @@ export class BattleContract extends Contract {
       await settle(ctx, battle, battle.result.winnerId, nowISO);
       battle.status = 'SETTLED';
       await saveBattle(ctx, battle);
-      emit(ctx, 'BattleSettled', { id, winnerId: battle.result.winnerId, via: 'SettleBattle' });
+      emit(ctx, 'BattleSettled', {
+        id,
+        winnerId: battle.result.winnerId,
+        playerA: battle.playerA,
+        playerB: battle.playerB,
+        via: 'SettleBattle',
+      });
+      return JSON.stringify(battle);
+    });
+  }
+
+  /**
+   * 取消尚未激活的对局（H5 房间启动失败补偿）：system only、CREATED → 全额退款。
+   * 与仲裁 REFUND 同结算语义（资产解锁归还、escrow 原路退回），但不需要先 SubmitResult；
+   * 结果字段写入确定性的 cancel 标记，便于审计与前端识别（→REFUNDED）。
+   */
+  @Transaction()
+  public async CancelBattle(ctx: Context, id: string, reason: string, nowISO: string, idemKey: string): Promise<string> {
+    return withIdempotency(ctx, idemKey, nowISO, async () => {
+      requireRole(ctx, 'system');
+      requireNonEmpty(reason, 'reason');
+      assertISO(nowISO, 'nowISO');
+      const battle = await loadBattle(ctx, id);
+      if (battle.status !== 'CREATED') {
+        fail('BAD_STATE', `battle ${id} is ${battle.status}, expected CREATED`);
+      }
+      await settle(ctx, battle, 'REFUND', nowISO);
+      battle.status = 'REFUNDED';
+      battle.result.winnerId = 'REFUND';
+      battle.result.resultHash = sha256hex(`cancel|${battle.id}|${reason}`);
+      battle.result.serverSubmitted = true;
+      battle.arbiterNote = `CANCEL: ${reason}`;
+      await saveBattle(ctx, battle);
+      emit(ctx, 'BattleCancelled', { id, reason, playerA: battle.playerA, playerB: battle.playerB });
+      emit(ctx, 'BattleSettled', {
+        id,
+        winnerId: 'REFUND',
+        playerA: battle.playerA,
+        playerB: battle.playerB,
+        via: 'CancelBattle',
+      });
       return JSON.stringify(battle);
     });
   }
@@ -396,7 +457,14 @@ export class BattleContract extends Contract {
       battle.status = 'SETTLED';
       battle.arbiterNote = `FORFEIT: ${reason}`;
       await saveBattle(ctx, battle);
-      emit(ctx, 'BattleSettled', { id, winnerId, via: 'Forfeit', loserId });
+      emit(ctx, 'BattleSettled', {
+        id,
+        winnerId,
+        playerA: battle.playerA,
+        playerB: battle.playerB,
+        via: 'Forfeit',
+        loserId,
+      });
       return JSON.stringify(battle);
     });
   }
@@ -455,7 +523,13 @@ export class BattleContract extends Contract {
       await saveBattle(ctx, battle);
       emit(ctx, 'BattleArbitrated', { id, outcome, arbiterNote });
       if (battle.status === 'SETTLED') {
-        emit(ctx, 'BattleSettled', { id, winnerId: outcome, via: 'Arbitrate' });
+        emit(ctx, 'BattleSettled', {
+          id,
+          winnerId: outcome,
+          playerA: battle.playerA,
+          playerB: battle.playerB,
+          via: 'Arbitrate',
+        });
       }
       return JSON.stringify(battle);
     });

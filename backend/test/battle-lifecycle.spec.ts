@@ -187,6 +187,21 @@ describe('battle entry: activation push -> both clients join (docs/backend-api.m
     expect(pushed(stack.pushes, 'battle:entry').at(-1)?.payload).toMatchObject({ awaitingPlayerIds: [] });
   });
 
+  it('刷新/重连后 battle:join 会补发当前回合（H15：不会一直等不到 battle:turn）', async () => {
+    const stack = makeStack();
+    const { battleId } = await activateRoom(stack);
+    await stack.gateway.onJoin(fakeClient('ash') as never, { battleId });
+    await stack.gateway.onJoin(fakeClient('gary') as never, { battleId });
+
+    const refreshed = fakeClient('ash');
+    await stack.gateway.onJoin(refreshed as never, { battleId });
+    expect(of(refreshed, 'battle:state')).toHaveLength(1);
+    const turns = of(refreshed, 'battle:turn');
+    expect(turns).toHaveLength(1);
+    expect(turns[0].payload).toMatchObject({ battleId, awaitingPlayerIds: ['ash', 'gary'] });
+    expect(Number(turns[0].payload.deadline)).toBeGreaterThan(Date.now());
+  });
+
   it('a party that never enters forfeits at the end of the entry grace (not a draw)', async () => {
     jest.useFakeTimers();
     try {

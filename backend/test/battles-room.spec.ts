@@ -1,5 +1,8 @@
 import { EventEmitter } from 'events';
 import { HttpException, ValidationPipe } from '@nestjs/common';
+import { BattleManagerService } from '../src/battles/battle-manager.service';
+import { SigningService } from '../src/battles/signing.service';
+import { BattleLog } from '../src/battles/entities/battle-log.entity';
 import { BattlesService, RoomKickedEvent, TEAM_SIZE_MAX, assertTeamSize, assertTeamUnique } from '../src/battles/battles.service';
 import { PlayerBlockService } from '../src/users/player-block.service';
 import { PlayerBlock } from '../src/users/entities/player-block.entity';
@@ -41,15 +44,24 @@ interface Stack {
   contract: Contract;
   redis: ReturnType<typeof makeRedis>;
   svc: BattlesService;
+  manager: { events: EventEmitter; get: () => undefined; startBattle: (...args: unknown[]) => Promise<void> };
   blocks: PlayerBlockService;
   kicks: RoomKickedEvent[];
 }
 
-async function makeStack(config: Record<string, unknown> = {}): Promise<Stack> {
+async function makeStack(config: Record<string, unknown> = {}, realManager = false): Promise<Stack> {
   const { chain, contract } = makeChain();
-  const manager = { events: new EventEmitter(), get: () => undefined, startBattle: async () => undefined };
-  const blocks = makeBlocks(makeConfig(config));
   const redis = makeRedis();
+  const manager = realManager
+    ? new BattleManagerService(
+        contract,
+        redis,
+        new SigningService(makeConfig(config)),
+        makeConfig(config),
+        mockRepo<BattleLog>() as never,
+      )
+    : { events: new EventEmitter(), get: () => undefined, startBattle: async () => undefined };
+  const blocks = makeBlocks(makeConfig(config));
   const svc = new BattlesService(
     contract,
     redis,
@@ -63,7 +75,7 @@ async function makeStack(config: Record<string, unknown> = {}): Promise<Stack> {
   );
   const kicks: RoomKickedEvent[] = [];
   svc.events.on('kicked', (e: RoomKickedEvent) => kicks.push(e));
-  return { chain, contract, redis, svc, blocks, kicks };
+  return { chain, contract, redis, svc, manager, blocks, kicks };
 }
 
 const WAGER = (over: Record<string, unknown> = {}) => ({
@@ -629,5 +641,79 @@ describe('互看出战队伍（房间详情 teamDetailA/B，所有人可见）',
     expect(detail.teamA).toEqual(['p_team_ok', 'p_team_gone']);
     expect(detail.teamDetailA).toHaveLength(2);
     expect(detail.teamDetailA[1]).toMatchObject({ id: 'p_team_gone', unavailable: true, speciesId: null, stats: null });
+  });
+});
+
+describe('房间启动失败补偿（H5：不留“链上锁着、本地没 battle”的孤儿）', () => {
+  async function joinedRoom() {
+    const stack = await makeStack({}, true);
+    await registerPlayers(stack.contract, 'ash', 'gary');
+    await seedPokemon(stack.chain, 'ash', { id: 'p_ash' });
+    await seedPokemon(stack.chain, 'gary', { id: 'p_gary' });
+    const room = await stack.svc.createRoom(userIdentity('ash'), ROOM_DTO());
+    await stack.svc.joinRoom(userIdentity('gary'), room.id, JOIN_DTO());
+    await stack.svc.confirmWager(userIdentity('ash'), room.id);
+    return { ...stack, roomId: room.id };
+  }
+
+  it('引擎起不来（链上已 ACTIVE）→ DRAW 退款、资产解锁、房间 FINISHED', async () => {
+    const { svc, contract, manager, roomId } = await joinedRoom();
+    const spy = jest.spyOn(manager, 'startBattle').mockRejectedValueOnce(new Error('engine boom'));
+    await expect(svc.confirmWager(userIdentity('gary'), roomId)).rejects.toThrow(/engine boom/);
+    spy.mockRestore();
+
+    const room = await svc.getRoom(roomId);
+    expect(room.status).toBe('FINISHED');
+    expect(room.battleId).toBeTruthy();
+    const battle = await contract.getBattle(room.battleId!);
+    expect(battle.status).toBe('SETTLED');
+    expect(battle.result.winnerId).toBe('DRAW');
+    expect((await contract.getPokemon('p_ash')).status).toBe('IDLE');
+    expect((await contract.getPokemon('p_gary')).status).toBe('IDLE');
+  });
+
+  it('ActivateBattle 失败（链上仍 CREATED）→ CancelBattle 全额退款（REFUNDED）', async () => {
+    const { svc, contract, roomId } = await joinedRoom();
+    const spy = jest.spyOn(contract, 'activateBattle').mockRejectedValueOnce(new Error('activate boom'));
+    await expect(svc.confirmWager(userIdentity('gary'), roomId)).rejects.toThrow(/activate boom/);
+    spy.mockRestore();
+
+    const room = await svc.getRoom(roomId);
+    expect(room.status).toBe('FINISHED');
+    const battle = await contract.getBattle(room.battleId!);
+    expect(battle.status).toBe('REFUNDED');
+    expect(battle.result.winnerId).toBe('REFUND');
+    expect((await contract.getPokemon('p_ash')).status).toBe('IDLE');
+    expect((await contract.getPokemon('p_gary')).status).toBe('IDLE');
+  });
+
+  it('CreateBattle 失败且链上确认没有对局 → 房间回 JOINED、清 battleId，可重试', async () => {
+    const { svc, contract, roomId } = await joinedRoom();
+    const spy = jest.spyOn(contract, 'createBattle').mockRejectedValueOnce(new Error('chain down'));
+    await expect(svc.confirmWager(userIdentity('gary'), roomId)).rejects.toThrow(/chain down/);
+    spy.mockRestore();
+
+    const room = await svc.getRoom(roomId);
+    expect(room.status).toBe('JOINED');
+    expect(room.battleId).toBeNull();
+    const retry = await svc.confirmWager(userIdentity('gary'), roomId);
+    expect(retry.status).toBe('ACTIVE');
+  });
+
+  it('补偿本身也失败（链不可读）→ 房间 FAILED 且保留 battleId，交给对账重试', async () => {
+    const { svc, contract, redis, roomId } = await joinedRoom();
+    const activate = jest.spyOn(contract, 'activateBattle').mockRejectedValueOnce(new Error('activate boom'));
+    // 让补偿路径的链上读取/取消也失败
+    const getBattle = jest.spyOn(contract, 'getBattle').mockRejectedValueOnce(new Error('chain unavailable'));
+    await expect(svc.confirmWager(userIdentity('gary'), roomId)).rejects.toThrow(/activate boom/);
+    activate.mockRestore();
+    getBattle.mockRestore();
+
+    const room = await svc.getRoom(roomId);
+    expect(room.status).toBe('FAILED');
+    expect(room.battleId).toBeTruthy();
+    // FAILED 房间不进大厅，但仍在索引里等对账
+    expect((await svc.listRooms()).some((r) => r.id === roomId)).toBe(false);
+    expect(await redis.smembers('battle:rooms')).toContain(roomId);
   });
 });

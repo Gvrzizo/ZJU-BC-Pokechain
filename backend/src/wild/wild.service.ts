@@ -222,7 +222,11 @@ export class WildService {
       this.finish(session, 'TIMEOUT', [{ kind: 'timeout', detail: { ttlSec: WILD_SESSION_TTL_SEC } }]);
       await this.save(session);
     }
-    if (session.finished) return this.view(session);
+    if (session.finished) {
+      // H9：超时/放弃的终态也要揭示（best-effort，失败由 capture.pending 定时 sweep 重试）
+      await this.capture.finalizeEvent(session.eventId, session.serverSeed);
+      return this.view(session);
+    }
 
     if (session.mustSwitch && action.type !== 'switch') {
       throw new AppException(
@@ -239,6 +243,8 @@ export class WildService {
     else throw new AppException('INVALID_ACTION', `unknown action type ${String(action.type)}`, HttpStatus.BAD_REQUEST);
 
     await this.save(session);
+    // 本回合进入终态（CAUGHT 已在 mint 前揭示）→ 揭示并清理定时登记
+    if (session.finished) await this.capture.finalizeEvent(session.eventId, session.serverSeed);
     return this.view(session);
   }
 
@@ -318,15 +324,7 @@ export class WildService {
     await this.syncCaptureAttempts(session, attemptNo);
     session.attempts = attemptNo;
 
-    // 2) reveal the committed server seed (only the first attempt transitions COMMITTED -> REVEALED)
-    const random = await this.contract.getRandom(session.eventId);
-    if (random.status === 'COMMITTED') {
-      await this.contract.revealAndVerify(SYSTEM_IDENTITY, session.eventId, session.serverSeed, {
-        idemKey: `${session.eventId}-reveal`,
-      });
-    }
-
-    // 3) official-style catch probability for the wild mon's current HP
+    // 2) 官方风格捕捉判定（H9：投球失败不 reveal，只有投中/战斗终态才揭示）
     const chance = captureProbability(session.wild.maxHp, session.wild.hp, species.catchRate, ball.bonus);
     const roll = deriveCaptureRoll(this.stream(session), attemptNo, chance);
     const events: WildBattleEvent[] = [
@@ -345,6 +343,8 @@ export class WildService {
     ];
 
     if (roll.success) {
+      // 结算后揭示：MintFromCapture 要求事件已 REVEALED，此时再公开 serverSeed 已不影响判定
+      await this.capture.revealCommitted(session.eventId, session.serverSeed);
       const pokemon = await this.mint(session, as.userId, species);
       events.push({ kind: 'caught', detail: { pokemonId: pokemon.id, shakes: roll.shakes } });
       this.record(session, events);

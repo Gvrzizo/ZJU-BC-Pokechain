@@ -22,8 +22,8 @@ import {
 
 /**
  * 重启对账（BattlesService.reconcileRooms）：内存引擎随进程消失后，Redis 房间
- * 按链上状态收尾——终态关房 / RESULT_SUBMITTED 兜底结算 / ACTIVE（含 CREATED）
- * 以 DRAW 退款；运行期对停滞房间先隐藏再后台对账。见 docs/backend-api.md §5。
+ * 按链上状态收尾——终态关房 / RESULT_SUBMITTED 兜底结算 / CREATED 直接取消退款 /
+ * ACTIVE 以 DRAW 退款；运行期对停滞房间先隐藏再后台对账。见 docs/backend-api.md §5。
  */
 
 const RECONCILE_CONFIG = {
@@ -186,7 +186,7 @@ describe('battle room reconciliation on startup (重启对账)', () => {
     expect(after.audits.rows[0]).toMatchObject({ action: 'battle.reconcile', target: 'b_rc_active' });
   });
 
-  it('CREATED（确认押注中途重启）：先激活再 DRAW 退款，锁定资产解锁', async () => {
+  it('CREATED（确认押注中途重启）：CancelBattle 直接退款（REFUNDED），锁定资产解锁', async () => {
     const stack = makeStack();
     await registerPlayers(stack.contract, 'ash', 'gary');
     const wageredA = await seedPokemon(stack.chain, 'ash', { id: 'p_rc_c_a' });
@@ -217,8 +217,9 @@ describe('battle room reconciliation on startup (重启对账)', () => {
     await after.battles.reconcileRooms('startup');
 
     const battle = await after.contract.getBattle('b_rc_created');
-    expect(battle.status).toBe('SETTLED');
-    expect(battle.result.winnerId).toBe('DRAW');
+    expect(battle.status).toBe('REFUNDED');
+    expect(battle.result.winnerId).toBe('REFUND');
+    expect(battle.result.resultHash).toBe(sha256hex('cancel|b_rc_created|server-restart'));
     expect((await after.contract.getPokemon(wageredA.id)).ownerId).toBe('ash');
     expect((await after.contract.getPokemon(wageredA.id)).status).toBe('IDLE');
     expect((await after.contract.getPlayer('ash')).points).toBe(1000);

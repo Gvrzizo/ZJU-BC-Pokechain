@@ -1,4 +1,5 @@
 import {
+  createHash,
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
@@ -15,19 +16,24 @@ export class SigningService {
   private readonly logger = new Logger(SigningService.name);
   private readonly privateKey: KeyObject;
   readonly publicKeyPem: string;
+  /** 公钥指纹（sha256(pem) 前 16 hex）：换钥后靠它判断旧 serverSig 该用哪把公钥验证。 */
+  readonly keyId: string;
 
   constructor(config: ConfigService) {
     const pem = config.get<string>('serverSigningKey') ?? '';
     if (pem) {
       this.privateKey = createPrivateKey(pem);
     } else {
-      this.logger.warn('SERVER_SIGNING_KEY not set; generated an ephemeral secp256k1 keypair');
+      this.logger.warn(
+        'SERVER_SIGNING_KEY not set; generated an ephemeral secp256k1 keypair (serverSig will not verify after restart)',
+      );
       const pair = generateKeyPairSync('ec', { namedCurve: 'secp256k1' });
       this.privateKey = pair.privateKey;
     }
     this.publicKeyPem = createPublicKey(this.privateKey)
       .export({ type: 'spki', format: 'pem' })
       .toString();
+    this.keyId = createHash('sha256').update(this.publicKeyPem).digest('hex').slice(0, 16);
   }
 
   /** secp256k1/SHA-256 signature over the raw resultHash bytes, DER hex. */

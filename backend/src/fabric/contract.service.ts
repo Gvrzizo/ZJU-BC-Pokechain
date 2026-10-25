@@ -166,6 +166,9 @@ export class ContractService {
   settleBattle(as: ChainIdentity, id: string, m?: TxMeta): Promise<BattleState> {
     return this.chain.settleBattle(as, { id, ...this.meta(m) });
   }
+  cancelBattle(as: ChainIdentity, id: string, reason: string, m?: TxMeta): Promise<BattleState> {
+    return this.chain.cancelBattle(as, { id, reason, ...this.meta(m) });
+  }
   forfeitBattle(as: ChainIdentity, id: string, loserId: string, reason: string, m?: TxMeta): Promise<BattleState> {
     return this.chain.forfeitBattle(as, { id, loserId, reason, ...this.meta(m) });
   }

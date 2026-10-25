@@ -214,7 +214,7 @@ export class ItemsService {
     };
   }
 
-  /** 道具效果的共同前置：目标宝可梦必填、本人所有。 */
+  /** 道具效果的共同前置：目标宝可梦必填、本人所有、且未被交易/对战锁定（H7）。 */
   private async mustOwnPokemon(
     as: ChainIdentity,
     targetPokemonId: string | undefined,
@@ -226,6 +226,10 @@ export class ItemsService {
     const pokemon = await this.contract.getPokemon(targetPokemonId);
     if (pokemon.ownerId !== as.userId) {
       throw new AppException('NOT_OWNER', `pokemon ${targetPokemonId} is not yours`, HttpStatus.FORBIDDEN);
+    }
+    // 消耗道具之前拒绝锁定资产：否则道具会被消耗、ApplyGrowth 才失败（无法回滚）
+    if (pokemon.status !== 'IDLE') {
+      throw new AppException('ASSET_LOCKED', `pokemon ${targetPokemonId} is ${pokemon.status}`, HttpStatus.CONFLICT);
     }
     return pokemon;
   }

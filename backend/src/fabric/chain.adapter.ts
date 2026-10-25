@@ -181,6 +181,11 @@ export abstract class ChainAdapter {
     args: { id: string; playerId: string } & TxMeta,
   ): Promise<BattleState>;
   abstract settleBattle(as: ChainIdentity, args: { id: string } & TxMeta): Promise<BattleState>;
+  /** H5：取消尚未激活（CREATED）的对局并全额退款；system only。 */
+  abstract cancelBattle(
+    as: ChainIdentity,
+    args: { id: string; reason: string } & TxMeta,
+  ): Promise<BattleState>;
   abstract forfeitBattle(
     as: ChainIdentity,
     args: { id: string; loserId: string; reason: string } & TxMeta,

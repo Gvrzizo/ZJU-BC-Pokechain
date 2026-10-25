@@ -419,7 +419,8 @@ export interface BattleRoom {
   /** 加入者留言（房主在确认面板看到），无留言为 null */
   joinMessage?: string | null;
   confirmations: { A: boolean; B: boolean };
-  status: 'WAITING' | 'JOINED' | 'ACTIVE' | 'FINISHED';
+  /** STARTING/FAILED 是 H5 启动补偿的瞬态：大厅不展示，前端仅做兜底标签 */
+  status: 'WAITING' | 'JOINED' | 'STARTING' | 'ACTIVE' | 'FINISHED' | 'FAILED';
   createdAt: string;
   updatedAt?: string;
 }
@@ -558,8 +559,13 @@ export interface FairnessEvent {
 /** GET /fairness/:eventId 完整响应 */
 export interface FairnessResponse {
   event: FairnessEvent;
+  /** serverSeed 是否已揭示（H9：COMMITTED 阶段为 false，接口裁剪 serverSeed/resultHash） */
+  revealed?: boolean;
+  note?: string;
   derivation: Record<string, string>;
   serverPublicKey: string;
+  /** 签名公钥指纹（H19；换钥后用于识别旧 serverSig 对应哪把公钥） */
+  serverKeyId?: string;
 }
 
 export interface ApiError {

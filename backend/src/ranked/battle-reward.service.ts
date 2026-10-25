@@ -125,6 +125,7 @@ export class BattleRewardService implements OnModuleInit, OnModuleDestroy {
       let ratings: RatingChange[] = [];
       let bondError: string | null = null;
       let ratingError: string | null = null;
+      let expError: string | null = null;
       let arenaError: string | null = null;
       let arena: ArenaSettlement | undefined;
 
@@ -133,6 +134,17 @@ export class BattleRewardService implements OnModuleInit, OnModuleDestroy {
       } catch (err) {
         bondError = (err as Error).message;
         this.logger.warn(`bond grant failed for ${battleId}: ${bondError}`);
+      }
+
+      // 普通 PvP（排位/房间）胜利经验：胜者参战队伍每只 +30（H3）。
+      // 机器人场走下面的 grantBotWinExp（+15），两边共用 `<battleId>-exp-<pokemonId>` 幂等键。
+      if (!rankedRecord?.bot) {
+        try {
+          await this.grantPvpWinExp(battleId, playerA, playerB, teamA, teamB, winnerId);
+        } catch (err) {
+          expError = (err as Error).message;
+          this.logger.warn(`pvp win exp failed for ${battleId}: ${expError}`);
+        }
       }
 
       if (rankedRecord) {
@@ -155,11 +167,11 @@ export class BattleRewardService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      if (bondError || ratingError || arenaError) {
+      if (bondError || ratingError || expError || arenaError) {
         // 保留待办：sweep 会重试（各条链上调用都是幂等键，重放不会叠加）
         await this.redis.setJson(
           `rewards:pending:${battleId}`,
-          { ...pending, lastError: bondError ?? ratingError ?? arenaError },
+          { ...pending, lastError: bondError ?? ratingError ?? expError ?? arenaError },
           PENDING_TTL_SEC,
         );
         return null;
@@ -226,6 +238,27 @@ export class BattleRewardService implements OnModuleInit, OnModuleDestroy {
       { playerId: playerA, before: plan.A.before, after: plan.A.after, delta: plan.A.after - plan.A.before },
       { playerId: playerB, before: plan.B.before, after: plan.B.after, delta: plan.B.after - plan.B.before },
     ];
+  }
+
+  /**
+   * 普通 PvP（排位/房间）胜利经验：胜者参战队伍每只 +30。
+   * DRAW/REFUND 或队伍缺失时不发；`grantBattleWinExp` 内部按链上 ownerId 过滤（赢来的对手宝可梦不会误加）。
+   */
+  private async grantPvpWinExp(
+    battleId: string,
+    playerA: string,
+    playerB: string,
+    teamA: string[],
+    teamB: string[],
+    winnerId: string,
+  ): Promise<void> {
+    if (!winnerId || winnerId === 'DRAW' || winnerId === 'REFUND') return;
+    const winnerTeam = winnerId === playerA ? teamA : winnerId === playerB ? teamB : [];
+    if (winnerTeam.length === 0) return;
+    const granted = await this.pokemon.grantBattleWinExp(winnerId, winnerTeam, battleId, BATTLE_WIN_EXP_GAIN);
+    this.logger.log(
+      `pvp battle ${battleId}: exp +${BATTLE_WIN_EXP_GAIN} for ${granted.length} pokemon of ${winnerId}`,
+    );
   }
 
   /**

@@ -153,6 +153,7 @@ export const PERSISTED_METHODS = [
   'submitBattleResult',
   'confirmBattleResult',
   'settleBattle',
+  'cancelBattle',
   'forfeitBattle',
   'disputeBattle',
   'arbitrateBattle',
@@ -1392,6 +1393,34 @@ export class MockChainAdapter extends ChainAdapter {
     });
   }
 
+  /** H5：取消尚未激活的对局（CREATED → REFUNDED，全额退款）。system only。 */
+  async cancelBattle(
+    as: ChainIdentity,
+    args: { id: string; reason: string } & TxMeta,
+  ): Promise<BattleState> {
+    const { nowISO, idemKey } = this.meta(args);
+    return this.idempotent(idemKey, nowISO, () => {
+      if (as.role !== 'system') throw new CodedError('NOT_AUTHORIZED', 'only system can cancel a battle');
+      const battle = this.mustGet<BattleState>(`battle:${args.id}`, 'BATTLE_NOT_FOUND', `battle ${args.id}`);
+      if (battle.status !== 'CREATED') {
+        throw new CodedError('INVALID_BATTLE_STATE', `battle ${args.id} is ${battle.status}, expected CREATED`);
+      }
+      this.emit('BattleCancelled', {
+        id: battle.id,
+        reason: args.reason,
+        playerA: battle.playerA,
+        playerB: battle.playerB,
+      });
+      const settled = this.settleInternal(battle, 'REFUND', nowISO, 'REFUNDED');
+      settled.result.winnerId = 'REFUND';
+      settled.result.resultHash = sha256hex(`cancel|${battle.id}|${args.reason}`);
+      settled.result.serverSubmitted = true;
+      settled.arbiterNote = `CANCEL: ${args.reason}`;
+      this.put(`battle:${battle.id}`, settled);
+      return settled;
+    });
+  }
+
   async forfeitBattle(
     as: ChainIdentity,
     args: { id: string; loserId: string; reason: string } & TxMeta,
@@ -1481,6 +1510,8 @@ export class MockChainAdapter extends ChainAdapter {
     try {
       const a = this.mustGet<PlayerState>(`player:${battle.playerA}`);
       const b = this.mustGet<PlayerState>(`player:${battle.playerB}`);
+      const beforeA = a.points;
+      const beforeB = b.points;
       const escrowTotal = battle.escrow.pointsA + battle.escrow.pointsB;
       const wagers: Array<{ wager: WagerBundle; owner: string }> = [
         { wager: battle.wagerA, owner: battle.playerA },
@@ -1553,13 +1584,16 @@ export class MockChainAdapter extends ChainAdapter {
       this.put(`battle:${battle.id}`, battle);
       this.emit('BattleSettled', {
         id: battle.id,
-        winnerId: outcome === 'DRAW' || outcome === 'REFUND' ? '' : outcome,
+        winnerId: outcome === 'DRAW' ? '' : outcome,
         outcome,
         playerA: battle.playerA,
         playerB: battle.playerB,
         pointsA: a.points,
         pointsB: b.points,
       });
+      // 与链码一致：结算也发双方 PointsChanged，排行榜监听器据此刷新真链/ Mock 分数
+      this.emit('PointsChanged', { playerId: a.playerId, delta: a.points - beforeA, reason: `battle:${battle.id}`, points: a.points });
+      this.emit('PointsChanged', { playerId: b.playerId, delta: b.points - beforeB, reason: `battle:${battle.id}`, points: b.points });
       return this.mustGet<BattleState>(`battle:${battle.id}`);
     } catch (err) {
       this.state.clear();

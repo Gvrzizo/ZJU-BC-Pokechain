@@ -3,7 +3,7 @@
 Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + refresh 7d，Redis 存 refresh 白名单）。
 防重放：变更类请求头带 `X-Nonce: <uuid>` + `X-Timestamp`，Redis `nonce:<uuid>` SET NX EX 300，重复拒绝 409。
 限流：Redis 滑动窗口，默认 100 req/min/用户，登录接口 10 req/min/IP。
-统一错误：`{ "statusCode":401, "code":"NOT_OWNER", "message":"..." }`。
+统一错误：`{ "statusCode":401, "code":"NOT_OWNER", "message":"..." }`。链码/适配器抛出的 `CODE: message` 本身没有 HTTP status，全局过滤器按 `backend/src/common/utils/errors.ts::CHAIN_HTTP_STATUS` 映射为稳定语义（权限 403、锁定/状态冲突 409、入参/余额 400、实体不存在 404；业务层已抛 `AppException` 的路径以自带 status 为准）；未收录的 code 保持 500，避免把真 bug 伪装成 4xx（H8，2026-10-25）。
 
 ## 1. Auth / Users
 
@@ -34,11 +34,11 @@ Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + r
 | POST | `/wild/start` | `{eventId, partyPokemonId?}` 开启服务端权威的**野怪战斗（PvE 捕捉主流程）**：队伍取链上 owner 名下 `status=IDLE` **且非濒死（0 HP）**的宝可梦（等级降序，并列取最早获得），首发默认等级最高者，可用 `partyPokemonId` 指定（非法/非 IDLE 抛 `INVALID_PARTY_POKEMON`，**指定濒死成员抛 `FAINTED`，全队濒死同样 `FAINTED`**）。**以链下当前 HP 出战**（伤势持久化，见下）。野怪个体由派生流野怪区域固定。返回会话 id 与初始状态（含队伍列表、各球当前捕捉成功率）。同一 `eventId` 幂等（重复 start 返回同一会话） |
 | POST | `/wild/:id/action` | `{action:{type:'move',moveId}\|{type:'ball',ballItemId}\|{type:'switch',targetPokemonId}\|{type:'run'}}` → 推进一个回合并返回新状态。规则见下文「野怪战斗」。已结束/超时的会话只返回终态（幂等，不再消耗球） |
 | GET | `/wild/:id` | 当前会话状态（重进战斗界面用；仅会话所有者可读） |
-| POST | `/capture/attempt` | **快速捕捉（兼容路径，e2e-smoke.sh 依赖）**：`{eventId, ballItemId}` → ① 校验球归属并 `ConsumeItem` ② 提交 `RevealAndVerify` ③ 按捕捉公式判定 ④ 成功则 `MintFromCapture`，失败返回 `{success:false, shakes:n}`。成功额外返回 `catchReward`（+20 积分，见 §10）。全程幂等（idemKey=eventId+'-attempt-'+n）。**等价于满血投球**：`p = captureProbability(1,1,catchRate,ballBonus)`；同一 eventId 的野怪战斗已结束时拒绝（`WILD_BATTLE_FINISHED`） |
-| POST | `/pokemon/:id/train` | **特训（只加努力值）**：链码 `AddPoints(-cost)` + `ApplyGrowth(evs += cost×4)`；**不改 exp/level**（等级只靠战斗经验与神奇糖果、个体值只靠王冠类道具，见下「集中升级路径」）。已满 510 EV 抛 `EV_MAXED`（不扣积分） |
-| POST | `/pokemon/:id/evolve` | 进化：**不带 `stoneItemId` = 等级进化**（EVOLUTIONS 里纯等级分支且等级达标，不消耗道具）；**带 = 进化石进化**（消耗 1 个对应石头）。两种路径都 `ApplyGrowth(speciesId 变更)` 并按新种族学习表补学技能。返回更新后的详情（含新进化链）。改过名的宝可梦进化后保留昵称 |
+| POST | `/capture/attempt` | **快速捕捉（兼容路径，e2e-smoke.sh 依赖）**：`{eventId, ballItemId}` → ① 校验球归属并 `ConsumeItem` ② 按捕捉公式判定 ③ **投中后才 `RevealAndVerify`** 并 `MintFromCapture`，失败返回 `{success:false, shakes:n}` 且事件保持 `COMMITTED`。成功额外返回 `catchReward`（+20 积分，见 §10）。全程幂等（idemKey=eventId+'-attempt-'+n）。**等价于满血投球**：`p = captureProbability(1,1,catchRate,ballBonus)`；同一 eventId 的野怪战斗已结束时拒绝（`WILD_BATTLE_FINISHED`）。玩家放弃的遭遇由 `capture:pending` 定时 sweep 在会话过期后揭示（H9） |
+| POST | `/pokemon/:id/train` | **特训（只加努力值）**：链码 `AddPoints(-cost)` + `ApplyGrowth(evs += cost×4)`；**不改 exp/level**（等级只靠战斗经验与神奇糖果、个体值只靠王冠类道具，见下「集中升级路径」）。已满 510 EV 抛 `EV_MAXED`（不扣积分）；交易/对战锁定中 `ASSET_LOCKED`(409)（**先拒绝，不扣积分**，H7） |
+| POST | `/pokemon/:id/evolve` | 进化：**不带 `stoneItemId` = 等级进化**（EVOLUTIONS 里纯等级分支且等级达标，不消耗道具）；**带 = 进化石进化**（消耗 1 个对应石头）。两种路径都 `ApplyGrowth(speciesId 变更)` 并按新种族学习表补学技能。返回更新后的详情（含新进化链）。改过名的宝可梦进化后保留昵称；交易/对战锁定中 `ASSET_LOCKED`(409)（**石头不消耗**，H7） |
 | POST | `/pokemon/:id/rename` | `{name}` **改名（昵称）**：第一次免费，之后每次 **50 积分**（`AddPoints(-50, reason='rename:<pokemonId>:<ordinal>')`）+ 链上 `ApplyGrowth({name})`。昵称 1-12 个字符（trim + 折叠空白后按码点计，中英文均可），拒绝控制字符与 `<>&"'`；非本人（含已放生）`NOT_OWNER`(403)、交易/对战锁定中 `ASSET_LOCKED`(409)、格式非法 `INVALID_NAME`(400)、余额不足 `INSUFFICIENT_POINTS`(400)。返回 `{name, renameCount, charged}`，见下「改名」 |
-| POST | `/pokemon/:id/release` | `Release`（前端二次确认）；成功后 +等级×1 积分（reason=`reward:release:<pokemonId>`，见 §10），并清掉该宝可梦的伤势键 |
+| POST | `/pokemon/:id/release` | `Release`（前端二次确认）；成功后 +等级×1 积分（reason=`reward:release:<pokemonId>`，见 §10），并清掉该宝可梦的伤势键；交易/对战锁定中 `ASSET_LOCKED`(409)，不发放奖励 |
 | POST | `/pokemon/center/heal` | **宝可梦中心**：全队回满，每次 **10 积分**（`AddPoints(-10, reason='heal:center')`）。只治疗本人 `IDLE` 的宝可梦；全员满血时**不扣费**（`charged=false`）。返回 `{cost, charged, points, healed:[{pokemonId,speciesId,name,before,after,maxHp}]}`（见下「伤势持久化」） |
 
 **技能获取（2026-10-25 收紧）**：只有两条路径——**升级学习表**（`applyExp` 跨过学习等级时自动学会，见下「升级与进化」）与**技能机 TM**（`POST /items/:id/use` 的 `tm` 分支，消耗 1 个 TM）。原先的 `POST /pokemon/:id/moves/learn`（免费学任意技能）已下线，链上 `ApplyGrowth` 也只接受 system 证书，玩家无法绕过 TM/学习表改技能。
@@ -174,7 +174,7 @@ p = min(1, a / 255)                                                   // 大师�
 - **队伍与首发**：队伍 = 链上 owner 名下 `status=IDLE` **且非濒死**的宝可梦（**等级降序**，并列取 `createdAt` 更早、再并列取 id 字典序）；首发默认等级最高者，`partyPokemonId` 可指定（濒死成员会被拒绝）。锁定中（交易/对战）与已释放的宝可梦不参战。**野怪战斗不锁定资产**（无押注），也不与 PvP 共享任何状态；**双方以链下 Redis 的当前 HP 出战**（伤势持久化，见上），每次会话落盘时把参战队伍 HP 写回 Redis。队伍整场会话固定并随状态返回（`party[]`）。
 - **回合规则**：玩家 `move`（出战宝可梦的真实技能表）→（野怪存活则）野怪 AI 出招，**最终能力值 speed 决定先手**（麻痹速度减半，平速用该回合派生流的 tie-break 槽）；命中/暴击/伤害/能力阶级/异常状态与 PvP 引擎**共用同一批纯函数**（`backend/src/battles/engine/battle-math.ts`）；野怪 AI 每回合从自己技能表按派生流随机选一个技能。回合末灼伤/中毒按 `maxHP/16` 扣血（不消耗掷点）。
 - **换宠**：`{type:'switch', targetPokemonId}` → **主动换宠消耗本回合**（野怪随后出招一次，换入者吃当回合伤害）；**濒死强制换宠**：出战宝可梦倒下且队伍还有健康成员 → 会话保持 `ACTIVE`、`mustSwitch=true`，此时只接受 `switch`（其它动作抛 `MUST_SWITCH`），换上后不额外挨打，可继续战斗；全队倒下才 `PLAYER_FAINTED`。换下的宝可梦保留自己的 HP/异常状态/能力阶级。
-- **投球**：`ball` 动作消耗该球（`ConsumeItem`，idemKey=`eventId-attempt-n`，与快速捕捉共用投球计数）→ 首次投球 `RevealAndVerify` → 按上式判定。成功 → `MintFromCapture`（idemKey=`eventId-mint`，`eventId` 状态机 COMMITTED→REVEALED→CONSUMED 不变）并结束战斗，同时发放收服奖励 +20 积分（reason=`reward:catch:<pokemonId>`，见 §10）与**出战宝可梦 +20 exp + 羁绊 +1**（经验走集中升级路径：`expGained=20`、可能升级并学技能；羁绊经 `BondService`，reason=`bond:wild-catch:<sessionId>`，幂等键 `<sessionId>-bond-catch`，受**每日每宠 +6** 上限约束）；失败 → 野怪反击（投球消耗了玩家这一回合），可继续投球，每次投球消费一个 attempt 派生块。
+- **投球**：`ball` 动作消耗该球（`ConsumeItem`，idemKey=`eventId-attempt-n`，与快速捕捉共用投球计数）→ 按上式判定（**失败不揭示**）。成功 → 先 `RevealAndVerify` 再 `MintFromCapture`（idemKey=`eventId-mint`，`eventId` 状态机 COMMITTED→REVEALED→CONSUMED）并结束战斗，同时发放收服奖励 +20 积分（reason=`reward:catch:<pokemonId>`，见 §10）与**出战宝可梦 +20 exp + 羁绊 +1**（经验走集中升级路径：`expGained=20`、可能升级并学技能；羁绊经 `BondService`，reason=`bond:wild-catch:<sessionId>`，幂等键 `<sessionId>-bond-catch`，受**每日每宠 +6** 上限约束）；失败 → 野怪反击（投球消耗了玩家这一回合），可继续投球，每次投球消费一个 attempt 派生块。**结算后揭示（H9）**：战斗进入终态（CAUGHT / WILD_FAINTED / PLAYER_FAINTED / RAN / TIMEOUT）才 reveal，避免首球后拿到 serverSeed 预判后续判定；玩家中途放弃的遭遇由 `CaptureService` 的 5 分钟 sweep 在会话过期后揭示。
 - **结束分支**：野怪 HP 归零 → `WILD_FAINTED`（不可再捕捉，出战宝可梦经 `ApplyGrowth` 获得经验 `max(5, floor(种族值总量×野怪等级/50))`，等级按 `floor(cbrt(exp))` 只升不降，幂等键 `<sessionId>-exp`；**击倒不再给羁绊**（BOND_WILD_FAINT = 0）；并发放击倒奖励 野怪等级×1 积分，reason=`reward:wild-faint:<sessionId>`）；我方全队倒下 → `PLAYER_FAINTED`（参战队伍留在 0 HP，需治疗）；`run` → `RAN`（必定成功，不消耗球，随机事件保持 COMMITTED，已受伤的 HP 照常写回）；超时 → `TIMEOUT`。
 - **状态返回**：`{sessionId, eventId, turn, status, finished, attempts, expiresAt, expGained, expGainedBy, levelsGained, movesLearned, canEvolve, bondGain, bondGainBy, catchReward, faintReward, activeIndex, mustSwitch, wild:{speciesId,name,nameZh,type,level,shiny,hp,maxHp,moves,status,stages,catchRate}, mine:{pokemonId,speciesId,name,nameZh,type,level,shiny,hp,maxHp,exp,bond,status,stages,moves:[{id,name,type,power,accuracy,category,effectText}]}, party:[{pokemonId,speciesId,name,nameZh,type,level,shiny,hp,maxHp,exp,status,fainted,active}], captureChances:[{itemId,typeId,name,nameZh,quantity,ballBonus,chance}], log:[{turn,events}], captured}`。`catchReward`/`faintReward` 是本次会话已发放的积分（未发放为 0），结算面板据此显示 "+20P / +等级×1 P"；`expGained`/`expGainedBy` 是本次发放的经验与获得者，`levelsGained`/`movesLearned`/`canEvolve` 是集中升级路径的结果（收服 +20 或击倒经验），结算面板据此显示"升到 Lv N / 学会了 X / 可以进化"；`bondGain`/`bondGainBy` 是本会话已发放的羁绊（收服 +1，击倒 0，上限外为 0；失败只记日志不影响主流程）、`mine.bond` 是出战宝可梦当前链上羁绊，结算面板显示"羁绊 +N ♥"。`captureChances` 每次返回都按野怪当前 HP 重算——前端球按钮上的百分比即此值；技能按钮的悬停说明用 `mine.moves[].effectText`。
 - **技能特效（PvP 与野怪共用，`battle-math.ts` + `game-data/moves.data.ts`）**：每个技能带中文 `effectText` 与可选结构化 `effect`（最多一个，命中后按 `chance` 掷点触发）：
@@ -260,6 +260,8 @@ p = min(1, a / 255)                                                   // 大师�
 
 **道具使用效果（`backend/src/items/items.service.ts`，全部 `ConsumeItem` + `ApplyGrowth`）**
 
+> **锁定校验（H7，2026-10-25）**：所有效果道具的目标宝可梦都必须**本人所有且 `status=IDLE`**；交易/对战锁定中统一 409 `ASSET_LOCKED`，且在 `ConsumeItem`/`AddPoints` **之前**拒绝——道具与积分不会被白白消耗。
+
 | typeId | 入参 | 效果 | 错误码 |
 |---|---|---|---|
 | `potion` / `super-potion` | `{targetPokemonId}` | **链下回血 +20 / +50**（伤势持久化，见 §2）：不超当前上限、满血抛 `HP_FULL`（不消耗道具）；链上只记一次 `ConsumeItem`，返回 `{effect:{healAmount}, hp:{before,after,maxHp,healed}}` | `TARGET_REQUIRED`（缺目标）/ `HP_FULL` |
@@ -329,7 +331,7 @@ p = min(1, a / 255)                                                   // 大师�
 | GET | `/battles/templates` | 常用押注模板 `{templates:[{id, name, note, wager, createdAt}]}`（每用户最多 10 个） |
 | POST | `/battles/templates` | 存模板 `{name(≤30), note?, wager}`；超过 10 个 → 409 `TEMPLATE_LIMIT` |
 | DELETE | `/battles/templates/:id` | 删模板（非本人 / 不存在 → 404 `TEMPLATE_NOT_FOUND`） |
-| POST | `/battles/:id/wager/confirm` | 双方确认押注清单；第二次确认时：服务端算 wagerHash → 链码 `CreateBattle`（锁定+escrow）→ `ActivateBattle` → 创建 Socket.IO 房间 |
+| POST | `/battles/:id/wager/confirm` | 双方确认押注清单；第二次确认时：**先生成 battleId 并把房间置 `STARTING`** → 链码 `CreateBattle`（锁定+escrow）→ `ActivateBattle` → 创建 Socket.IO 房间；任何一步失败按 H5 规则补偿（见下「启动失败补偿」），不会把资产锁在链上而本地没有 battleId |
 | POST | `/battles/:id/result/confirm` | 双方各确认一次对战结果 → 链码 `ConfirmResult`；第二次确认即 SETTLED（押注资产交付）。前端收到 `battle:end` 后自动调用，见下 |
 | POST | `/battles/:id/forfeit` | 主动认输 → 链码 `Forfeit(loser=自己)` |
 | POST | `/battles/:id/dispute` | `{reason}` → `Dispute` |
@@ -426,7 +428,7 @@ p = min(1, a / 255)                                                   // 大师�
 - `stats` 用与 `GET /pokemon/:id` 相同的口径（种族值 + IV + EV + 等级 + 性格，见 §2「能力值计算」）；`qty` 是押注数量、`held` 是该堆叠当前持有量（`0` = 已不在链上）。`wagerDetail*` / `teamDetail*` 的宝可梦一项**只有公开字段**（`id/name/speciesId/nameZh/level/shiny/bond/stats/unavailable`）——`name` 是链上名字（改名后即玩家昵称），`stats` 是最终六项能力值，**IV/EV/性格不出现在任何房间响应里**。
 
 ### WebSocket（Socket.IO，命名空间 `/battle`，JWT 鉴权）
-- 客户端→服务端：`battle:join {battleId}`、`battle:action {battleId, seq, action}`
+- 客户端→服务端：`battle:join {battleId}`、`battle:action {battleId, seq, action}`。`battle:join` 先回 `battle:state`（带 `you`），若当前有未结算回合再补发 `battle:turn {awaitingPlayerIds, deadline}`——刷新/重连后立即恢复出招按钮与倒计时（H15）；鉴权用动态 token（每次重连取当前 accessToken，H16）。
 - `action` 用**资产 id** 而非引擎槽位：`{type:'move', moveId:'thunderbolt'}`、`{type:'switch', targetPokemonId:'p_xxx'}`、`{type:'run'}`；服务端按对局 state 解析成引擎槽位（引擎原生 `moveIndex`/`toIndex` 仍接受，内部/测试用，与 id 形式二选一）。`item` 类型暂不支持：服务端直接拒绝 `ITEM_NOT_SUPPORTED`，**不消耗回合**（避免旧行为里道具动作吞掉一次行动）。
 - `battle:error` 常见 code：`BAD_ACTION`（action.type 缺失/未知）、`UNKNOWN_MOVE`（技能不属于出战宝可梦）、`UNKNOWN_POKEMON`（换宠目标不在队伍）、`INVALID_MOVE_INDEX` / `INVALID_SWITCH_INDEX`、`SWITCH_TO_ACTIVE` / `SWITCH_TO_FAINTED` / `MUST_SWITCH`、`ACTION_ALREADY_SUBMITTED`、`ITEM_NOT_SUPPORTED`、`BATTLE_FINISHED`、`BATTLE_NOT_LIVE`、`NOT_PARTY`、`UNAUTHORIZED`；前端 `BATTLE_ERROR_TEXT` 映射为中文提示，未收录的 code 原样展示。
 - 服务端→客户端：`battle:state {fullState}`（每回合广播，服务端权威）、`battle:turn {awaitingPlayerId, deadline}`、`battle:entry {awaitingPlayerIds, deadline, graceMs}`（入场宽限期内的等待方）、`battle:end {winnerId, resultHash, txId}`、`battle:error {code}`、`battle:activated {roomId, battleId}`（押注双确认、战斗激活后向双方 `user:<playerId>` 房间推送——**先确认方没有携带 battleId 的 REST 响应，靠该推送自动进入 `/battle/:id`**；大厅视图需长连 `/battle` 监听）、`battle:room-kicked {roomId, hostId, playerId}`（房主请离后推给被请离者 `user:<playerId>` 房间；大厅视图同时用 5s 轮询兜底发现被请离，见 §5 房间体验扩展）
@@ -444,8 +446,9 @@ p = min(1, a / 255)                                                   // 大师�
   （`poke:hp` 只被野怪战斗读写，见 §2「伤势持久化」）；濒死校验仍在**报名/提交队伍**时生效。
 - 规则：**服务端权威**计算（简化回合制：速度决定先手、属性克制表、命中/暴击用该 battle 的 RandomCommit 派生流、**能力阶级/异常状态已落地**（见 §2「技能特效」，burn/psn/par 三种，掷点顺序 麻痹→命中→暴击→浮动→追加效果））；每回合 30s 超时 → 超时方判负走 `Forfeit`；掉线 60s 未重连判负；结束后服务端 `SubmitResult(resultHash=sha256(canonical(回合日志)), serverSig=secp256k1 签名)` → **前端双方客户端收到 `battle:end` 后自动** `ConfirmResult`（结算面板显示"已确认 x/2，等待对方确认"；自动确认失败时给手动"确认结算"按钮；SETTLED 后提示"押注已交付"并刷新背包/积分）→ 二次确认即链上 SETTLED；2 分钟（`BATTLE_SETTLE_FALLBACK_MS`）无人确认时服务端 `SettleBattle` 兜底。
 - **入场宽限（`BATTLE_ENTRY_GRACE_MS`，默认 90s）**：战斗激活后双方各自 `battle:join` 视为到场，**双方都到齐才启动 30s 回合计时**（宽限期内不发 `battle:turn`）；宽限结束时仍有一方未到场 → 该方 `Forfeit` 判负（押注归对方，非 DRAW），双方都没到场才判 DRAW。战斗开始后掉线仍按 60s 判负。
-- **房间生命周期**：房间在其 battle 进入终态（SETTLED/REFUNDED）后立即置为 FINISHED 并从 `GET /battles/rooms` 列表剔除（含引擎自行结束的路径与重启/结算兜底后的对账）；`ACTIVE` 房间仅对当事双方显示"回到战斗"重连入口，重连失败（`BATTLE_NOT_LIVE`）时前端提示"该对局已结束或已清理"并自动退回大厅、刷新列表。
-- **重启对账**：内存引擎随进程消失后，后端启动即按链上状态对账 Redis 房间——`SETTLED`/`REFUNDED`/`DISPUTED`/链上已无此 battle → 关房出列；`RESULT_SUBMITTED` → 直接 `SettleBattle` 兜底；`ACTIVE`（引擎已丢）与未激活的 `CREATED` → `SubmitResult(DRAW)` + `SettleBattle` 按"服务中断"退款（resultHash 前缀 `server-restart`，链下半审计日志 `battle.reconcile`），双方资产/积分原路退回并解锁；单个房间失败仅记日志，不阻塞启动。运行期 `GET /battles/rooms` 对"`ACTIVE` 但本进程无引擎且超过 `BATTLE_RECONCILE_STALE_MS`（默认 10 分钟）"的房间同样隐藏并触发一次后台对账（未超时的房间保留"回到战斗"入口，供重启后短时间内重连）。
+- **房间生命周期**：房间在其 battle 进入终态（SETTLED/REFUNDED）后立即置为 FINISHED 并从 `GET /battles/rooms` 列表剔除（含引擎自行结束的路径与重启/结算兜底后的对账）；`ACTIVE` 房间仅对当事双方显示"回到战斗"重连入口，重连失败（`BATTLE_NOT_LIVE`）时前端提示"该对局已结束或已清理"并自动退回大厅、刷新列表。瞬态 `STARTING`（已生成 battleId、正在链上建局/起引擎）与补偿失败的 `FAILED` 不进入大厅列表，避免出现点不进去的房间。
+- **启动失败补偿（H5，2026-10-25）**：押注双确认后先落 `battleId + STARTING` 再调链。`CreateBattle` 失败时先读链：链上确认不存在 → 房间回 `JOINED`、清 `battleId`，双方可重试；结果未知（网络超时/链不可读）或链上已存在 → 走补偿。`ActivateBattle`/读队伍/起引擎失败 → 按链上状态补偿：`CREATED` 调 `CancelBattle` 全额退款（→REFUNDED）、`ACTIVE` 调 `settleAbandoned` 以 DRAW 退款（→SETTLED）。补偿成功房间置 `FINISHED`；补偿本身失败（链不可读）置 `FAILED` 并保留 `battleId`，由对账重试，资产不会永久冻结。
+- **重启对账**：内存引擎随进程消失后，后端启动即按链上状态对账 Redis 房间——`SETTLED`/`REFUNDED`/`DISPUTED`/链上已无此 battle → 关房出列；`RESULT_SUBMITTED` → 直接 `SettleBattle` 兜底；`CREATED`（含 `STARTING`/`FAILED` 残留）→ `CancelBattle` 全额退款（→REFUNDED，`resultHash=sha256("cancel|<id>|server-restart")`）；`ACTIVE`（引擎已丢）→ `SubmitResult(DRAW)` + `SettleBattle` 按"服务中断"退款（resultHash 前缀 `server-restart`，链下半审计日志 `battle.reconcile`）；双方资产/积分原路退回并解锁；单个房间失败仅记日志，不阻塞启动。运行期 `GET /battles/rooms` 对"`ACTIVE` 但本进程无引擎且超过 `BATTLE_RECONCILE_STALE_MS`（默认 10 分钟）"以及"`STARTING` 但本进程无引擎"的房间隐藏并触发一次后台对账（未超时的 ACTIVE 房间保留"回到战斗"入口，供重启后短时间内重连）。
 - 战斗 RandomCommit：wager 双方确认后由服务端 `Commit(purpose='battle')`，结束时 `RevealAndVerify`，保证全程判定可审计。
 
 ## 6. 资源与公平性
@@ -454,14 +457,14 @@ p = min(1, a / 255)                                                   // 大师�
 |---|---|---|
 | GET | `/assets/manifest` | 前端资源清单 `[{uri, sha256, size}]`（MinIO 签名 URL，前端下载后校验哈希） |
 | POST | `/assets/register` | admin：登记资源 `metadataHash+URI` |
-| GET | `/fairness/:eventId` | 返回 RandomCommit 全量（commitHash/serverSeed/clientSeed/resultHash）+ 派生算法说明，供任何人复核 |
-| GET | `/leaderboard` | 积分榜（Redis ZSET 缓存，链上事件驱动刷新，P1） |
+| GET | `/fairness/:eventId` | 返回 RandomCommit + 派生算法说明 + `serverPublicKey`/`serverKeyId`（公钥指纹），供任何人复核。**H9：`COMMITTED` 阶段不返回 `serverSeed`/`resultHash`**（响应带 `revealed:false` 与说明），结算后（`REVEALED`/`CONSUMED`）才返回完整数据；战斗事件在结算时揭示。**H19**：`SERVER_SIGNING_KEY` 固定时 `serverKeyId` 跨重启不变，`battle_logs.serverKeyId` 记录当次签名密钥 |
+| GET | `/leaderboard` | 积分榜（Redis ZSET 缓存；监听链上 `PointsChanged`/`PlayerRegistered`/`BattleSettled`，事件里的 `playerId`/`playerA`/`playerB`/`winnerId`/`fromId`/`toId` 都会触发重读对应玩家余额刷新） |
 
 ## 7. PostgreSQL 表（链下）
 
 `users(id, username, password_hash, nickname, avatar_uri, role, fabric_cert_enc, fabric_key_enc, created_at)`
 `friendships / blacklists`（P1）
-`battle_logs(id, battle_id, turns_json, result_hash, server_sig, created_at)`
+`battle_logs(id, battle_id, turns_json, result_hash, server_sig, server_key_id, created_at)`（`server_key_id` = 签名公钥指纹，H19；空串=旧记录）
 `audit_logs(id, actor, action, target, detail, created_at)`（admin/arbitrator 操作留痕）
 `chat_messages`（P1）
 
@@ -473,7 +476,7 @@ p = min(1, a / 255)                                                   // 大师�
 
 ## 9. 安全基线
 
-helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2、JWT 短时效、nonce 防重放、限流、日志脱敏（不记密码/私钥/seed 明文——serverSeed 仅在 reveal 前存内存/KMS，reveal 后上链公开）。
+helmet、CORS 白名单、class-validator 全入参、TypeORM 参数化、argon2、JWT 短时效、nonce 防重放、限流、日志脱敏（不记密码/私钥/seed 明文——serverSeed 仅在 reveal 前存内存/KMS，reveal 后上链公开）。前端会话：refresh 请求固定 5s 超时（H17，避免首屏守卫挂起）、Socket.IO 每次（重）连用回调取当前 accessToken 且鉴权失败停止重连（H16）、交易确认按 username 比较 `fromId/toId`（H14，UUID 比较会导致确认状态错误）。
 
 ## 10. 积分经济
 
@@ -695,4 +698,4 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 - `frontend/src/components/CaptureOverlay.vue`：准备阶段的首发列表带 HP 与（濒死）标记、**濒死成员禁选**；全队濒死时禁用"进入草丛"并提示去宝可梦中心；背包伤药可在战斗中/队伍页使用（`POST /items/:id/use {targetPokemonId}`）。
 - 交易所（TradeView）建议提示同一条"易主后羁绊重置为 30"（本次未改该文件）。
 
-**遗留**：`Transfer` 与交易确认处的羁绊重置目前只有链上行为 + 文档说明，交易界面尚未加仪式感提示；排位结算面板尚未渲染 `arena` 发奖明细（接口已返回）；通用 PvP 胜利经验（非机器人场 +30）的接线点 `PokemonService.grantBattleWinExp` 仍未被普通 PvP 结算调用（目前只接了机器人场的 ×0.5 分支，幂等键与通用接线一致，后续接线不会重复发奖）。
+**遗留**：`Transfer` 与交易确认处的羁绊重置目前只有链上行为 + 文档说明，交易界面尚未加仪式感提示；排位结算面板尚未渲染 `arena` 发奖明细（接口已返回）。

@@ -133,6 +133,25 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     expect((await w.getPlayer('u_ash')).wins).toBe(1);
     expect((await w.getPlayer('u_gary')).losses).toBe(1);
     expect(w.eventNames()).toEqual(expect.arrayContaining(['BattleConfirmed', 'BattleSettled']));
+    // H4：BattleSettled 带双方 playerId，结算另发双方 PointsChanged（排行榜靠它刷新）
+    const settledEvents = w.stub.committedEvents
+      .filter((e) => e.name === 'BattleSettled')
+      .map((e) => JSON.parse(e.payload));
+    expect(settledEvents[settledEvents.length - 1]).toMatchObject({
+      id: 'b_1',
+      winnerId: 'u_ash',
+      playerA: 'u_ash',
+      playerB: 'u_gary',
+    });
+    const pointsEvents = w.stub.committedEvents
+      .filter((e) => e.name === 'PointsChanged')
+      .map((e) => JSON.parse(e.payload));
+    expect(pointsEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ playerId: 'u_ash', delta: 100, balance: 1050, reason: 'battle:b_1' }),
+        expect.objectContaining({ playerId: 'u_gary', delta: 0, balance: 950, reason: 'battle:b_1' }),
+      ]),
+    );
   });
 
   test('ConfirmResult/Dispute：同组织其他玩家不能替当事人确认/争议（NOT_OWNER）', async () => {
@@ -225,6 +244,40 @@ describe('BattleContract（押注锁定 + 签名结果 + 原子结算 + 仲裁�
     expect(done.result.serverSig).toBe(SIG);
     expect(done.result.serverSubmitted).toBe(true);
     expect((await w.getPokemon('p_2')).ownerId).toBe('u_ash');
+  });
+
+  test('CancelBattle：system 取消 CREATED 对局并全额退款（H5）；ACTIVE 不可取消', async () => {
+    await createBattle(w);
+    await expectCode(
+      w.run(() => w.battle.CancelBattle(w.ctxAs('u_ash'), 'b_1', 'start-failed', T3, 'idem-cx0')),
+      'FORBIDDEN',
+    );
+    const done = JSON.parse(
+      await w.run(() => w.battle.CancelBattle(w.systemCtx(), 'b_1', 'start-failed', T3, 'idem-cx1')),
+    );
+    expect(done.status).toBe('REFUNDED');
+    expect(done.result).toMatchObject({ winnerId: 'REFUND', serverSubmitted: true });
+    expect(done.result.resultHash).toBe(hash('cancel|b_1|start-failed'));
+    expect(done.arbiterNote).toBe('CANCEL: start-failed');
+    // 双方押注资产解锁归还、escrow 原路退回
+    expect((await w.getPokemon('p_1')).ownerId).toBe('u_ash');
+    expect((await w.getPokemon('p_2')).ownerId).toBe('u_gary');
+    expect((await w.getPokemon('p_1')).status).toBe('IDLE');
+    expect((await w.getPokemon('p_2')).status).toBe('IDLE');
+    expect((await w.getItem('i_1')).status).toBe('IDLE');
+    expect((await w.getPlayer('u_ash')).points).toBe(1000);
+    expect((await w.getPlayer('u_gary')).points).toBe(1000);
+    expect(w.eventNames()).toEqual(expect.arrayContaining(['BattleCancelled', 'BattleSettled']));
+    // 幂等重放
+    const replay = await w.run(() => w.battle.CancelBattle(w.systemCtx(), 'b_1', 'start-failed', T3, 'idem-cx1'));
+    expect(replay).toBe(JSON.stringify(done));
+
+    await createBattle(w, 'b_2');
+    await activateBattle(w, 'b_2');
+    await expectCode(
+      w.run(() => w.battle.CancelBattle(w.systemCtx(), 'b_2', 'too-late', T4, 'idem-cx2')),
+      'BAD_STATE',
+    );
   });
 
   test('Dispute→Arbitrate（赢家结局）：仅 Org2 arbitrator 可仲裁', async () => {
