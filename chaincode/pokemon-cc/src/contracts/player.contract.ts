@@ -29,6 +29,8 @@ export class PlayerContract extends Contract {
     idemKey: string,
   ): Promise<string> {
     return withIdempotency(ctx, idemKey, nowISO, async () => {
+      // 仅 admin/system 代注册：防止任意玩家抢注他人 username（docs/chaincode-api.md §2.1）
+      requireRole(ctx, 'admin', 'system');
       requireNonEmpty(playerId, 'playerId');
       requireNonEmpty(nickname, 'nickname');
       assertISO(nowISO, 'nowISO');

@@ -11,21 +11,27 @@
 |---|---|---|
 | Web 会话 | JWT access（15min）+ refresh（7d），refresh 白名单存 Redis `refresh:<uid>:<jti>`，刷新即轮换旧 jti 作废；登出吊销 | `backend/src/auth/auth.service.ts` |
 | 口令存储 | argon2 哈希（`argon2` 包），登录 `argon2.verify`；口令永不出后端、永不记日志 | 同上 |
-| 链上身份 | Fabric CA 注册+enroll 得 X.509；`role` 属性以 ecert 形式写入证书，链码 CID `getAttrValue('role')` 读取 | `backend/src/fabric/fabric-ca.service.ts`、`chaincode/.../common/cid.ts` |
+| 链上身份 | Fabric CA 注册+enroll 得 X.509；`role` 属性以 ecert 形式写入证书，链码 CID `getAttrValue('role')` 读取；**用户身份**由 CA 自动写入的 `hf.EnrollmentID`（= 注册用户名 = 链上 `playerId`）确定 | `backend/src/fabric/fabric-ca.service.ts`、`chaincode/.../common/cid.ts` |
 | 组织归属 | MSP：玩家/运营 Org1MSP，仲裁 Org2MSP；`requireArbitrator` = Org2MSP ∧ role=arbitrator | `network/configtx.yaml`、cid.ts |
 
 ### 1.2 权限矩阵与越权校验
 
 | 操作 | 允许的链上角色 | 链码强制点 |
 |---|---|---|
-| RegisterPlayer 代发 / GrantRole | admin | `PlayerContract` requireRole |
+| RegisterPlayer 代发 | admin, system（后端注册/seed 用 `ADMIN_IDENTITY`，防抢注 username） | `PlayerContract` requireRole |
+| GrantRole | admin | `PlayerContract` requireRole |
 | AddPoints / MintItem | admin, system | 同上 |
-| Transfer / TransferPoints / ConsumeItem | owner 本人（mspId 匹配）或 system | `assertCallerIsPlayer` |
-| RevealAndVerify / MintFromCapture / ActivateBattle / SubmitResult / SettleBattle / Forfeit | system | requireRole('system') |
-| ConfirmTrade / ConfirmResult / Dispute | 当事人 | NOT_PARTY 检查 |
+| Transfer / TransferPoints / ConsumeItem / TransferItem / MergeStacks | owner 本人（`hf.EnrollmentID` == `playerId`）或 system | `assertCallerIsPlayer` |
+| RevealAndVerify / MintFromCapture / ApplyGrowth / ActivateBattle / SubmitResult / SettleBattle / Forfeit | system（养成写入也仅 system，玩家证书改不了 level/EV/IV/species/name） | requireRole('system') |
+| ConfirmTrade / ConfirmResult / Dispute | 当事人**本人**（`hf.EnrollmentID` 匹配） | NOT_PARTY + `assertCallerIsPlayer` |
+| CreateBattle | system 或当事人本人（`hf.EnrollmentID` ∈ {playerA, playerB}） | `getEnrollmentId` 校验 |
 | Arbitrate | Org2MSP + arbitrator | `requireArbitrator` |
 
 越权防护在**两层独立实施**：Web 层 `@Roles()` 守卫挡掉非 admin/arbitrator 的 HTTP 调用；链码层 CID 再校验一次——即使后端被绕过（如直接拿到 peer 背书），链码仍会拒绝越权交易。单测覆盖"非 owner 转移/非 arbitrator 仲裁/非 system 提交结果"全部拒绝路径。
+
+**铸造/揭示/养成（2026-10-25 修复 C2/C3）**：`MintFromCapture`、`RevealAndVerify`、`ApplyGrowth` 三笔写入交易均为 system-only。链码仍是「信任后端传入的 IV/EV/level」，它保证的是**玩家拿自己的证书无法自铸宝可梦、无法绕过训练/王冠/糖果直接改属性**；游戏规则的完整链上校验（从 `resultHash` 派生 IV、成本校验）属 P2 扩展点。后端所有合法链路（capture/starter/train/rename/evolve/candy/stone/TM）都由 system 身份代签，`POST /pokemon/:id/moves/learn` 免费学技能入口已下线，技能只来自升级学习表与 TM。
+
+**本人校验（2026-10-25 修复 C1）**：`assertCallerIsPlayer` 比较证书 `hf.EnrollmentID` 与 `player.playerId`，**不再比较 mspId**——所有普通玩家同属 Org1MSP，按组织校验等于「任意玩家可冒充任意玩家」。`hf.EnrollmentID` 由 Fabric CA 在 enroll 时自动写入 ecert，**不得**作为自定义属性显式注册（会被 CA 403 拒绝）；手工签发、缺少该属性的证书一律抛 `NOT_OWNER`，属预期安全行为，旧玩家记录无需迁移（`playerId` 即 enrollment ID）。
 
 ### 1.3 API 防线
 
@@ -37,6 +43,7 @@
 | XSS | 前端 Vue 模板默认转义（无 `v-html` 渲染用户输入）；helmet 设置 CSP 等安全头 | `main.ts`、前端视图 |
 | CSRF | 认证走 `Authorization: Bearer` 头而非 Cookie，跨站表单无法携带；CORS 白名单（`CORS_ORIGINS`）精确列举来源 | `main.ts` |
 | 入参畸形 | 全局 `ValidationPipe({whitelist, transform})` + class-validator DTO，多余字段剥离、类型强转 | `main.ts`、各 dto |
+| 越权读（BOLA） | `GET /pokemon/:id` 只返回本人资产：非本人与不存在统一 404 `NOT_FOUND`（不泄露 IV/EV/性格，也不泄露资产是否存在）；队伍校验（房间/排位）另行去重，防止「同一只 ×6 条命」 | `pokemon.service::getOneForUser`、`battles.service::assertTeamUnique` |
 
 ### 1.4 私钥托管与风险声明
 
@@ -56,6 +63,7 @@
 
 - 资产状态机：宝可梦/道具 `IDLE | LOCKED_TRADE | LOCKED_BATTLE`（+ 宝可梦 `RELEASED`）；锁定态拒绝转移/消耗/再锁定（`ASSET_LOCKED`）；`lockRef` 记录锁定来源，结算时校验 `lockRef==本单 id` 防止错单解锁。
 - 所有权：一切转移/消耗校验 `ownerId==调用者`（或 system）；交易/对战建单时逐项校验双方资产归属与状态。
+- **交易只锁发起方 `offer`（2026-10-25 修复 C5）**：`CreateTrade` 对 `request` 只做归属/`IDLE` 预检、不锁定，执行时才在同一笔交易内校验并交换；否则任何知道他人资产 id 的人都能建「请求对方资产」的交易把受害者资产锁死。旧交易（创建时锁了 request）仍可执行/取消/过期。`ttlSeconds` 上限 7 天（后端 DTO + 链码双重限制）。
 
 ### 2.3 双花 / 重放 / 溢出
 

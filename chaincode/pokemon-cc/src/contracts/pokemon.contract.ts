@@ -10,7 +10,7 @@ import {
   requireNonEmpty,
   safeInt,
 } from '../common/assert';
-import { getRole, requireRole } from '../common/cid';
+import { requireRole } from '../common/cid';
 import { withIdempotency } from '../common/idempotency';
 import {
   applyIvsPatch,
@@ -86,6 +86,7 @@ export class PokemonContract extends Contract {
     idemKey: string,
   ): Promise<string> {
     return withIdempotency(ctx, idemKey, nowISO, async () => {
+      requireRole(ctx, 'system');
       requireNonEmpty(id, 'id');
       requireNonEmpty(name, 'name');
       requireNonEmpty(nature, 'nature');
@@ -151,16 +152,19 @@ export class PokemonContract extends Contract {
     });
   }
 
+  /**
+   * 养成写入（docs/chaincode-api.md §2.3）：**仅 system**。
+   * 后端在扣费/校验学习表/进化条件后以 system 身份代签；玩家证书不能直接改
+   * level/exp/EV/IV/species/name（否则等于免费获得全部养成收益）。
+   */
   @Transaction()
   public async ApplyGrowth(ctx: Context, id: string, growthJSON: string, nowISO: string, idemKey: string): Promise<string> {
     return withIdempotency(ctx, idemKey, nowISO, async () => {
+      requireRole(ctx, 'system');
       requireNonEmpty(id, 'id');
       assertISO(nowISO, 'nowISO');
       const pokemon = await loadPokemon(ctx, id);
-      const owner = await loadPlayer(ctx, pokemon.ownerId);
-      if (getRole(ctx) !== 'system') {
-        assertCallerIsPlayer(ctx, owner);
-      }
+      await loadPlayer(ctx, pokemon.ownerId);
       assertIdle(pokemon.status, 'pokemon', id);
       const growth = parseJSON<Record<string, unknown>>(growthJSON, 'growthJSON');
       if (growth === null || typeof growth !== 'object' || Array.isArray(growth)) {

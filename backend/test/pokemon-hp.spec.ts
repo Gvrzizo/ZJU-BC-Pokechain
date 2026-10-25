@@ -271,9 +271,16 @@ describe('伤势持久化：链下当前 HP（docs/backend-api.md §2）', () =>
     expect(engine.active('A').maxHp).toBe(maxA);
     expect(engine.active('B').hp).toBe(ctx.hp.maxHpOf(weak));
 
-    // 一回合：hyper-beam（lv60）必定击倒 lv2，对局结束
-    ctx.manager.submitAction(battleId, 'ash', { type: 'move', moveIndex: 0 });
-    ctx.manager.submitAction(battleId, 'gary', { type: 'move', moveIndex: 0 });
+    // lv60 打 lv2 必定击倒；Hyper Beam 只有 90% 命中，miss 时继续下一回合（派生随机流每局不同）
+    for (let turn = 0; turn < 10; turn++) {
+      const active = ctx.manager.get(battleId);
+      if (!active || active.engine.finished) break;
+      ctx.manager.submitAction(battleId, 'ash', { type: 'move', moveIndex: 0 });
+      const afterA = ctx.manager.get(battleId);
+      if (!afterA || afterA.engine.finished) break;
+      ctx.manager.submitAction(battleId, 'gary', { type: 'move', moveIndex: 0 });
+      await new Promise((r) => setTimeout(r, 10));
+    }
     expect(await waitFor(() => ctx.manager.get(battleId) === undefined)).toBe(true);
 
     // 不回写：战前伤势原样保留，从未受伤的对手也不会凭空多出毒伤势键

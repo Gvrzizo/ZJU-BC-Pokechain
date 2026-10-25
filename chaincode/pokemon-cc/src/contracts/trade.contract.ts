@@ -19,10 +19,25 @@ import {
   saveTrade,
 } from '../common/state';
 
+/**
+ * request 资产的可执行状态：IDLE（本版语义：创建时只预检不锁定）或
+ * 已被本交易锁定（旧交易：创建时锁了 request，需继续兼容执行/取消/过期）。
+ */
+function lockedByTrade(asset: { status: string; lockRef: string }, tradeId: string): boolean {
+  return asset.status === 'IDLE' || (asset.status === 'LOCKED_TRADE' && asset.lockRef === tradeId);
+}
+
+/** 交易 TTL 上限：7 天（后端 DTO 同样限制；链码兜住直接调用链码的超长 expiresAt）。 */
+const TTL_MAX_MS = 7 * 24 * 3600 * 1000;
+
 export function manifestHashOf(fromId: string, toId: string, offer: AssetBundle, request: AssetBundle): string {
   return sha256hex(canonicalJson({ fromId, toId, offer, request }));
 }
 
+/**
+ * 解锁双方资产：新交易 request 未锁定（遍历时自动跳过）；旧交易 request 仍锁定，
+ * 取消/过期时必须一起解锁，否则会留下永久锁（docs/remediation-guide §P0-3）。
+ */
 async function unlockTradeAssets(ctx: Context, trade: Trade): Promise<void> {
   for (const pid of [...trade.offer.pokemonIds, ...trade.request.pokemonIds]) {
     const p = await loadPokemon(ctx, pid);
@@ -70,8 +85,12 @@ async function executeTrade(ctx: Context, trade: Trade): Promise<void> {
   }
   for (const pid of trade.request.pokemonIds) {
     const p = await loadPokemon(ctx, pid);
-    if (p.status !== 'LOCKED_TRADE' || p.lockRef !== trade.id || p.ownerId !== trade.toId) {
-      fail('BAD_STATE', `pokemon ${pid} is not locked by trade ${trade.id}`);
+    if (p.ownerId !== trade.toId) {
+      // 创建时不再锁 request：执行前被转走/放生即失败，整笔交易回滚（offer 仍锁定、交易仍 OPEN）
+      fail('NOT_OWNER', `pokemon ${pid} is owned by ${p.ownerId}, not ${trade.toId}`);
+    }
+    if (!lockedByTrade(p, trade.id)) {
+      fail('ASSET_LOCKED', `pokemon ${pid} is ${p.status}`);
     }
     if (p.ownerId !== trade.fromId) {
       p.bond = BOND_RESET_ON_TRANSFER;
@@ -93,8 +112,11 @@ async function executeTrade(ctx: Context, trade: Trade): Promise<void> {
   }
   for (const iid of trade.request.itemIds) {
     const i = await loadItem(ctx, iid);
-    if (i.status !== 'LOCKED_TRADE' || i.lockRef !== trade.id || i.ownerId !== trade.toId) {
-      fail('BAD_STATE', `item ${iid} is not locked by trade ${trade.id}`);
+    if (i.ownerId !== trade.toId) {
+      fail('NOT_OWNER', `item ${iid} is owned by ${i.ownerId}, not ${trade.toId}`);
+    }
+    if (!lockedByTrade(i, trade.id)) {
+      fail('ASSET_LOCKED', `item ${iid} is ${i.status}`);
     }
     i.ownerId = trade.fromId;
     i.status = 'IDLE';
@@ -136,6 +158,14 @@ export class TradeContract extends Contract {
       if (nowISO >= expiresAt) {
         fail('TRADE_EXPIRED', 'expiresAt must be later than nowISO');
       }
+      // Date.parse 对带 Z/偏移的 ISO 串是确定性的（不用 Date.now / new Date）
+      const ttlMs = Date.parse(expiresAt) - Date.parse(nowISO);
+      if (!Number.isFinite(ttlMs)) {
+        fail('INVALID_TIME', `cannot parse nowISO/expiresAt ("${nowISO}", "${expiresAt}")`);
+      }
+      if (ttlMs > TTL_MAX_MS) {
+        fail('INVALID_PARAM', `expiresAt must be within 7 days of nowISO, got ${ttlMs}ms`);
+      }
       if (await exists(ctx, 'trade', id)) {
         fail('TRADE_EXISTS', `trade ${id} already exists`);
       }
@@ -150,20 +180,22 @@ export class TradeContract extends Contract {
         fail('INVALID_PARAM', 'the same asset cannot appear on both sides of a trade');
       }
       const offerAssets = await validateBundleAssets(ctx, offer, fromId, 'offer');
-      const requestAssets = await validateBundleAssets(ctx, request, toId, 'request');
+      // request 只预检（存在/归属/IDLE），**不锁定**：否则任何知道对方资产 id 的人
+      // 都能建一笔"请求对方资产"的交易锁住受害者资产（C5，docs/security.md §2.2）。
+      await validateBundleAssets(ctx, request, toId, 'request');
       if (from.points < offer.points) {
         fail('INSUFFICIENT_POINTS', `from ${fromId} has ${from.points}, needs ${offer.points}`);
       }
       if (to.points < request.points) {
         fail('INSUFFICIENT_POINTS', `to ${toId} has ${to.points}, needs ${request.points}`);
       }
-      // 锁定全部资产；积分不动，仅在执行时划转
-      for (const p of [...offerAssets.pokemons, ...requestAssets.pokemons]) {
+      // 只锁发起方自己的 offer；积分不动，仅在执行时划转
+      for (const p of offerAssets.pokemons) {
         p.status = 'LOCKED_TRADE';
         p.lockRef = id;
         await savePokemon(ctx, p);
       }
-      for (const i of [...offerAssets.items, ...requestAssets.items]) {
+      for (const i of offerAssets.items) {
         i.status = 'LOCKED_TRADE';
         i.lockRef = id;
         await saveItem(ctx, i);

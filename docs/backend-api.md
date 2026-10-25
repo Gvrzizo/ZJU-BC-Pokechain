@@ -27,7 +27,7 @@ Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + r
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/pokemon?owner=me` | 我的宝可梦（链上 QueryByOwner，Redis 缓存 5s；每只附带 `evs`、`stats` 六项能力值、**羁绊战斗加成百分比 `bondBonus`**（见下「能力值计算」）、**当前 HP `currentHp`/`fainted`**（链下伤势，见下）、**改名次数 `renameCount`**（链下 PG，见下「改名」）与进化链 `evolution`/`evolutions`） |
-| GET | `/pokemon/:id` | 详情（同上附带 `evs`、`stats`、`bondBonus`、`currentHp`/`fainted`、`renameCount` 与进化链） |
+| GET | `/pokemon/:id` | 详情（同上附带 `evs`、`stats`、`bondBonus`、`currentHp`/`fainted`、`renameCount` 与进化链）。**仅本人可读**：IV/EV/性格/羁绊属私密养成数据，非本人与不存在统一 404 `NOT_FOUND`（2026-10-25 修复 H1 BOLA，调用方无法据此枚举他人资产） |
 | GET | `/pokedex` | 图鉴（species 静态表 + 我拥有数 + **出现区域 `habitatOf`**：该种族会出现的区域 id 列表（栖息地反查，含传说区；从不出现的为 `[]`）+ `legendary` 标记；区域详情/中文名见 `GET /capture/zones`） |
 | GET | `/capture/zones` | **区域表**（前端渲染 + 调试）：`{default, aliases, zones:[{id, name（中文名）, minLevel, maxLevel, maxStage, habitats, legendary, keyTypeId, keyNameZh, lureAllowed, poolSize}]}`——普通区给等级带/阶段门槛/栖息地属性/池规模，传说区给所需钥匙 typeId 与中文名（`lureAllowed=false`）。完整表见下「区域与栖息地野生池」 |
 | POST | `/capture/encounter` | `{clientSeed?, lureTier?, zoneId?}` 随机遇敌：服务端生成 serverSeed+eventId，**先提交链码 `RandomContract.Commit`**，再从已验证派生流决定 species/等级（种类 `n=0`、等级 `n=1`）。**区域**：`zoneId` ∈ 普通区 7 个（`route-grass`/`forest`/`route-mid`/`cave`/`coast`/`route-north`/`volcano`）+ 传说区 6 个（`sky-pillar`/`seafloor`/`magma`/`ruins`/`southern-island`/`birth-island`），缺省 `route-grass`、非法抛 `INVALID_ZONE`、旧 id 别名 `south`/`mid`/`north` 归一为 `route-grass`/`route-mid`/`route-north`（响应与 `Commit.meta.zone` 一律记规范 id）；每区固定**等级带** + **阶段门槛** + **栖息地属性**（池见下「区域与栖息地野生池」），`等级 = zone.minLevel + floor(rand(1) × 带宽)`，**与玩家队伍等级彻底脱钩**。**传说区额外门控**：需要对应钥匙（`sky-key`/`ocean-key`/`magma-key`/`ruins-key`/`island-key`/`birth-key`，持有即通行、**不消耗**）否则 403 `KEY_REQUIRED`（消息带 typeId 与中文名）；本人已拥有该区任一传说（含锁定中）否则 409 `LEGENDARY_OWNED`；**禁止付费诱饵**（400 `LURE_NOT_ALLOWED`，不扣费），闪光仍按基准 1/4096 判定。**付费诱饵 `lureTier`**（仅普通区）：0 免费 / 1 = 50 积分（带内 +2 级）/ 2 = 200 积分（带内 +5 级、闪光概率 ×4 → 1/1024），加成**封顶 `zone.maxLevel`**；付费经链码 `AddPoints(-cost, reason='lure:tierN')` 原子扣减（余额不足抛 `INSUFFICIENT_POINTS`），并把 `{zone,lureTier?,cost?}` 写入 `RandomCommit.meta` 上链留痕（`GET /fairness/:eventId` 的 `event.meta` 可见，审计可据此复算 `n=0/n=1`）。返回 `{eventId, zone:{id,name,minLevel,maxLevel,maxStage,habitats,legendary,keyTypeId,keyNameZh}, wild:{speciesId,name,nameZh,level,previewSpriteUri,catchRate}, lure:{tier,cost,levelBonus,shinyMultiplier}, commitHash, clientSeed}`；`eventId` 是后续**野怪战斗**（主流程）或**快速捕捉**（兼容路径）的唯一凭据 |
@@ -40,7 +40,8 @@ Base URL：`/api/v1`　认证：`Authorization: Bearer <JWT>`（access 15min + r
 | POST | `/pokemon/:id/rename` | `{name}` **改名（昵称）**：第一次免费，之后每次 **50 积分**（`AddPoints(-50, reason='rename:<pokemonId>:<ordinal>')`）+ 链上 `ApplyGrowth({name})`。昵称 1-12 个字符（trim + 折叠空白后按码点计，中英文均可），拒绝控制字符与 `<>&"'`；非本人（含已放生）`NOT_OWNER`(403)、交易/对战锁定中 `ASSET_LOCKED`(409)、格式非法 `INVALID_NAME`(400)、余额不足 `INSUFFICIENT_POINTS`(400)。返回 `{name, renameCount, charged}`，见下「改名」 |
 | POST | `/pokemon/:id/release` | `Release`（前端二次确认）；成功后 +等级×1 积分（reason=`reward:release:<pokemonId>`，见 §10），并清掉该宝可梦的伤势键 |
 | POST | `/pokemon/center/heal` | **宝可梦中心**：全队回满，每次 **10 积分**（`AddPoints(-10, reason='heal:center')`）。只治疗本人 `IDLE` 的宝可梦；全员满血时**不扣费**（`charged=false`）。返回 `{cost, charged, points, healed:[{pokemonId,speciesId,name,before,after,maxHp}]}`（见下「伤势持久化」） |
-| POST | `/pokemon/:id/moves/learn` | `{moveId, forgetMoveId?}` → `ApplyGrowth(moves)` |
+
+**技能获取（2026-10-25 收紧）**：只有两条路径——**升级学习表**（`applyExp` 跨过学习等级时自动学会，见下「升级与进化」）与**技能机 TM**（`POST /items/:id/use` 的 `tm` 分支，消耗 1 个 TM）。原先的 `POST /pokemon/:id/moves/learn`（免费学任意技能）已下线，链上 `ApplyGrowth` 也只接受 system 证书，玩家无法绕过 TM/学习表改技能。
 
 **能力值计算（实现口径，第三世代官方公式，2026-09 经 Bulbapedia "Stat"/"Nature" 核实）**
 
@@ -301,10 +302,12 @@ p = min(1, a / 255)                                                   // 大师�
 
 ## 4. 交易
 
+> **锁资产语义（2026-10-25 修复 C5）**：创建交易只锁发起方的 `offer`；`request` 在创建时只预检归属与 `IDLE`，确认执行时才在同一笔交易内校验并交换。取消/过期仍解锁双方（兼容旧交易里被锁的 `request`）。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/trades` | `{toPlayerId, offer:{pokemonIds,itemIds,points}, request:{...}, ttlSeconds}` → `CreateTrade`（服务端算 manifestHash、expiresAt） |
-| POST | `/trades/:id/confirm` | 双方各调一次 `ConfirmTrade`；第二次确认时链上原子执行 |
+| POST | `/trades` | `{toPlayerId, offer:{pokemonIds,itemIds,points}, request:{...}, ttlSeconds}` → `CreateTrade`（服务端算 manifestHash、expiresAt）。**`ttlSeconds` 上限 7 天**（`@Max(7*24*3600)`，链码同样兜底），且**只锁定发起方的 `offer`**——`request` 只做归属/IDLE 预检，接收方在确认前仍可自由使用/转移（2026-10-25 修复 C5） |
+| POST | `/trades/:id/confirm` | 双方各调一次 `ConfirmTrade`；第二次确认时链上原子执行。若此时 `request` 资产已被转走/锁定，整笔回滚：抛 `NOT_OWNER`/`ASSET_LOCKED`，发起方 `offer` 保持锁定、交易仍 `OPEN` |
 | POST | `/trades/:id/cancel` | `CancelTrade` |
 | GET | `/trades/:id` / GET `/trades?box=in|out` | 查询 |
 
@@ -313,9 +316,9 @@ p = min(1, a / 255)                                                   // 大师�
 ### REST
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/battles/rooms` | `{mode:'1v1', name?, note?, wager, teamPokemonIds}` 创建房间（房主=A；房名/备注见下；`teamPokemonIds` **1-6 只**） |
+| POST | `/battles/rooms` | `{mode:'1v1', name?, note?, wager, teamPokemonIds}` 创建房间（房主=A；房名/备注见下；`teamPokemonIds` **1-6 只且不得重复**——同一只宝可梦不能占多个槽位，否则等于 6 条命；违反 400 `DUPLICATE_TEAM`） |
 | GET | `/battles/rooms` | 大厅列表（Redis 缓存，5s；`wagerA/wagerB` 为归一后的押注包，`name/note/joinMessage` 为房名/备注/加入者留言，见下） |
-| POST | `/battles/rooms/:id/join` | `{wager, teamPokemonIds, message?}` 加入（=B；队伍 **1-6 只**；`message` 为给房主的留言 ≤100 字） |
+| POST | `/battles/rooms/:id/join` | `{wager, teamPokemonIds, message?}` 加入（=B；队伍 **1-6 只且不得重复**（`DUPLICATE_TEAM` 400）；`message` 为给房主的留言 ≤100 字） |
 | GET | `/battles/rooms/:id` | 房间详情：房间本体 + **双方押注富化明细** `wagerDetailA/wagerDetailB` + **双方出战队伍富化明细** `teamDetailA/teamDetailB`（"查看押注"/"查看队伍"弹窗，任何人可看） |
 | PATCH | `/battles/rooms/:id` | 房主改 `{name?, note?}`（仅房主、押注双确认前） |
 | DELETE | `/battles/rooms/:id` | 房主删除房间（**仅 WAITING**：还没人加入；有人加入 → 409 `ROOM_NOT_EMPTY`，先 `kick`；`ACTIVE`/`FINISHED` → 409 `ROOM_NOT_OPEN`）。房间记录、大厅索引与大厅缓存一并清理 |
@@ -369,6 +372,7 @@ p = min(1, a / 255)                                                   // 大师�
 |---|---|---|
 | `INVALID_PARAM` | 400 | wager 结构非法（`items`/`itemIds` 混用、资产重复、`qty` 非正整数等）；`PATCH /battles/rooms/:id` 未给任何字段 |
 | `INVALID_TEAM_SIZE` | 400 | 出战队伍不是 **1-6 只**（创建/加入房间、排位入队同一口径） |
+| `DUPLICATE_TEAM` | 400 | 出战队伍里有重复的宝可梦 id（创建/加入房间、排位入队同一口径；2026-10-25 修复 H2） |
 | `ITEM_NOT_FOUND` | 404 | 押注道具不存在 |
 | `NOT_OWNER` | 403 | 押注道具 / 出战宝可梦不属于本人 |
 | `ASSET_LOCKED` | 409 | 押注道具 / 宝可梦已被锁定（交易或对战） |
@@ -577,7 +581,7 @@ QUEUED ──300s 未匹配──► TIMEOUT；配对失败 ──► ERROR（�
 
 - `casual`：**沿用既有房间流程**——`wager={pokemonIds:[],items:[],points:0}`、双方自动加入 + 自动确认押注 → `CreateBattle` → `ActivateBattle` → 引擎开局，并推送 `battle:activated`。排位房与普通房在同一大厅列表/对局列表里（`FINISHED` 后同样出列）。
 - `arena`：**先扣双方准入积分（扣失败即取消建房），再建房**，因此 battleId 由排位侧生成（reason 要带 battleId）；房间仍是同一套记录（`createRoom`/`joinRoom` + 激活记账），机器人场没有房间（`roomId=null`）。
-- 队伍校验与普通房一致：**规模 1-6 只**（否则 400 `INVALID_TEAM_SIZE`），每只宝可梦必须属于本人、`status=IDLE` **且非濒死（0 HP，`assertTeam` 在入队时就拦下并指明是哪只）**（锁定中/已释放/濒死不能参赛）；配对时二次校验（含 1-6），队伍失效则**双方出队**并在下次轮询返回 `ERROR`。
+- 队伍校验与普通房一致：**规模 1-6 只且不得重复**（否则 400 `INVALID_TEAM_SIZE` / `DUPLICATE_TEAM`），每只宝可梦必须属于本人、`status=IDLE` **且非濒死（0 HP，`assertTeam` 在入队时就拦下并指明是哪只）**（锁定中/已释放/濒死不能参赛）；配对时二次校验（含 1-6），队伍失效则**双方出队**并在下次轮询返回 `ERROR`。
 
 **ELO 结算（K=32）**
 

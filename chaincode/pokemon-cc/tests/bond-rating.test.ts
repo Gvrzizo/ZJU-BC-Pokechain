@@ -29,14 +29,14 @@ describe('Pokemon.bond（羁绊值：铸造 50 / 易主重置 30 / BondUp）', (
     delete legacy.bond;
     await w.run(() => w.stub.putState('pokemon:p_1', Buffer.from(JSON.stringify(legacy))));
     expect((await w.getPokemon('p_1')).bond).toBe(BOND_DEFAULT);
-    await w.run(() => w.pokemon.Transfer(w.ctx(ORG1), 'p_1', 'u_gary', T3, 'idem-legacy-bond'));
+    await w.run(() => w.pokemon.Transfer(w.ctxAs('u_ash'), 'p_1', 'u_gary', T3, 'idem-legacy-bond'));
     expect((await w.getPokemon('p_1')).bond).toBe(BOND_RESET);
   });
 
   test('Transfer：易主 bond 重置为 30（提升到 100 后转移清零）', async () => {
     await w.run(() => w.pokemon.BondUp(w.systemCtx(), JSON.stringify(['p_1']), '50', 'training', T3, 'idem-bond-p1'));
     expect((await w.getPokemon('p_1')).bond).toBe(100);
-    const p = JSON.parse(await w.run(() => w.pokemon.Transfer(w.ctx(ORG1), 'p_1', 'u_gary', T3, 'idem-t-bond')));
+    const p = JSON.parse(await w.run(() => w.pokemon.Transfer(w.ctxAs('u_ash'), 'p_1', 'u_gary', T3, 'idem-t-bond')));
     expect(p.ownerId).toBe('u_gary');
     expect(p.bond).toBe(BOND_RESET);
     expect((await w.getPokemon('p_1')).bond).toBe(BOND_RESET);
@@ -45,7 +45,7 @@ describe('Pokemon.bond（羁绊值：铸造 50 / 易主重置 30 / BondUp）', (
 
   test('Transfer：转给自己不算易主，bond 保持', async () => {
     await w.run(() => w.pokemon.BondUp(w.systemCtx(), JSON.stringify(['p_1']), '20', 'training', T3, 'idem-bond-self'));
-    const p = JSON.parse(await w.run(() => w.pokemon.Transfer(w.ctx(ORG1), 'p_1', 'u_ash', T3, 'idem-self-transfer')));
+    const p = JSON.parse(await w.run(() => w.pokemon.Transfer(w.ctxAs('u_ash'), 'p_1', 'u_ash', T3, 'idem-self-transfer')));
     expect(p.bond).toBe(70);
   });
 
@@ -53,9 +53,9 @@ describe('Pokemon.bond（羁绊值：铸造 50 / 易主重置 30 / BondUp）', (
     await w.run(() => w.pokemon.BondUp(w.systemCtx(), JSON.stringify(['p_1', 'p_2']), '50', 'training', T2, 'idem-bond-trade'));
     const offer = JSON.stringify({ pokemonIds: ['p_1'], itemIds: [], points: 0 });
     const request = JSON.stringify({ pokemonIds: ['p_2'], itemIds: [], points: 0 });
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG1), 't_1', 'u_ash', 'u_gary', offer, request, EXPIRES, T3, 'idem-trade-bond-1'));
-    await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG1), 't_1', 'u_ash', T4, 'idem-trade-bond-2'));
-    await w.run(() => w.trade.ConfirmTrade(w.ctx(ORG2), 't_1', 'u_gary', T4, 'idem-trade-bond-3'));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', 'u_gary', offer, request, EXPIRES, T3, 'idem-trade-bond-1'));
+    await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_ash'), 't_1', 'u_ash', T4, 'idem-trade-bond-2'));
+    await w.run(() => w.trade.ConfirmTrade(w.ctxAs('u_gary'), 't_1', 'u_gary', T4, 'idem-trade-bond-3'));
     expect((await w.getPokemon('p_1')).ownerId).toBe('u_gary');
     expect((await w.getPokemon('p_2')).ownerId).toBe('u_ash');
     expect((await w.getPokemon('p_1')).bond).toBe(BOND_RESET);
@@ -72,8 +72,8 @@ describe('Pokemon.bond（羁绊值：铸造 50 / 易主重置 30 / BondUp）', (
     );
     await w.run(() => w.battle.ActivateBattle(w.systemCtx(), 'b_1', T3, 'idem-bb-2'));
     await w.run(() => w.battle.SubmitResult(w.systemCtx(), 'b_1', 'u_ash', hash('battle-result'), 'sig', T3, 'idem-bb-3'));
-    await w.run(() => w.battle.ConfirmResult(w.ctx(ORG1), 'b_1', 'u_ash', T4, 'idem-bb-4'));
-    await w.run(() => w.battle.ConfirmResult(w.ctx(ORG2), 'b_1', 'u_gary', T4, 'idem-bb-5'));
+    await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_ash'), 'b_1', 'u_ash', T4, 'idem-bb-4'));
+    await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_gary'), 'b_1', 'u_gary', T4, 'idem-bb-5'));
     expect((await w.getBattle('b_1')).status).toBe('SETTLED');
     expect((await w.getPokemon('p_1')).ownerId).toBe('u_ash');
     expect((await w.getPokemon('p_1')).bond).toBe(100);
@@ -90,8 +90,8 @@ describe('Pokemon.bond（羁绊值：铸造 50 / 易主重置 30 / BondUp）', (
     );
     await w.run(() => w.battle.ActivateBattle(w.systemCtx(), 'b_draw', T3, 'idem-bd-2'));
     await w.run(() => w.battle.SubmitResult(w.systemCtx(), 'b_draw', 'DRAW', hash('draw'), 'sig', T3, 'idem-bd-3'));
-    await w.run(() => w.battle.ConfirmResult(w.ctx(ORG1), 'b_draw', 'u_ash', T4, 'idem-bd-4'));
-    await w.run(() => w.battle.ConfirmResult(w.ctx(ORG2), 'b_draw', 'u_gary', T4, 'idem-bd-5'));
+    await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_ash'), 'b_draw', 'u_ash', T4, 'idem-bd-4'));
+    await w.run(() => w.battle.ConfirmResult(w.ctxAs('u_gary'), 'b_draw', 'u_gary', T4, 'idem-bd-5'));
     expect((await w.getPokemon('p_1')).ownerId).toBe('u_ash');
     expect((await w.getPokemon('p_2')).ownerId).toBe('u_gary');
     expect((await w.getPokemon('p_1')).bond).toBe(BOND_DEFAULT);
@@ -114,7 +114,7 @@ describe('Pokemon.bond（羁绊值：铸造 50 / 易主重置 30 / BondUp）', (
     const call = (ids: string[], delta: string, key: string, reason = 'walk') =>
       w.run(() => w.pokemon.BondUp(w.systemCtx(), JSON.stringify(ids), delta, reason, T3, key));
     await expectCode(
-      w.run(() => w.pokemon.BondUp(w.ctx(ORG1), JSON.stringify(['p_1']), '10', 'walk', T3, 'idem-b1')),
+      w.run(() => w.pokemon.BondUp(w.ctxAs('u_ash'), JSON.stringify(['p_1']), '10', 'walk', T3, 'idem-b1')),
       'FORBIDDEN',
     );
     await expectCode(call(['p_1'], '0', 'idem-b2'), 'INVALID_PARAM');
@@ -124,7 +124,7 @@ describe('Pokemon.bond（羁绊值：铸造 50 / 易主重置 30 / BondUp）', (
     await expectCode(call(['p_1', 'p_1'], '10', 'idem-b6'), 'INVALID_PARAM');
     await expectCode(call(['p_x'], '10', 'idem-b7'), 'POKEMON_NOT_FOUND');
     // 放生后不可再提升（Released 保留记录但已无 owner）
-    await w.run(() => w.pokemon.Release(w.ctx(ORG2), 'p_2', T3, 'idem-rel-bond'));
+    await w.run(() => w.pokemon.Release(w.ctxAs('u_gary'), 'p_2', T3, 'idem-rel-bond'));
     await expectCode(call(['p_2'], '10', 'idem-b8'), 'BAD_STATE');
     // 失败调用不落库
     expect((await w.getPokemon('p_1')).bond).toBe(BOND_DEFAULT);
@@ -159,7 +159,7 @@ describe('Player.rating（排位分：默认 1000 / UpdateRating）', () => {
 
   test('UpdateRating：仅 system；0/99999 边界合法，越界/非整数/不存在拒绝，发 RatingChanged', async () => {
     await w.registerPlayer('u_ash', ORG1);
-    await expectCode(w.run(() => w.player.UpdateRating(w.ctx(ORG1), 'u_ash', '1200', 'battle', T2, 'idem-r1')), 'FORBIDDEN');
+    await expectCode(w.run(() => w.player.UpdateRating(w.ctxAs('u_ash'), 'u_ash', '1200', 'battle', T2, 'idem-r1')), 'FORBIDDEN');
     await expectCode(w.run(() => w.player.UpdateRating(w.adminCtx(), 'u_ash', '1200', 'battle', T2, 'idem-r1b')), 'FORBIDDEN');
     const low = JSON.parse(await w.run(() => w.player.UpdateRating(w.systemCtx(), 'u_ash', '0', 'placement', T2, 'idem-r2')));
     expect(low.rating).toBe(0);

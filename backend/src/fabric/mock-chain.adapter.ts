@@ -38,6 +38,8 @@ const BOND_MIN_DELTA = 1;
 const BOND_MAX_DELTA = 50;
 const BOND_UP_MAX_IDS = 100;
 const RATING_DEFAULT = 1000;
+/** 交易 TTL 上限（与链码 trade.contract.ts 一致：7 天）。 */
+const TRADE_TTL_MAX_MS = 7 * 24 * 3600 * 1000;
 const RATING_MAX = 99999;
 
 type StatKey = (typeof EV_KEYS)[number];
@@ -312,6 +314,10 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<PlayerState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
+      // 链上 RegisterPlayer 仅 admin/system（防抢注 username；后端注册走 ADMIN_IDENTITY）
+      if (as.role !== 'admin' && as.role !== 'system') {
+        throw new CodedError('FORBIDDEN', 'RegisterPlayer requires role admin or system');
+      }
       const key = `player:${args.playerId}`;
       const existing = this.get<PlayerState>(key);
       if (existing) return existing;
@@ -468,11 +474,15 @@ export class MockChainAdapter extends ChainAdapter {
   }
 
   async revealAndVerify(
-    _as: ChainIdentity,
+    as: ChainIdentity,
     args: { eventId: string; serverSeed: string } & TxMeta,
   ): Promise<RandomCommitState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
+      // 链上 RevealAndVerify 仅 system（serverSeed 只在服务端）
+      if (as.role !== 'system') {
+        throw new CodedError('NOT_AUTHORIZED', 'only system can reveal a random event');
+      }
       const commit = this.mustGet<RandomCommitState>(`rand:${args.eventId}`, 'EVENT_NOT_FOUND', `random event ${args.eventId}`);
       if (commit.status !== 'COMMITTED') {
         throw new CodedError('INVALID_RANDOM_STATE', `random event ${args.eventId} is ${commit.status}, expected COMMITTED`);
@@ -514,7 +524,7 @@ export class MockChainAdapter extends ChainAdapter {
 
   // ---------------------------------------------------------------- PokemonContract
   async mintFromCapture(
-    _as: ChainIdentity,
+    as: ChainIdentity,
     args: {
       id: string;
       playerId: string;
@@ -531,6 +541,10 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<PokemonState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
+      // 链上 MintFromCapture 仅 system（铸造属性由后端从已验证随机流派生）
+      if (as.role !== 'system') {
+        throw new CodedError('NOT_AUTHORIZED', 'only system can mint from a capture');
+      }
       if (this.state.has(`pokemon:${args.id}`)) {
         throw new CodedError('POKEMON_EXISTS', `pokemon ${args.id} already exists`);
       }
@@ -602,10 +616,11 @@ export class MockChainAdapter extends ChainAdapter {
   ): Promise<PokemonState> {
     const { nowISO, idemKey } = this.meta(args);
     return this.idempotent(idemKey, nowISO, () => {
-      const pokemon = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${args.id}`, 'POKEMON_NOT_FOUND', `pokemon ${args.id}`));
-      if (pokemon.ownerId !== as.userId && as.role !== 'system') {
-        throw new CodedError('NOT_OWNER', 'only the owner or system can apply growth');
+      // 链上 ApplyGrowth 仅 system：等级/EV/IV/物种/昵称都由后端校验成本后以 system 身份代签
+      if (as.role !== 'system') {
+        throw new CodedError('NOT_AUTHORIZED', 'only system can apply growth');
       }
+      const pokemon = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${args.id}`, 'POKEMON_NOT_FOUND', `pokemon ${args.id}`));
       if (pokemon.status !== 'IDLE') {
         throw new CodedError('ASSET_LOCKED', `pokemon ${args.id} is ${pokemon.status}`);
       }
@@ -876,6 +891,37 @@ export class MockChainAdapter extends ChainAdapter {
     return pokemon;
   }
 
+  /** offer/request 预检：归属 + IDLE，只读不写（链上 validateBundleAssets 的镜像）。 */
+  private assertPokemonTradable(id: string, expectedOwner: string): PokemonState {
+    const pokemon = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`, 'POKEMON_NOT_FOUND', `pokemon ${id}`));
+    if (pokemon.ownerId !== expectedOwner) {
+      throw new CodedError('NOT_OWNER', `pokemon ${id} is owned by ${pokemon.ownerId}, not ${expectedOwner}`);
+    }
+    if (pokemon.status !== 'IDLE') {
+      throw new CodedError('ASSET_LOCKED', `pokemon ${id} is ${pokemon.status}`);
+    }
+    return pokemon;
+  }
+
+  private assertItemTradable(id: string, expectedOwner: string): ItemState {
+    const item = this.mustGet<ItemState>(`item:${id}`, 'ITEM_NOT_FOUND', `item ${id}`);
+    if (item.ownerId !== expectedOwner) {
+      throw new CodedError('NOT_OWNER', `item ${id} is owned by ${item.ownerId}, not ${expectedOwner}`);
+    }
+    if (item.status !== 'IDLE') {
+      throw new CodedError('ASSET_LOCKED', `item ${id} is ${item.status}`);
+    }
+    return item;
+  }
+
+  /**
+   * request 资产是否可参与本交易执行：IDLE（本版语义，创建时只预检不锁）或
+   * 已被本交易锁定（旧交易，兼容执行/取消/过期）。
+   */
+  private tradableByTrade(asset: { status: string; lockRef: string }, tradeId: string): boolean {
+    return asset.status === 'IDLE' || (asset.status === 'LOCKED_TRADE' && asset.lockRef === tradeId);
+  }
+
   private lockItem(id: string, expectedOwner: string, lockRef: string, lockStatus: 'LOCKED_TRADE' | 'LOCKED_BATTLE'): ItemState {
     const item = this.mustGet<ItemState>(`item:${id}`, 'ITEM_NOT_FOUND', `item ${id}`);
     if (item.ownerId !== expectedOwner) {
@@ -928,24 +974,36 @@ export class MockChainAdapter extends ChainAdapter {
       if (this.state.has(`trade:${args.id}`)) {
         throw new CodedError('TRADE_EXISTS', `trade ${args.id} already exists`);
       }
-      this.mustGet<PlayerState>(`player:${args.fromId}`, 'PLAYER_NOT_FOUND', `player ${args.fromId}`);
-      this.mustGet<PlayerState>(`player:${args.toId}`, 'PLAYER_NOT_FOUND', `player ${args.toId}`);
-      for (const id of args.offer.pokemonIds) this.lockPokemon(id, args.fromId, args.id, 'LOCKED_TRADE');
-      for (const id of args.request.pokemonIds) this.lockPokemon(id, args.toId, args.id, 'LOCKED_TRADE');
-      for (const id of args.offer.itemIds) this.lockItem(id, args.fromId, args.id, 'LOCKED_TRADE');
-      for (const id of args.request.itemIds) this.lockItem(id, args.toId, args.id, 'LOCKED_TRADE');
-      for (const [who, pts] of [
-        ['from', args.offer.points],
-        ['to', args.request.points],
-      ] as const) {
-        this.assertSafeInt(pts, `${who}.points`);
-        if (pts < 0) throw new CodedError('INVALID_AMOUNT', 'points must be non-negative');
-        const holder = who === 'from' ? args.fromId : args.toId;
-        const player = this.mustGet<PlayerState>(`player:${holder}`);
-        if (player.points < pts) {
-          throw new CodedError('INSUFFICIENT_POINTS', `player ${holder} balance ${player.points} cannot cover ${pts}`);
-        }
+      if (nowISO >= args.expiresAt) {
+        throw new CodedError('TRADE_EXPIRED', 'expiresAt must be later than nowISO');
       }
+      const ttlMs = Date.parse(args.expiresAt) - Date.parse(nowISO);
+      if (!Number.isFinite(ttlMs)) {
+        throw new CodedError('INVALID_TIME', 'cannot parse nowISO/expiresAt');
+      }
+      if (ttlMs > TRADE_TTL_MAX_MS) {
+        throw new CodedError('INVALID_PARAM', 'expiresAt must be within 7 days of nowISO');
+      }
+      const from = this.mustGet<PlayerState>(`player:${args.fromId}`, 'PLAYER_NOT_FOUND', `player ${args.fromId}`);
+      const to = this.mustGet<PlayerState>(`player:${args.toId}`, 'PLAYER_NOT_FOUND', `player ${args.toId}`);
+      this.assertSafeInt(args.offer.points, 'from.points');
+      this.assertSafeInt(args.request.points, 'to.points');
+      if (args.offer.points < 0 || args.request.points < 0) {
+        throw new CodedError('INVALID_AMOUNT', 'points must be non-negative');
+      }
+      if (from.points < args.offer.points) {
+        throw new CodedError('INSUFFICIENT_POINTS', `player ${args.fromId} balance ${from.points} cannot cover ${args.offer.points}`);
+      }
+      if (to.points < args.request.points) {
+        throw new CodedError('INSUFFICIENT_POINTS', `player ${args.toId} balance ${to.points} cannot cover ${args.request.points}`);
+      }
+      // 先全量预检（失败不留半锁），再只锁发起方 offer
+      for (const id of args.request.pokemonIds) this.assertPokemonTradable(id, args.toId);
+      for (const id of args.request.itemIds) this.assertItemTradable(id, args.toId);
+      for (const id of args.offer.pokemonIds) this.assertPokemonTradable(id, args.fromId);
+      for (const id of args.offer.itemIds) this.assertItemTradable(id, args.fromId);
+      for (const id of args.offer.pokemonIds) this.lockPokemon(id, args.fromId, args.id, 'LOCKED_TRADE');
+      for (const id of args.offer.itemIds) this.lockItem(id, args.fromId, args.id, 'LOCKED_TRADE');
       const trade: TradeState = {
         docType: 'trade',
         id: args.id,
@@ -1030,6 +1088,13 @@ export class MockChainAdapter extends ChainAdapter {
       }
       for (const id of trade.request.pokemonIds) {
         const p = withPokemonDefaults(this.mustGet<PokemonState>(`pokemon:${id}`));
+        // request 创建时不再锁定：执行前被转走/放生 → NOT_OWNER，被别的单锁住 → ASSET_LOCKED
+        if (p.ownerId !== trade.toId) {
+          throw new CodedError('NOT_OWNER', `pokemon ${id} is owned by ${p.ownerId}, not ${trade.toId}`);
+        }
+        if (!this.tradableByTrade(p, trade.id)) {
+          throw new CodedError('ASSET_LOCKED', `pokemon ${id} is ${p.status}`);
+        }
         if (p.ownerId !== trade.fromId) p.bond = BOND_RESET_ON_TRANSFER;
         p.ownerId = trade.fromId;
         p.status = 'IDLE';
@@ -1045,6 +1110,12 @@ export class MockChainAdapter extends ChainAdapter {
       }
       for (const id of trade.request.itemIds) {
         const i = this.mustGet<ItemState>(`item:${id}`);
+        if (i.ownerId !== trade.toId) {
+          throw new CodedError('NOT_OWNER', `item ${id} is owned by ${i.ownerId}, not ${trade.toId}`);
+        }
+        if (!this.tradableByTrade(i, trade.id)) {
+          throw new CodedError('ASSET_LOCKED', `item ${id} is ${i.status}`);
+        }
         i.ownerId = trade.fromId;
         i.status = 'IDLE';
         i.lockRef = '';

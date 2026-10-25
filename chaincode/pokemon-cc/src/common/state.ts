@@ -1,6 +1,6 @@
 import { Context } from 'fabric-contract-api';
 import { checkedAmount, fail } from './assert';
-import { getMspId } from './cid';
+import { getEnrollmentId } from './cid';
 import { keyOf } from './keys';
 import { Battle, BOND_DEFAULT, Item, Player, Pokemon, RandomCommit, RATING_DEFAULT, Trade, zeroEvs } from './model';
 
@@ -67,11 +67,14 @@ export async function loadRand(ctx: Context, id: string): Promise<RandomCommit> 
 }
 export const saveRand = (ctx: Context, r: RandomCommit) => save(ctx, 'rand', r.eventId, r);
 
-/** 调用者必须是该玩家本人（mspId 匹配，docs/chaincode-api.md §2.1）。 */
+/**
+ * 调用者必须是该玩家本人：证书 `hf.EnrollmentID` === `player.playerId`
+ * （docs/chaincode-api.md §2.1）。缺失该属性的证书一律拒绝，不回退 mspId。
+ */
 export function assertCallerIsPlayer(ctx: Context, player: Player): void {
-  const caller = getMspId(ctx);
-  if (caller !== player.mspId) {
-    fail('NOT_OWNER', `caller msp ${caller} does not match player ${player.playerId} (msp ${player.mspId})`);
+  const caller = getEnrollmentId(ctx);
+  if (!caller || caller !== player.playerId) {
+    fail('NOT_OWNER', `caller ${caller || '<none>'} does not match player ${player.playerId}`);
   }
 }
 

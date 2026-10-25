@@ -1,3 +1,4 @@
+import { HttpException } from '@nestjs/common';
 import { BattleManagerService } from '../src/battles/battle-manager.service';
 import { BattlesService } from '../src/battles/battles.service';
 import { SigningService } from '../src/battles/signing.service';
@@ -189,6 +190,18 @@ describe('排位匹配（docs/backend-api.md §11）', () => {
     expect(await stack.redis.client.zcard('ranked:queue')).toBe(0);
     const statusA = await stack.ranked.status(userIdentity('ash'));
     expect(statusA).toMatchObject({ state: 'MATCHED', battleId });
+  });
+
+  it('入队时队伍重复（同一只占多槽）→ 400 DUPLICATE_TEAM，不写队列', async () => {
+    const stack = await makeStack();
+    const { pa } = await seedTeams(stack.chain, stack.contract);
+    const err = await stack.ranked
+      .enqueue(userIdentity('ash'), [pa.id, pa.id])
+      .catch((e: HttpException) => e);
+    expect(err.message).toMatch(/^DUPLICATE_TEAM:/);
+    expect(err.getStatus()).toBe(400);
+    expect(await stack.redis.client.zcard('ranked:queue')).toBe(0);
+    expect((await stack.ranked.status(userIdentity('ash'))).state).toBe('IDLE');
   });
 
   it('分差超过 ±200 不配对（各自排队中）', async () => {

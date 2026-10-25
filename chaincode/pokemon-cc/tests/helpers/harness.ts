@@ -141,16 +141,21 @@ export class MockStub {
   }
 }
 
-export function makeCtx(stub: MockStub, mspId: string, role?: string): Context {
+/**
+ * 构造链码 Context。`enrollmentId` 写入 CID attr `hf.EnrollmentID`（CA 会自动写入该属性）；
+ * 不传则证书不含该属性——用于验证"缺属性即拒绝"。
+ */
+export function makeCtx(stub: MockStub, mspId: string, role?: string, enrollmentId?: string): Context {
   const ctx = new Context();
   ctx.stub = stub as unknown as Context['stub'];
   const attrs: Record<string, string> = role ? { role } : {};
+  if (enrollmentId !== undefined) attrs['hf.EnrollmentID'] = enrollmentId;
   ctx.clientIdentity = {
     getMSPID: () => mspId,
     getAttributeValue: (name: string) => (name in attrs ? attrs[name] : null),
     getAttributeNames: () => Object.keys(attrs),
     assertAttributeValue: (name: string, value: string) => attrs[name] === value,
-    getID: () => `x509::mock::${mspId}`,
+    getID: () => `x509::mock::${mspId}::${enrollmentId ?? ''}`,
     getIDBytes: () => Buffer.from(mspId),
   } as unknown as Context['clientIdentity'];
   return ctx;
@@ -178,28 +183,37 @@ export class World {
   readonly trade = new TradeContract();
   readonly battle = new BattleContract();
 
-  ctx(mspId: string, role?: string): Context {
-    return makeCtx(this.stub, mspId, role);
+  /** 低层身份：显式 mspId/role/enrollmentId（enrollmentId 省略 = 证书无该属性）。 */
+  ctx(mspId: string, role?: string, enrollmentId?: string): Context {
+    return makeCtx(this.stub, mspId, role, enrollmentId);
+  }
+
+  /** 玩家本人证书（player role，hf.EnrollmentID=playerId）。 */
+  ctxAs(playerId: string, mspId = ORG1): Context {
+    return makeCtx(this.stub, mspId, 'player', playerId);
   }
 
   adminCtx(): Context {
-    return this.ctx(ORG1, 'admin');
+    return this.ctx(ORG1, 'admin', 'admin');
   }
 
   systemCtx(): Context {
-    return this.ctx(ORG1, 'system');
+    return this.ctx(ORG1, 'system', 'system');
   }
 
   arbitratorCtx(): Context {
-    return this.ctx(ORG2, 'arbitrator');
+    return this.ctx(ORG2, 'arbitrator', 'arbiter');
   }
 
   async run<T>(fn: () => Promise<T>): Promise<T> {
     return invoke(this.stub, fn);
   }
 
+  /** 注册玩家：链上 RegisterPlayer 仅 admin/system（后端注册用 ADMIN_IDENTITY），故以 admin 身份代发。 */
   async registerPlayer(playerId: string, mspId: string, now = T1): Promise<void> {
-    await this.run(() => this.player.RegisterPlayer(this.ctx(mspId), playerId, `nick-${playerId}`, now, `idem-reg-${playerId}`));
+    await this.run(() =>
+      this.player.RegisterPlayer(this.ctx(mspId, 'admin', 'admin'), playerId, `nick-${playerId}`, now, `idem-reg-${playerId}`),
+    );
   }
 
   async mintItem(id: string, ownerId: string, quantity: number, now = T1, typeId = 'poke-ball'): Promise<void> {

@@ -19,7 +19,7 @@ describe('ItemContract', () => {
 
   test('MintItem：普通玩家被拒 FORBIDDEN；quantity 必须 ≥1；id 重复抛 ITEM_EXISTS', async () => {
     await expectCode(
-      w.run(() => w.item.MintItem(w.ctx(ORG1), 'i_1', 'u_ash', 'poke-ball', '5', 'u', 'a'.repeat(64), T1, 'idem-x1')),
+      w.run(() => w.item.MintItem(w.ctxAs('u_ash'), 'i_1', 'u_ash', 'poke-ball', '5', 'u', 'a'.repeat(64), T1, 'idem-x1')),
       'FORBIDDEN',
     );
     await expectCode(
@@ -73,10 +73,10 @@ describe('ItemContract', () => {
     await expectCode(w.getItem('i_new'), 'ITEM_NOT_FOUND');
     // LOCKED 堆叠不参与合并：i_legacy 被管理员转走后由 gary 锁定交易，不会并入 ash 的堆叠
     await w.mintItem('i_gary', 'u_gary', 1);
-    await w.run(() => w.item.TransferItem(w.ctx(ORG1), 'i_legacy', 'u_gary', T2, 'idem-ti-legacy'));
+    await w.run(() => w.item.TransferItem(w.ctxAs('u_ash'), 'i_legacy', 'u_gary', T2, 'idem-ti-legacy'));
     const offer = JSON.stringify({ pokemonIds: [], itemIds: ['i_legacy'], points: 0 });
     const empty = JSON.stringify({ pokemonIds: [], itemIds: [], points: 0 });
-    await w.run(() => w.trade.CreateTrade(w.ctx(ORG2), 't_lock', 'u_gary', 'u_ash', offer, empty, '2026-01-02T00:00:00.000Z', T2, 'idem-t-lock'));
+    await w.run(() => w.trade.CreateTrade(w.ctxAs('u_gary'), 't_lock', 'u_gary', 'u_ash', offer, empty, '2026-01-02T00:00:00.000Z', T2, 'idem-t-lock'));
     expect((await w.getItem('i_legacy')).status).toBe('LOCKED_TRADE');
     expect((await w.getItem('i_gary')).quantity).toBe(1);
     await w.mintItem('i_gary2', 'u_gary', 3);
@@ -90,9 +90,9 @@ describe('ItemContract', () => {
     await w.mintItem('i_ash', 'u_ash', 5);
     await w.mintItem('i_gary', 'u_gary', 2);
     // TransferItem 保持整堆语义、不触发合并 → gary 转入后 ash 名下出现两个同 type 堆叠
-    await w.run(() => w.item.TransferItem(w.ctx(ORG2), 'i_gary', 'u_ash', T2, 'idem-ti-m1'));
+    await w.run(() => w.item.TransferItem(w.ctxAs('u_gary'), 'i_gary', 'u_ash', T2, 'idem-ti-m1'));
     expect((await w.getItem('i_ash')).quantity).toBe(5);
-    const merged = JSON.parse(await w.run(() => w.item.MergeStacks(w.ctx(ORG1), 'u_ash', 'poke-ball', T2, 'idem-ms1')));
+    const merged = JSON.parse(await w.run(() => w.item.MergeStacks(w.ctxAs('u_ash'), 'u_ash', 'poke-ball', T2, 'idem-ms1')));
     expect(merged).toMatchObject({ id: 'i_ash', quantity: 7 }); // i_ash 的 createdAt 更早
     await expectCode(w.getItem('i_gary'), 'ITEM_NOT_FOUND');
     // system 亦可调用
@@ -100,7 +100,7 @@ describe('ItemContract', () => {
     await w.run(() => w.item.MergeStacks(w.systemCtx(), 'u_ash', 'poke-ball', T2, 'idem-ms2'));
     expect((await w.getItem('i_ash')).quantity).toBe(8);
     // 非 owner 抛 NOT_OWNER（gary 试图合并 ash 的堆叠）
-    await expectCode(w.run(() => w.item.MergeStacks(w.ctx(ORG2), 'u_ash', 'poke-ball', T2, 'idem-ms3')), 'NOT_OWNER');
+    await expectCode(w.run(() => w.item.MergeStacks(w.ctxAs('u_gary'), 'u_ash', 'poke-ball', T2, 'idem-ms3')), 'NOT_OWNER');
     // 无 IDLE 堆叠 → null
     const none = await w.run(() => w.item.MergeStacks(w.systemCtx(), 'u_gary', 'poke-ball', T2, 'idem-ms4'));
     expect(none).toBe('null');
@@ -108,24 +108,24 @@ describe('ItemContract', () => {
 
   test('TransferItem：owner 整堆转移；非 owner 抛 NOT_OWNER', async () => {
     await w.mintItem('i_1', 'u_ash', 5);
-    const i = JSON.parse(await w.run(() => w.item.TransferItem(w.ctx(ORG1), 'i_1', 'u_gary', T2, 'idem-ti1')));
+    const i = JSON.parse(await w.run(() => w.item.TransferItem(w.ctxAs('u_ash'), 'i_1', 'u_gary', T2, 'idem-ti1')));
     expect(i).toMatchObject({ ownerId: 'u_gary', quantity: 5 });
-    await expectCode(w.run(() => w.item.TransferItem(w.ctx(ORG1), 'i_1', 'u_ash', T2, 'idem-ti2')), 'NOT_OWNER');
+    await expectCode(w.run(() => w.item.TransferItem(w.ctxAs('u_ash'), 'i_1', 'u_ash', T2, 'idem-ti2')), 'NOT_OWNER');
   });
 
   test('ConsumeItem：owner/system 扣减；到 0 保留记录 quantity=0；超量抛 INSUFFICIENT_QUANTITY', async () => {
     await w.mintItem('i_1', 'u_ash', 5);
-    let i = JSON.parse(await w.run(() => w.item.ConsumeItem(w.ctx(ORG1), 'i_1', '2', 'use', T2, 'idem-ci1')));
+    let i = JSON.parse(await w.run(() => w.item.ConsumeItem(w.ctxAs('u_ash'), 'i_1', '2', 'use', T2, 'idem-ci1')));
     expect(i.quantity).toBe(3);
     i = JSON.parse(await w.run(() => w.item.ConsumeItem(w.systemCtx(), 'i_1', '3', 'system-use', T2, 'idem-ci2')));
     expect(i.quantity).toBe(0);
     expect((await w.getItem('i_1')).quantity).toBe(0);
-    await expectCode(w.run(() => w.item.ConsumeItem(w.ctx(ORG1), 'i_1', '1', 'use', T2, 'idem-ci3')), 'INSUFFICIENT_QUANTITY');
+    await expectCode(w.run(() => w.item.ConsumeItem(w.ctxAs('u_ash'), 'i_1', '1', 'use', T2, 'idem-ci3')), 'INSUFFICIENT_QUANTITY');
   });
 
   test('ConsumeItem：非 owner 且非 system 抛 NOT_OWNER', async () => {
     await w.mintItem('i_1', 'u_ash', 5);
-    await expectCode(w.run(() => w.item.ConsumeItem(w.ctx(ORG2), 'i_1', '1', 'steal', T2, 'idem-ci4')), 'NOT_OWNER');
+    await expectCode(w.run(() => w.item.ConsumeItem(w.ctxAs('u_gary'), 'i_1', '1', 'steal', T2, 'idem-ci4')), 'NOT_OWNER');
   });
 
   test('QueryByOwner 富查询', async () => {

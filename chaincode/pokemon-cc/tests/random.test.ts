@@ -83,6 +83,18 @@ describe('RandomContract（承诺-揭示）', () => {
     expect(w.eventNames()).toContain('RandomRevealed');
   });
 
+  test('RevealAndVerify：仅 system；玩家证书不能揭示（FORBIDDEN）且状态保持 COMMITTED', async () => {
+    await w.run(() => w.random.Commit(w.systemCtx(), 'ev_1', 'capture', 'u_ash', sha256hex(SERVER_SEED), CLIENT_SEED, T1, 'idem-c8'));
+    await expectCode(
+      w.run(() => w.random.RevealAndVerify(w.ctxAs('u_ash'), 'ev_1', SERVER_SEED, T2, 'idem-r-forge')),
+      'FORBIDDEN',
+    );
+    expect((await w.getRand('ev_1')).status).toBe('COMMITTED');
+    // system 仍可揭示
+    await w.run(() => w.random.RevealAndVerify(w.systemCtx(), 'ev_1', SERVER_SEED, T2, 'idem-r-ok'));
+    expect((await w.getRand('ev_1')).status).toBe('REVEALED');
+  });
+
   test('RevealAndVerify：非 COMMITTED 状态抛 BAD_STATE', async () => {
     await w.commitReveal('ev_1', 'capture', 'u_ash');
     await expectCode(w.run(() => w.random.RevealAndVerify(w.systemCtx(), 'ev_1', SERVER_SEED, T2, 'idem-r3')), 'BAD_STATE');

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { HttpException, ValidationPipe } from '@nestjs/common';
-import { BattlesService, RoomKickedEvent, TEAM_SIZE_MAX, assertTeamSize } from '../src/battles/battles.service';
+import { BattlesService, RoomKickedEvent, TEAM_SIZE_MAX, assertTeamSize, assertTeamUnique } from '../src/battles/battles.service';
 import { PlayerBlockService } from '../src/users/player-block.service';
 import { PlayerBlock } from '../src/users/entities/player-block.entity';
 import { WagerTemplateService } from '../src/battles/wager-template.service';
@@ -472,6 +472,41 @@ describe('出战队伍数量限制 1-6（docs/backend-api.md §5）', () => {
 
     const joined = await svc.joinRoom(userIdentity('gary'), room.id, JOIN_DTO({ teamPokemonIds: garyTeam }));
     expect(joined.teamB).toHaveLength(6);
+  });
+});
+
+describe('出战队伍去重（H2：同一只宝可梦不能占多个槽位）', () => {
+  it('assertTeamUnique 边界：重复 id 400 DUPLICATE_TEAM，1-6 只不同 id 放行', () => {
+    expect(() => assertTeamUnique(['p1', 'p1'])).toThrow(/^DUPLICATE_TEAM:/);
+    expect(() => assertTeamUnique(['p1', 'p2', 'p3'])).not.toThrow();
+    expect(() => assertTeamUnique([])).not.toThrow();
+  });
+
+  it('创建 / 加入房间带重复宝可梦 → 400 DUPLICATE_TEAM（6 条命攻击被拒，房间未创建）', async () => {
+    const { chain, contract, svc } = await makeStack();
+    await registerPlayers(contract, 'ash', 'gary');
+    await seedPokemon(chain, 'ash', { id: 'p_ash' });
+    await seedPokemon(chain, 'gary', { id: 'p_gary' });
+
+    // 6 个相同 id：规模合法，但去重校验先于资产/归属校验
+    const before = (await svc.listRooms()).length;
+    const err = await svc
+      .createRoom(userIdentity('ash'), ROOM_DTO({ teamPokemonIds: Array.from({ length: 6 }, () => 'p_ash') }))
+      .catch((e: HttpException) => e);
+    expect(err.message).toMatch(/^DUPLICATE_TEAM:/);
+    expect(err.getStatus()).toBe(400);
+    expect(await svc.listRooms()).toHaveLength(before);
+
+    // 正常队伍可建房；加入方重复同样被拒且不写 playerB
+    const room = await svc.createRoom(userIdentity('ash'), ROOM_DTO({ teamPokemonIds: ['p_ash'] }));
+    const joinErr = await svc
+      .joinRoom(userIdentity('gary'), room.id, JOIN_DTO({ teamPokemonIds: ['p_gary', 'p_gary'] }))
+      .catch((e: HttpException) => e);
+    expect(joinErr.message).toMatch(/^DUPLICATE_TEAM:/);
+    expect(joinErr.getStatus()).toBe(400);
+    expect((await svc.getRoom(room.id)).playerB).toBeNull();
+    const joined = await svc.joinRoom(userIdentity('gary'), room.id, JOIN_DTO({ teamPokemonIds: ['p_gary'] }));
+    expect(joined.teamB).toEqual(['p_gary']);
   });
 });
 

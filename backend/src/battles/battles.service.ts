@@ -100,6 +100,21 @@ export function assertTeamSize(pokemonIds: string[]): void {
   }
 }
 
+/**
+ * 出战队伍去重（H2 / docs/review-2026-10-25.md）：同一只宝可梦不能占多个槽位
+ * （否则「最强一只 ×6」等于 6 条命，押注房可稳赢）。房间与排位共用。
+ */
+export function assertTeamUnique(pokemonIds: string[]): void {
+  if (!Array.isArray(pokemonIds)) return;
+  if (new Set(pokemonIds).size !== pokemonIds.length) {
+    throw new AppException(
+      'DUPLICATE_TEAM',
+      'teamPokemonIds must not contain duplicates',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
+
 const ROOM_TTL_SEC = 3600;
 /** chain battle states that still allow (re)joining the live battle screen */
 const LIVE_BATTLE_STATES = new Set(['CREATED', 'ACTIVE', 'RESULT_SUBMITTED']);
@@ -682,6 +697,7 @@ export class BattlesService implements OnModuleInit {
 
   private async assertTeamOwnership(playerId: string, pokemonIds: string[]): Promise<void> {
     assertTeamSize(pokemonIds);
+    assertTeamUnique(pokemonIds);
     for (const id of pokemonIds) {
       const p = await this.contract.getPokemon(id).catch(() => null);
       if (!p || p.ownerId !== playerId) {

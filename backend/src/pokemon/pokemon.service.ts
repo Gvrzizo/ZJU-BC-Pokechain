@@ -6,7 +6,6 @@ import { AppException } from '../common/utils/errors';
 import { ChainEventsService } from '../fabric/chain-events.service';
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, GrowthPatch, PokemonState, SYSTEM_IDENTITY } from '../fabric/chain.types';
-import { getMove } from '../game-data/moves.data';
 import { zonesForSpecies } from '../game-data/encounter.data';
 import { EVOLUTIONS, getSpecies, SPECIES } from '../game-data/species.data';
 import { getItemType } from '../game-data/items.data';
@@ -191,6 +190,21 @@ export class PokemonService implements OnModuleInit {
 
   async getOne(id: string): Promise<PokemonView> {
     const base = withComputedStats(await this.contract.getPokemon(id));
+    base.renameCount = await this.renameCountOf(id);
+    return this.withHp(base);
+  }
+
+  /**
+   * 详情（H1 / docs/review-2026-10-25.md）：**仅本人可读**。IV/EV/性格/羁绊属于私密养成数据，
+   * 非本人一律按「不存在」处理（404），不返回链上完整对象、也不泄露他人资产是否存在。
+   */
+  async getOneForUser(id: string, requester: string): Promise<PokemonView> {
+    // 不存在与「不是本人」返回同一个 404：调用方无法据此枚举他人的资产 id
+    const state = await this.contract.getPokemon(id).catch(() => null);
+    if (!state || state.ownerId !== requester) {
+      throw new AppException('NOT_FOUND', `pokemon ${id} does not exist`, HttpStatus.NOT_FOUND);
+    }
+    const base = withComputedStats(state);
     base.renameCount = await this.renameCountOf(id);
     return this.withHp(base);
   }
@@ -512,24 +526,5 @@ export class PokemonService implements OnModuleInit {
     await this.redis.del(`cache:pokemon:${as.userId}`).catch(() => undefined);
     this.logger.log(`center heal for ${as.userId}: ${healed.length} pokemon, -${CENTER_HEAL_COST}P`);
     return { cost: CENTER_HEAL_COST, charged: true, points: player.points, healed };
-  }
-
-  async learnMove(as: ChainIdentity, id: string, moveId: string, forgetMoveId?: string) {
-    const pokemon = await this.mustOwn(as, id);
-    if (!getMove(moveId)) {
-      throw new AppException('UNKNOWN_MOVE', `move ${moveId} does not exist`, HttpStatus.BAD_REQUEST);
-    }
-    if (pokemon.moves.includes(moveId)) {
-      throw new AppException('MOVE_KNOWN', `already knows ${moveId}`, HttpStatus.CONFLICT);
-    }
-    let moves = [...pokemon.moves];
-    if (moves.length >= 4) {
-      if (!forgetMoveId || !moves.includes(forgetMoveId)) {
-        throw new AppException('FORGET_REQUIRED', 'knows 4 moves; provide a valid forgetMoveId', HttpStatus.BAD_REQUEST);
-      }
-      moves = moves.filter((m) => m !== forgetMoveId);
-    }
-    moves.push(moveId);
-    return this.withHp(withComputedStats(await this.contract.applyGrowth(as, id, { moves })));
   }
 }

@@ -8,7 +8,7 @@ import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, identityForUser, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
-import { BattleRoom, BattlesService, assertTeamSize } from '../battles/battles.service';
+import { BattleRoom, BattlesService, assertTeamSize, assertTeamUnique } from '../battles/battles.service';
 import { OpponentPokemonDetail, enrichTeam, toOpponentTeam } from '../battles/wager-detail';
 import { PokemonHpService } from '../pokemon/pokemon-hp.service';
 import { RankedBattleLauncher } from './battle-launcher';
@@ -930,8 +930,9 @@ export class RankedService {
    * （伤势持久化，docs/backend-api.md §2）。
    */
   async assertTeam(playerId: string, pokemonIds: string[]): Promise<void> {
-    // 队伍规模 1-6（与房间创建/加入同一口径）：违规 400 INVALID_TEAM_SIZE
+    // 队伍规模 1-6 + 不得重复（与房间创建/加入同一口径）：400 INVALID_TEAM_SIZE / DUPLICATE_TEAM
     assertTeamSize(pokemonIds);
+    assertTeamUnique(pokemonIds);
     for (const id of [...new Set(pokemonIds)]) {
       const pokemon = await this.contract.getPokemon(id).catch(() => null);
       if (!pokemon || pokemon.ownerId !== playerId) {

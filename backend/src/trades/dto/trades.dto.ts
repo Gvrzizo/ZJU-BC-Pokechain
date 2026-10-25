@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsInt, IsNotEmpty, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
 
 export class AssetOfferDto {
   @IsOptional()
@@ -31,8 +31,10 @@ export class CreateTradeDto {
   @Type(() => AssetOfferDto)
   request: AssetOfferDto;
 
+  /** 10 秒 - 7 天（链码 CreateTrade 同样限制 `expiresAt - nowISO <= 7d`）。 */
   @IsInt()
   @Min(10)
+  @Max(7 * 24 * 3600)
   ttlSeconds: number;
 }
 

@@ -123,9 +123,10 @@ X.509 证书 + 私钥 ──► 证书属性：role=player|admin|system|arbitrat
    ▼
 链码 CID（ClientIdentity）：getMSPID() 取组织，getAttributeValue('role') 取角色
    ▼
-访问控制：requireRole / requireArbitrator(Org2MSP+arbitrator) / assertCallerIsPlayer
+访问控制：requireRole / requireArbitrator(Org2MSP+arbitrator) / assertCallerIsPlayer(hf.EnrollmentID == playerId)
 ```
 
+- **用户身份**：CA 自动写入的 `hf.EnrollmentID`（= 注册用户名 = 链上 `playerId`）是「本人」的唯一依据；`mspId` 只表示组织归属。`RegisterPlayer` 仅 `admin|system` 可调用（防抢注 username）。
 - **组织归属（MSP）**：普通玩家与运营身份在 Org1MSP；仲裁身份在 Org2MSP。链码 `requireArbitrator` 同时校验 `mspId=Org2MSP` 与 `role=arbitrator`（`chaincode/pokemon-cc/src/common/cid.ts`），仲裁权因此不依赖后端自律，而由 Fabric 成员服务背书。
 - **角色**：`player`（默认，注册即得）、`admin`（Org1 运营，可 GrantRole/MintItem/AddPoints）、`system`（后端服务身份，Org1，专用于 RevealAndVerify/CreateBattle/SubmitResult/SettleBattle 等编排交易）、`arbitrator`（Org2）。角色作为 CA 属性写进证书（`registerAndEnroll` 时 `attrs: [{name:'role', ecert:true}]`），链码改不了、后端也改不了，换角色必须重签证书或链上 GrantRole（仅 admin，且写链上 Player.role 供业务读取）。
 
