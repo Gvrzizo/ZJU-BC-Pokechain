@@ -457,14 +457,14 @@ p = min(1, a / 255)                                                   // 大师�
 |---|---|---|
 | GET | `/assets/manifest` | 前端资源清单 `[{uri, sha256, size}]`（MinIO 签名 URL，前端下载后校验哈希） |
 | POST | `/assets/register` | admin：登记资源 `metadataHash+URI` |
-| GET | `/fairness/:eventId` | 返回 RandomCommit + 派生算法说明，供任何人复核。**H9：`COMMITTED` 阶段不返回 `serverSeed`/`resultHash`**（响应带 `revealed:false` 与说明），结算后（`REVEALED`/`CONSUMED`）才返回完整数据；战斗事件在结算时揭示 |
+| GET | `/fairness/:eventId` | 返回 RandomCommit + 派生算法说明 + `serverPublicKey`/`serverKeyId`（公钥指纹），供任何人复核。**H9：`COMMITTED` 阶段不返回 `serverSeed`/`resultHash`**（响应带 `revealed:false` 与说明），结算后（`REVEALED`/`CONSUMED`）才返回完整数据；战斗事件在结算时揭示。**H19**：`SERVER_SIGNING_KEY` 固定时 `serverKeyId` 跨重启不变，`battle_logs.serverKeyId` 记录当次签名密钥 |
 | GET | `/leaderboard` | 积分榜（Redis ZSET 缓存；监听链上 `PointsChanged`/`PlayerRegistered`/`BattleSettled`，事件里的 `playerId`/`playerA`/`playerB`/`winnerId`/`fromId`/`toId` 都会触发重读对应玩家余额刷新） |
 
 ## 7. PostgreSQL 表（链下）
 
 `users(id, username, password_hash, nickname, avatar_uri, role, fabric_cert_enc, fabric_key_enc, created_at)`
 `friendships / blacklists`（P1）
-`battle_logs(id, battle_id, turns_json, result_hash, server_sig, created_at)`
+`battle_logs(id, battle_id, turns_json, result_hash, server_sig, server_key_id, created_at)`（`server_key_id` = 签名公钥指纹，H19；空串=旧记录）
 `audit_logs(id, actor, action, target, detail, created_at)`（admin/arbitrator 操作留痕）
 `chat_messages`（P1）
 

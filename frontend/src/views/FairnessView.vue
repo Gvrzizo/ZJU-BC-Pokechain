@@ -116,6 +116,7 @@ async function verify() {
         <p>playerId: <span class="mono">{{ record.event.playerId }}</span></p>
         <p class="mt-8">commitHash: <span class="mono">{{ record.event.commitHash }}</span></p>
         <p>serverSeed: <span class="mono">{{ record.event.serverSeed || '（结算后揭示）' }}</span></p>
+        <p v-if="record.serverKeyId" class="mt-8">签名公钥指纹: <span class="mono">{{ record.serverKeyId }}</span></p>
         <p>clientSeed: <span class="mono">{{ record.event.clientSeed }}</span></p>
         <p>resultHash: <span class="mono">{{ record.event.resultHash || '—' }}</span></p>
         <p v-if="record.event.meta">meta: <span class="mono">{{ record.event.meta }}</span></p>

@@ -119,6 +119,9 @@ services:
       FABRIC_CA_NAME: ${FABRIC_CA_NAME:-ca.org1.pokechain.com}
       FABRIC_CA_TLS_CERT_PATH: /network/organizations/fabric-ca/org1/tls-cert.pem
       CERT_ENC_KEY: ${CERT_ENC_KEY:-}
+      # 战斗结果签名密钥（secp256k1 PKCS8 PEM）。空值=启动时生成临时钥，重启后旧 serverSig 不可验证；
+      # 生产/真链必须固定设置（H19），容器内换行用 \n 转义或改用 env_file。
+      SERVER_SIGNING_KEY: ${SERVER_SIGNING_KEY:-}
       # ---- minio（真实对象存储；bucket 由 minio-init 建好）----
       MINIO_MOCK: "false"
       MINIO_ENDPOINT: minio

@@ -564,6 +564,8 @@ export interface FairnessResponse {
   note?: string;
   derivation: Record<string, string>;
   serverPublicKey: string;
+  /** 签名公钥指纹（H19；换钥后用于识别旧 serverSig 对应哪把公钥） */
+  serverKeyId?: string;
 }
 
 export interface ApiError {

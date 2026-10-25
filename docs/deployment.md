@@ -189,6 +189,10 @@ FABRIC_SYSTEM_USER=system
 FABRIC_SYSTEM_MSP_ID=Org1MSP
 FABRIC_CERT_STORE_DIR=.fabric-certs
 CERT_ENC_KEY=<openssl rand -hex 32 的输出>
+# 战斗结果签名密钥（secp256k1 PKCS8 PEM）。生产/真链必须固定设置：
+#   openssl ecparam -name secp256k1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt
+# 空值仅本地演示：重启后临时钥变化，旧 serverSig 不可验证（/fairness 的 serverKeyId 会变，H19）。
+SERVER_SIGNING_KEY=<PKCS8 PEM>
 MINIO_MOCK=true        # 或接真实 MinIO
 ```
 

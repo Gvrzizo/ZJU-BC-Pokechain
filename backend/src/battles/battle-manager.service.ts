@@ -323,6 +323,7 @@ export class BattleManagerService {
           turnsJson: battle.engine.log as unknown as unknown[],
           resultHash,
           serverSig,
+          serverKeyId: this.signing.keyId,
         }),
       );
     } catch (err) {

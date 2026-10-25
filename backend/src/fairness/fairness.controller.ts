@@ -40,6 +40,7 @@ export class FairnessController {
         battleLayout: BATTLE_DERIVATION_DOC,
       },
       serverPublicKey: this.signing.publicKeyPem,
+      serverKeyId: this.signing.keyId,
     };
   }
 }

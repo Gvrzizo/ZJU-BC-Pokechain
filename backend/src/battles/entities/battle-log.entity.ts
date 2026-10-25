@@ -25,6 +25,10 @@ export class BattleLog {
   @Column({ name: 'server_sig', type: 'text' })
   serverSig: string;
 
+  /** 签名公钥指纹（SigningService.keyId）：换钥后据此选择验签公钥；旧记录为空串。 */
+  @Column({ name: 'server_key_id', length: 32, default: '' })
+  serverKeyId: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }
