@@ -179,7 +179,7 @@ Web 层 `@Roles()` 守卫挡掉非 admin/arbitrator 的 HTTP 调用；链码层 
 - **不存最终能力值**：只存 IV/EV/性格，六项能力值由后端按第三世代公式计算。理由是"可完全推导"，不必重复记账。
 - **不存当前 HP**：伤势存 Redis `poke:hp:<pokemonId>`，缺键 = 满血。理由是高频可变、且不属于价值本体。PvP 一律满血出战、赛后不回写。
 
-### 4.3 六个合约的分工
+### 4.3 八个合约的分工
 
 | 合约 | 职责 | 谁调 |
 |---|---|---|
@@ -189,11 +189,14 @@ Web 层 `@Roles()` 守卫挡掉非 admin/arbitrator 的 HTTP 调用；链码层 
 | ItemContract | 铸造、堆叠合并、转移、消耗 | 本人 / system |
 | **TradeContract** | 双确认原子交换 | 双方 |
 | **BattleContract** | 押注锁定、结果提交、双确认、兜底、仲裁 | system / 双方 / Org2 |
+| HistoryContract | 只读查询账本历史（履历） | 任何人（需登录） |
+| BreedingContract | 血统繁殖：校验双亲、重算遗传、写子代 | 本人 / system |
 
 ### 4.4 TradeContract：一笔交易内完成整套交换
 
 ```
-CreateTrade  → 逐项校验归属与 IDLE → 全部锁成 LOCKED_TRADE(lockRef=tradeId)
+CreateTrade  → 逐项校验归属与 IDLE → 只锁发起方的 offer(LOCKED_TRADE, lockRef=tradeId)
+            → request 仅预检不锁（否则任何人可用"请求你的资产"锁住你的资产）
              → manifestHash = sha256(canonical(offer,request,from,to))
 ConfirmTrade → 先确认方只记 confirmations.from
              → 后确认方在同一笔交易内：换 owner → 划积分 → 解锁 → EXECUTED
@@ -227,6 +230,20 @@ Arbitrate       仅 Org2 arbitrator → SETTLED / REFUNDED
 6. **易主即断羁绊**：`bond` 铸造 50，**所有权变更一律重置 30**（直接转移/交易/押注被赢走），只有 `BondUp`(system) 能涨，255 截顶；DRAW/REFUND/放生不改动。
 
 ---
+
+### 4.6 两个可删除的扩展：履历与血统
+
+两个功能都是**独立合约 + 独立后端模块**，用 `[FEAT:history]` / `[FEAT:breeding]` 成对标记接入点，删起来不影响主流程。
+
+| 扩展 | 链上做什么 | 为什么需要链 |
+|---|---|---|
+| **宝可梦履历** `HistoryContract` | 只读 `getHistoryForKey('pokemon:<id>')`，把每个版本投影成摘要返回；`summary`（初训家/转手/版本数）在**完整历史**上算，只有时间线受 `maxEntries` 截断 | 历史是账本自带的，运营方改不了；普通数据库只能存"当前值" |
+| **血统繁殖** `BreedingContract` | 校验双亲（同 owner/IDLE/等级≥20）→ 消费 `purpose='mint'` 随机事件 → **按 serverSeed 重算子代 IV/性格/闪光再比对** → 扣 200P → 写子代（`parents`/`generation`，`dnaHash` 即血统承诺） | 属性由链码重算，后端改不了；血统绑定双亲与事件，无法伪造 |
+
+两个实现细节值得记：
+
+- `getHistoryForKey` 只能放在 `@Transaction(false)` 里（不同 peer 结果可能不同）；本项目 Fabric 2.5.16 实测返回**新→旧**，链码按首尾时间戳归一化，不依赖方向；peer 必须开启历史库（`CORE_LEDGER_HISTORY_ENABLEHISTORYDATABASE=true`）。
+- 繁殖**不引入新状态、不加锁**：整笔交易内完成，并发保护来自"扣积分写同一个 player 键"；把费用改成 0 时该保护会消失。
 
 ## 5. 可验证随机数（本项目最"区块链"的部分）
 
@@ -299,7 +316,7 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 
 ### 5.5 战斗与捕捉的时序差异
 
-- **捕捉**：`Commit` → 立刻派生预览 → 投球时 `Reveal` → 消费。单次判定，早揭示无风险。
+- **捕捉**：`Commit` → 立刻派生预览 → 打到终态/投中时才 `Reveal` 并消费（H9）。失败投球保持 COMMITTED，`/fairness` 对 COMMITTED 裁剪种子，避免首球后预测后续判定。
 - **PvP 战斗**：开战 `Commit`，**整场打完才 `Reveal`**。战斗全程 serverSeed 对双方不可见，没人能预测下一次暴击；战后揭示 + 回合日志（`resultHash = sha256(canonical(log))`）让整场可逐步重放复核。
 - 战斗种子额外在 Redis `battle:seed:<battleId>` 备份 24h，防止后端崩溃导致**永远无法揭示 → 无法结算**（揭示是结算的前置）。
 
@@ -364,9 +381,9 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 
 ## 8. 三条主线，从链的视角重讲
 
-**注册**：argon2 建用户 → CA register+enroll（`role=player` 入 ecert，`hf.EnrollmentID=用户名`）→ 私钥 AES-GCM 存 PG → `RegisterPlayer`（admin 代发，idemKey=`register-<username>`）→ 链上 points=1000、rating=1000。
+**注册**：argon2 建用户 → CA register+enroll（`role=player` 入 ecert，`hf.EnrollmentID=用户名`）→ 私钥 AES-GCM 存 PG → `RegisterPlayer`（admin 代发，idemKey=`register-<username>`）→ 链上 points=400、rating=1000，并带 72 小时转账锁（防小号搬分）。
 
-**捕捉**：`Commit`（承诺上链）→ 派生种类/等级（预览，不揭 IV）→ 野怪战斗（整场读 30000 区）→ 首次投球时 `RevealAndVerify` → `ConsumeItem`（扣球）→ 判定 → 成功则 `MintFromCapture`（内部 `consumeRandom` 一次性消费 + dnaHash）→ 掉落走 `MintItem`（确定性 idemKey `<sessionId>-drop`）。
+**捕捉**：`Commit`（承诺上链）→ 派生种类/等级（预览，不揭 IV）→ 野怪战斗（整场读 30000 区）→ 投球（`ConsumeItem` 扣球）→ 结算时 `RevealAndVerify`→ 判定 → 成功则 `MintFromCapture`（内部 `consumeRandom` 一次性消费 + dnaHash）→ 掉落走 `MintItem`（确定性 idemKey `<sessionId>-drop`）。
 
 **押注对战**：
 ```
@@ -421,7 +438,7 @@ rand(n) = uint64_be( HMAC-SHA256(key = serverSeed,
 | 想理解什么 | 看哪里 |
 |---|---|
 | 链码通用纪律（幂等/键空间/身份/状态） | `chaincode/pokemon-cc/src/common/{idempotency,state,cid,crypto,keys,bundle}.ts` |
-| 六个合约 | `chaincode/pokemon-cc/src/contracts/*.contract.ts`（先看 `battle` 与 `random`） |
+| 八个合约 | `chaincode/pokemon-cc/src/contracts/*.contract.ts`（先看 `battle`、`random`、`breeding`） |
 | 网络与背书策略 | `network/configtx.yaml` + `scripts/up.sh` + `scripts/deployCC.sh` |
 | 后端怎么代发交易 | `backend/src/fabric/{contract.service,chain.adapter,fabric-gateway.service,fabric-ca.service}.ts` |
 | Mock 复刻了什么 | `backend/src/fabric/mock-chain.adapter.ts` + `mock-chain.store.ts` |

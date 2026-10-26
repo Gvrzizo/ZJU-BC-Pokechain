@@ -9,6 +9,9 @@ import { PokemonHpService } from '../src/pokemon/pokemon-hp.service';
 import { PokemonService } from '../src/pokemon/pokemon.service';
 import { PokemonRename } from '../src/pokemon/entities/pokemon-rename.entity';
 import { BondService } from '../src/bond/bond.service';
+// --- [FEAT:dex] begin ---
+import { DexService } from '../src/dex/dex.service';
+// --- [FEAT:dex] end ---
 import { PlayerBlockService } from '../src/users/player-block.service';
 import {
   ADMIN_IDENTITY,
@@ -44,6 +47,9 @@ export function makePokemonService(
     { stream$: new Subject().asObservable() } as never,
     makeHpService(redis),
     renames as never,
+    // --- [FEAT:dex] begin ---
+    new DexService(mockRepo<{ id?: string }>() as never),
+    // --- [FEAT:dex] end ---
   );
 }
 

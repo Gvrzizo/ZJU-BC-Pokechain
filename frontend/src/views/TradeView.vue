@@ -17,6 +17,10 @@ const box = ref<'in' | 'out'>('in');
 const trades = ref<Trade[]>([]);
 const message = ref('');
 const showCreate = ref(false);
+// --- [FEAT:ux] begin ---
+/** 创建交易失败时把错误显示在弹窗里（原来只显示在页面顶部，容易以为没反应） */
+const createError = ref('');
+// --- [FEAT:ux] end ---
 
 const form = ref({
   toPlayerId: '',
@@ -57,6 +61,7 @@ function assetsSummary(a: TradeAssets): string {
 }
 
 async function submitCreate() {
+  createError.value = '';
   try {
     await createTrade({
       toPlayerId: form.value.toPlayerId,
@@ -76,7 +81,7 @@ async function submitCreate() {
     showCreate.value = false;
     await refresh();
   } catch (e: any) {
-    message.value = e?.response?.data?.message ?? t('trade.createFail');
+    createError.value = e?.response?.data?.message ?? t('trade.createFail');
   }
 }
 
@@ -162,8 +167,13 @@ function myConfirmed(trade: Trade): boolean {
       :title="t('trade.createTitle')"
       :confirm-text="t('trade.submit')"
       @confirm="submitCreate"
-      @cancel="showCreate = false"
+      @cancel="showCreate = false; createError = ''"
     >
+      <!-- --- [FEAT:ux] begin --- -->
+      <p v-if="createError" class="mb-8" style="font-size: var(--px-fs-sm); color: var(--gba-red)">
+        {{ createError }}
+      </p>
+      <!-- --- [FEAT:ux] end --- -->
       <div class="px-field">
         <label>{{ t('trade.counterparty') }}</label>
         <input v-model="form.toPlayerId" class="px-input" placeholder="u_xxx / 用户名" />

@@ -4,6 +4,9 @@ import { In, Repository } from 'typeorm';
 import { RedisService } from '../common/redis/redis.service';
 import { AppException } from '../common/utils/errors';
 import { ChainEventsService } from '../fabric/chain-events.service';
+// --- [FEAT:dex] begin ---
+import { DexService } from '../dex/dex.service';
+// --- [FEAT:dex] end ---
 import { ContractService } from '../fabric/contract.service';
 import { ChainIdentity, GrowthPatch, PokemonState, SYSTEM_IDENTITY } from '../fabric/chain.types';
 import { zonesForSpecies } from '../game-data/encounter.data';
@@ -133,6 +136,9 @@ export class PokemonService implements OnModuleInit {
     readonly hp: PokemonHpService,
     /** 改名次数（链下 PG，docs/backend-api.md §2「改名」） */
     @InjectRepository(PokemonRename) private readonly renames: Repository<PokemonRename>,
+    // --- [FEAT:dex] begin ---
+    private readonly dex: DexService,
+    // --- [FEAT:dex] end ---
   ) {}
 
   onModuleInit(): void {
@@ -213,6 +219,9 @@ export class PokemonService implements OnModuleInit {
     const mine = await this.listMine(username);
     const owned = new Map<number, number>();
     for (const p of mine) owned.set(p.speciesId, (owned.get(p.speciesId) ?? 0) + 1);
+    // 当前持有的种族补记一笔（覆盖交易/押注赢来的宝可梦），再与历史解锁取并集
+    await this.dex.record(username, [...owned.keys()]);
+    const unlocked = await this.dex.list(username);
     return Object.values(SPECIES).map((s) => ({
       speciesId: s.id,
       name: s.name,
@@ -220,6 +229,8 @@ export class PokemonService implements OnModuleInit {
       type: s.type,
       spriteUri: s.spriteUri,
       ownedCount: owned.get(s.id) ?? 0,
+      /** 永久解锁：进化后低阶种族仍然显示为已捕获 */
+      unlocked: unlocked.has(s.id) || (owned.get(s.id) ?? 0) > 0,
       /**
        * 该种族会出现的区域（栖息地反查，`GET /capture/zones` 提供区域详情）：
        * 普通区按等级带 + 属性栖息地过滤，传说种族只出现在对应的传说区；从不出现的为 []。
@@ -457,6 +468,8 @@ export class PokemonService implements OnModuleInit {
     }
     if (learned.length > 0) patch.moves = moves;
     const updated = await this.contract.applyGrowth(SYSTEM_IDENTITY, pokemon.id, patch);
+    // 进化后低阶种族也要留在图鉴里
+    await this.dex.record(pokemon.ownerId, [pokemon.speciesId, targetSpeciesId]);
     return this.withHp(withComputedStats(updated));
   }
 

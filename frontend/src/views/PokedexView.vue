@@ -32,7 +32,7 @@ function typesOf(e: DexEntry): string[] {
 onMounted(() => store.refreshAll());
 
 function isOwned(e: DexEntry) {
-  return ownedOf(e) > 0 || ownedIds.value.has(e.speciesId);
+  return e.unlocked === true || ownedOf(e) > 0 || ownedIds.value.has(e.speciesId);
 }
 
 /** 属性名走词典（'electric' → 电 / Electric），未收录回退英文原名 */
@@ -62,7 +62,8 @@ function typeLabel(type: string): string {
           :class="{ 'dex-cell--owned': isOwned(e) }"
           @click="selected = e"
         >
-          <SpriteIcon :species-id="e.speciesId" :size="48" style="margin: 0 auto" />
+          <SpriteIcon v-if="isOwned(e)" :species-id="e.speciesId" :size="48" style="margin: 0 auto" />
+          <span v-else class="dex-silhouette">?</span>
           <div style="font-size: var(--px-fs-sm); margin-top: 6px">
             #{{ String(e.speciesId).padStart(3, '0') }}
           </div>
@@ -78,17 +79,23 @@ function typeLabel(type: string): string {
           #{{ String(selected.speciesId).padStart(3, '0') }}
           {{ isOwned(selected) ? monName(selected.speciesId, selected.name) : t('dex.unknown') }}
         </h2>
-        <SpriteIcon :species-id="selected.speciesId" :size="96" style="margin: 12px auto" />
-        <p style="font-size: var(--px-fs-sm)">
-          {{ t('dex.types', { types: typesOf(selected).map(typeLabel).join(' / ') || t('dex.unknownType') }) }}
-        </p>
-        <p style="font-size: var(--px-fs-sm)">{{ t('dex.baseRate', { rate: selected.baseRate ?? '—' }) }}</p>
+        <SpriteIcon v-if="isOwned(selected)" :species-id="selected.speciesId" :size="96" style="margin: 12px auto" />
+        <div v-else class="dex-silhouette dex-silhouette--lg">?</div>
+
+        <template v-if="isOwned(selected)">
+          <p style="font-size: var(--px-fs-sm)">
+            {{ t('dex.types', { types: typesOf(selected).map(typeLabel).join(' / ') || t('dex.unknownType') }) }}
+          </p>
+          <p style="font-size: var(--px-fs-sm)">{{ t('dex.baseRate', { rate: selected.baseRate ?? '—' }) }}</p>
+        </template>
+        <p v-else class="text-dim" style="font-size: var(--px-fs-sm)">{{ t('dex.lockedHint') }}</p>
         <p style="font-size: var(--px-fs-sm)">
           {{ t('dex.ownedCount', { count: ownedOf(selected) || (isOwned(selected) ? '≥1' : 0) }) }}
           <span v-if="isOwned(selected)" class="badge badge--green">{{ t('dex.owned') }}</span>
         </p>
 
-        <!-- 进化链：当前 → 目标（sprite + 中文名 + 条件），条件来自后端 /pokedex 的 evolutions -->
+        <!-- 进化链：仅在已解锁时展示，未解锁不剧透后续形态 -->
+        <template v-if="isOwned(selected)">
         <h3 class="mt-16" style="font-size: var(--px-fs-sm)">{{ t('dex.evolution') }}</h3>
         <div v-if="(selected.evolutions ?? []).length > 0">
           <div
@@ -116,6 +123,7 @@ function typeLabel(type: string): string {
           </div>
         </div>
         <p v-else class="text-dim" style="font-size: var(--px-fs-sm)">{{ t('dex.evoNone') }}</p>
+        </template>
       </div>
     </div>
   </div>
@@ -127,6 +135,24 @@ function typeLabel(type: string): string {
   filter: saturate(0.3);
 }
 
+.dex-silhouette {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto;
+  font-size: 24px;
+  color: #7a8f8a;
+  background: repeating-linear-gradient(45deg, #dfe7dc, #dfe7dc 4px, #cfd9cb 4px, #cfd9cb 8px);
+  border: 2px solid #a6bba3;
+}
+.dex-silhouette--lg {
+  width: 96px;
+  height: 96px;
+  font-size: 44px;
+  margin: 12px auto;
+}
 .dex-cell--owned {
   opacity: 1;
   filter: none;

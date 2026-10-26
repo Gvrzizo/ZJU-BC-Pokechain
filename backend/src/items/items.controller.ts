@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { identityForUser } from '../fabric/chain.types';
-import { UseItemDto } from './dto/items.dto';
+import { MergeStacksDto, UseItemDto } from './dto/items.dto';
 import { ItemsService } from './items.service';
 
 @Controller('items')
@@ -25,6 +25,13 @@ export class ItemsController {
       targetPokemonId: dto.targetPokemonId,
       forgetMoveId: dto.forgetMoveId,
       stat: dto.stat,
+      count: dto.count,
     });
+  }
+
+  /** 合并同一 typeId 的 IDLE 堆叠（真链上 CouchDB 富查询有延迟，会残留多堆叠）。 */
+  @Post('merge')
+  merge(@CurrentUser() user: AuthUser, @Body() dto: MergeStacksDto) {
+    return this.items.mergeStacks(identityForUser(user), dto.typeId);
   }
 }

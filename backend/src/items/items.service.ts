@@ -16,6 +16,8 @@ export interface UseItemOptions {
   targetPokemonId?: string;
   forgetMoveId?: string;
   stat?: StatKey;
+  /** 一次用几个（仅神奇糖果）：1-99 */
+  count?: number;
 }
 
 /** 特训类道具（kind='other'）的 typeId 白名单。 */
@@ -48,6 +50,11 @@ export class ItemsService {
     private readonly contract: ContractService,
     private readonly pokemon: PokemonService,
   ) {}
+
+  /** 合并同 typeId 的 IDLE 堆叠（链码 MergeStacks）。返回幸存堆叠或 null。 */
+  async mergeStacks(as: ChainIdentity, typeId: string) {
+    return this.contract.mergeStacks(as, as.userId, typeId);
+  }
 
   listMine(username: string) {
     return this.contract.queryItemsByOwner(username);
@@ -140,7 +147,7 @@ export class ItemsService {
         return { used: item.typeId, taught: moveId, pokemon: updated };
       }
       case 'other':
-        return this.useTrainingItem(as, id, item.typeId, options);
+        return this.useTrainingItem(as, id, item.typeId, item.quantity, options);
       default:
         throw new AppException('NOT_USABLE', `${item.typeId} cannot be used directly`, HttpStatus.BAD_REQUEST);
     }
@@ -154,6 +161,7 @@ export class ItemsService {
     as: ChainIdentity,
     itemId: string,
     typeId: string,
+    itemQuantity: number,
     options: UseItemOptions,
   ): Promise<UseItemResult> {
     if (!TRAINING_ITEM_EFFECTS.includes(typeId as (typeof TRAINING_ITEM_EFFECTS)[number])) {
@@ -165,17 +173,25 @@ export class ItemsService {
       if (pokemon.level >= LEVEL_MAX) {
         throw new AppException('LEVEL_MAXED', `already at level ${LEVEL_MAX}`, HttpStatus.CONFLICT);
       }
-      // +1 级 = exp 补到 (level+1)^3（exp 曲线 level = floor(cbrt(exp))）
-      const gain = Math.max(0, (pokemon.level + 1) ** 3 - (pokemon.exp ?? 0));
-      await this.contract.consumeItem(as, itemId, 1, 'use-rare-candy');
-      const outcome = await this.pokemon.applyExp(pokemon, gain);
+      // 批量喂：受"剩余数量 / 等级上限"双重约束；一次请求只发两笔链上交易
+      const requested = Math.max(1, Math.floor(options.count ?? 1));
+      const count = Math.min(requested, itemQuantity, LEVEL_MAX - pokemon.level);
+      if (count <= 0) {
+        throw new AppException('LEVEL_MAXED', `already at level ${LEVEL_MAX}`, HttpStatus.CONFLICT);
+      }
+      const targetLevel = pokemon.level + count;
+      const gain = Math.max(0, targetLevel ** 3 - (pokemon.exp ?? 0));
+      // 幂等键带上"当前等级 + 数量"：连点/重试同一次操作不会重复扣糖
+      const stamp = `${itemId}-${pokemon.id}-${pokemon.level}-${count}`;
+      await this.contract.consumeItem(as, itemId, count, 'use-rare-candy', { idemKey: `use-candy-${stamp}` });
+      const outcome = await this.pokemon.applyExp(pokemon, gain, { idemKey: `use-candy-grow-${stamp}` });
       return {
         used: typeId,
         pokemon: outcome.pokemon,
         levelsGained: outcome.levelsGained,
         movesLearned: outcome.movesLearned,
         canEvolve: outcome.canEvolve,
-        message: `等级提升到 Lv${outcome.pokemon.level}`,
+        message: `消耗 ${count} 颗，等级提升到 Lv${outcome.pokemon.level}`,
       };
     }
 

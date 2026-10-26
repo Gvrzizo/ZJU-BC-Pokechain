@@ -228,9 +228,17 @@ function restart() {
   phase.value = 'prep';
 }
 
+// --- [FEAT:ux] begin ---
+/** 投球要连发三笔链上交易（扣球 / 验证随机 / 铸造），真链上 3-6 秒，给出阶段提示 */
+const busyHint = ref('');
+// --- [FEAT:ux] end ---
+
 async function act(action: WildActionEx) {
   if (!canAct.value || !state.value) return;
   busy.value = true;
+  // --- [FEAT:ux] begin ---
+  busyHint.value = action.type === 'ball' ? '投球结算中：扣球 → 验证随机 → 结算…' : '';
+  // --- [FEAT:ux] end ---
   error.value = '';
   try {
     const next = await wildAction(state.value.sessionId, action);
@@ -248,6 +256,7 @@ async function act(action: WildActionEx) {
     error.value = e?.response?.data?.message ?? '操作失败';
   } finally {
     busy.value = false;
+    busyHint.value = '';
   }
 }
 
@@ -454,7 +463,7 @@ if (store.items.length === 0) {
 
         <div v-else class="wild-footer">
           <PixelButton variant="danger" :disabled="busy" @click="close">逃跑</PixelButton>
-          <span v-if="busy" class="blink text-dim">投掷中…</span>
+          <span v-if="busy" class="blink text-dim">{{ busyHint || '投掷中…' }}</span>
           <span v-else-if="error" class="wild-error">{{ error }}</span>
         </div>
       </template>
@@ -578,7 +587,7 @@ if (store.items.length === 0) {
           <div class="wild-footer">
             <PixelButton :disabled="!canCommand" @click="showParty = true">换宠</PixelButton>
             <PixelButton variant="danger" :disabled="!canCommand" @click="runAway">逃跑</PixelButton>
-            <span v-if="busy" class="blink text-dim">行动中…</span>
+            <span v-if="busy" class="blink text-dim">{{ busyHint || '行动中…' }}</span>
           </div>
         </div>
 

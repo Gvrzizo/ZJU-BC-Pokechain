@@ -3,7 +3,7 @@
 B/S 架构、GBA《宝可梦 红宝石/蓝宝石》像素风。宝可梦相关名称/形象/音效/地图仅用于课程演示。
 
 - 区块链：Hyperledger Fabric 2.5（双组织 + Fabric CA + CouchDB + Raft）
-- 链码：TypeScript（`chaincode/pokemon-cc`，六合约：Player/Random/Pokemon/Item/Trade/Battle）
+- 链码：TypeScript（`chaincode/pokemon-cc`，八合约：Player/Random/Pokemon/Item/Trade/Battle/History/Breeding）
 - 后端：NestJS + fabric-gateway（浏览器不直连 Peer/Orderer）
 - 前端：Vue3 + Phaser 3
 - 链下：PostgreSQL / Redis / MinIO（图片音频地图，链上只存 hash+URI）
@@ -28,7 +28,8 @@ docker compose up -d --build  # 启动 PostgreSQL/Redis/MinIO + 后端 + 前端�
 
 | 文档 | 内容 |
 |---|---|
-| `docs/blockchain-design.md` | **架构与区块链设计总览（先读这一篇）**：分层架构、Fabric 治理与背书、身份体系、六合约、可验证随机数、双链模式 |
+| `docs/endorsement-and-identity.md` | **背书策略、证书与角色详解（以一次 ConfirmTrade 为例）**：策略三层、2/2 如何被满足、全流程 11 步 |
+| `docs/blockchain-design.md` | **架构与区块链设计总览（先读这一篇）**：分层架构、Fabric 治理与背书、身份体系、八合约、可验证随机数、双链模式 |
 | `docs/architecture.md` | 总体架构与链上/链下职责划分 |
 | `docs/chaincode-api.md` | 链码合约接口规范（数据模型/交易/事件/安全规则） |
 | `docs/backend-api.md` | 后端 REST/WebSocket API 规范 |

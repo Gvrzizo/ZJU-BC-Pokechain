@@ -103,6 +103,7 @@ export const en: LocaleDictionary = {
     'dex.owned': 'Owned',
     'dex.unknown': '???',
     'dex.unknownType': 'unknown',
+    'dex.lockedHint': 'Catch this Pokémon to reveal its types and evolution chain',
     'dex.evolution': 'Evolution',
     'dex.evoNone': 'No known evolution',
     'dex.evoLevel': 'Lv.{level}',

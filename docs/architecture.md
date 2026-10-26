@@ -228,7 +228,7 @@ A                  后端 TradesService              TradeContract              
  │ POST /trades      │                                │                               │
  │──────────────────▶│ CreateTrade(offer,request,TTL) │                               │
  │                  │───────────────────────────────▶│ 校验双方资产归属/状态/积分余额     │
- │                  │                                │ 全部资产→LOCKED_TRADE(lockRef=id)│
+ │                  │                                │ 只锁 A 的 offer；B 的 request 仅预检│
  │                  │                                │ manifestHash=sha256(canonical(…))│
  │ confirm           │                                │                               │
  │──────────────────▶│ ConfirmTrade(A) ─────────────▶│ confirmations.from=true        │
@@ -287,7 +287,7 @@ Pokechain/
 │   ├── organizations/          #   cryptogen 输出 + CA 数据（gitignore）
 │   └── channel-artifacts/      #   genesis.block / gamechannel.tx/.block / 链码包
 ├── chaincode/pokemon-cc/       # TypeScript 链码（fabric-contract-api 2.5）
-│   ├── src/contracts/          #   player/random/pokemon/item/trade/battle 六合约
+│   ├── src/contracts/          #   player/random/pokemon/item/trade/battle/history/breeding 八合约
 │   ├── src/common/             #   cid/assert/state/idempotency/query/bundle/crypto
 │   ├── META-INF/statedb/couchdb/indexes/   # 4 张富查询索引
 │   └── tests/                  #   Jest 60 用例（手写 mock-stub harness）

@@ -42,7 +42,7 @@
 1. 后端建账号（PG 存口令哈希）；
 2. 后端向 ca.org1 申请证书，证书里带属性 `role=player`；
 3. 私钥加密存 PG；
-4. 后端用 admin 证书发 `RegisterPlayer`，链上生成 `player:<id>`，points=1000。
+4. 后端用 admin 证书发 `RegisterPlayer`，链上生成 `player:<id>`，points=400（另有 72 小时转账锁）。
 
 ### 3.2 捕捉（一次遇敌 = 1 个随机事件 + 若干交易）
 
@@ -50,14 +50,14 @@
 2. 发 `Commit`，链上写 `rand:<eventId>`，状态 COMMITTED；
 3. 后端用派生流算出野怪种类/等级，返回给前端；
 4. 打野怪、投球时：`ConsumeItem` 扣球；
-5. 首次投球前发 `RevealAndVerify`，链上重算 `sha256(serverSeed)==commitHash`，通过则状态 REVEALED；
+5. 投球后到结算（投中/野怪倒地/逃跑/超时）时发 `RevealAndVerify`，链上重算 `sha256(serverSeed)==commitHash`，通过则状态 REVEALED；失败投球保持 COMMITTED；
 6. 捕捉成功发 `MintFromCapture`，链码内部把该随机事件标为 CONSUMED，同时生成 `pokemon:<id>`，owner 是玩家。
 
 要点：**先承诺、后使用、再揭示**。铸造必须消费同一个随机事件，一个事件只能消费一次。
 
 ### 3.3 交易
 
-1. `CreateTrade`：校验双方资产归属和 IDLE 状态，全部锁成 `LOCKED_TRADE`（lockRef=交易单 id）；
+1. `CreateTrade`：校验双方资产归属和 IDLE 状态，**只锁发起方的 offer**（`LOCKED_TRADE`，lockRef=交易单 id）；B 的 request 只预检、不锁，执行时再校验；
 2. 甲方 `ConfirmTrade`：只记 confirmations.from；
 3. 乙方 `ConfirmTrade`：在同一笔交易里换 owner、划积分、解锁、置 EXECUTED；
 4. 取消或过期：`CancelTrade` / `ExpireTrade` 解锁资产。
@@ -157,12 +157,21 @@
 4. 防重放和限流依赖 Redis，Redis 挂了就放开（可用性优先）；
 5. 战斗引擎状态在内存，后端崩溃后这一局无法继续，只能仲裁退款。
 
+## 8.5 两个后来加的功能（可删）
+
+| 功能 | 链上 | 关键点 |
+|---|---|---|
+| 宝可梦履历 | `HistoryContract.GetPokemonHistory`（只读） | 读账本历史；初训家/转手次数按**完整历史**算，时间线可截断；peer 需开历史库 |
+| 血统繁殖 | `BreedingContract.Breed` | 双亲需同 owner、IDLE、Lv≥20；扣 200P；链码用同一 `serverSeed` **重算子代 IV/性格/闪光**并与提交值比对，不符即 `HEREDITY_MISMATCH` |
+
+两个都用 `[FEAT:history]` / `[FEAT:breeding]` 标记接入点，卸载步骤见 `docs/feature-overview-history-breeding.md`。
+
 ## 9. 看代码的位置
 
 | 内容 | 文件 |
 |---|---|
 | 链码通用逻辑（幂等、状态、权限） | `chaincode/pokemon-cc/src/common/` |
-| 六个合约 | `chaincode/pokemon-cc/src/contracts/` |
+| 八个合约 | `chaincode/pokemon-cc/src/contracts/`（另见 `breeding.contract.ts`、`history.contract.ts`） |
 | 网络与背书策略 | `network/configtx.yaml`、`scripts/deployCC.sh` |
 | 后端如何发交易 | `backend/src/fabric/chain.adapter.ts`、`fabric-gateway.service.ts` |
 | 随机数派生布局 | `backend/src/pokemon/capture-derive.ts` |

@@ -129,6 +129,8 @@ export interface PokedexEntry {
   types: string[];
   baseRate?: number;
   owned: number;
+  /** 永久解锁（捕获/领取/进化过即 true；进化后低阶种族仍算已捕获） */
+  unlocked?: boolean;
   /** 该种族的进化分支（后端 /pokedex 附带，图鉴详情展示进化链与条件） */
   evolutions?: EvolutionStep[];
 }

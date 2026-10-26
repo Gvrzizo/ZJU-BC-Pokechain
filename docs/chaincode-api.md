@@ -192,6 +192,15 @@ Trade 的 `offer/request` 保持 `{pokemonIds, itemIds, points}` **整堆语义�
 - **结算事件**：`BattleSettled` payload 带 `{id, winnerId, playerA, playerB}`（Forfeit 另带 `loserId`，SettleBattle/Arbitrate 另带 `via`）；并在同一交易内为双方各发一条 `PointsChanged {playerId, delta, balance, reason:"battle:<id>"}`（DRAW/REFUND 时 delta=0）。后端排行榜靠这两个事件刷新 Redis ZSET，缺事件会导致真链榜单停在旧分数（H4）。
 - 结算按 wager 引用定位锁定堆叠：整堆锁→原堆叠；拆分锁→子堆叠（原堆叠即使已被合并删除也能正确定位子堆叠）。
 
+### 2.7 后续新增的两个合约（独立文档）
+
+| 合约 | 交易 | 详见 |
+|---|---|---|
+| `HistoryContract` | `GetPokemonHistory`（只读，账本历史） | `docs/feature-pokemon-history.md` |
+| `BreedingContract` | `Breed` / `GetLineage` / `GetBreedingConfig` | `docs/feature-breeding.md` |
+
+两者同样遵守 §0 的确定性、幂等、键空间与错误码约定；均可用 `[FEAT:history]` / `[FEAT:breeding]` 标记整块卸载（`docs/feature-overview-history-breeding.md` §4）。
+
 ## 3. CouchDB 索引
 
 `META-INF/statedb/couchdb/indexes/` 随链码打包：

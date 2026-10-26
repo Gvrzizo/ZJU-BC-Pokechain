@@ -10,6 +10,8 @@ export interface UseItemOptions {
   forgetMoveId?: string;
   /** 银色王冠用：把哪一项个体值升满 31 */
   stat?: PokemonStatKey;
+  /** 神奇糖果一次喂几颗（1-99） */
+  count?: number;
 }
 
 /** `POST /items/:id/use` 的响应（按道具类型给不同字段，docs/backend-api.md §3）。 */
@@ -51,3 +53,11 @@ export async function useItem(
   const { data } = await http.post<UseItemResult>(`/items/${encodeURIComponent(id)}/use`, options);
   return data;
 }
+
+
+// --- [FEAT:bag] begin ---
+/** 合并同一 typeId 的 IDLE 堆叠（真链 CouchDB 延迟可能留下多堆叠）。 */
+export async function mergeStacks(typeId: string): Promise<void> {
+  await http.post('/items/merge', { typeId });
+}
+// --- [FEAT:bag] end ---

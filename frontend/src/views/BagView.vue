@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { useItem } from '@/api/items';
+import { computed, onMounted, ref } from 'vue';
+import { mergeStacks, useItem } from '@/api/items';
 import { usePokemonStore } from '@/stores/pokemon';
 import { useI18n } from '@/composables/useI18n';
 import type { Item } from '@/types';
@@ -13,20 +13,54 @@ const { t, itemName, monName } = useI18n();
 const usingItem = ref<Item | null>(null);
 const targetPokemonId = ref('');
 const message = ref('');
+// --- [FEAT:bag] begin ---
+const busy = ref(false);
+/** 同 typeId 有多个 IDLE 堆叠时给出"合并"入口（真链 CouchDB 延迟会导致没合并）。 */
+const duplicateTypes = computed(() => {
+  const seen = new Map<string, number>();
+  for (const item of store.items) {
+    if (item.status !== 'IDLE' || item.quantity <= 0) continue;
+    seen.set(item.typeId, (seen.get(item.typeId) ?? 0) + 1);
+  }
+  return [...seen.entries()].filter(([, n]) => n > 1).map(([typeId]) => typeId);
+});
+const targetMon = computed(() => store.myPokemon.find((p) => p.id === targetPokemonId.value) ?? null);
+const candyCount = computed(() => {
+  if (!targetMon.value) return 0;
+  return Math.max(0, Math.min(99, 20 - targetMon.value.level));
+});
+
+async function doMergeAll() {
+  if (busy.value || duplicateTypes.value.length === 0) return;
+  busy.value = true;
+  try {
+    for (const typeId of duplicateTypes.value) await mergeStacks(typeId);
+    message.value = '同名堆叠已合并';
+    await store.refreshItems();
+  } catch (e: any) {
+    message.value = e?.response?.data?.message ?? '合并失败';
+  } finally {
+    busy.value = false;
+  }
+}
+// --- [FEAT:bag] end ---
 
 onMounted(() => store.refreshAll());
 
-async function confirmUse() {
-  if (!usingItem.value) return;
+async function confirmUse(count = 1) {
+  if (!usingItem.value || busy.value) return;
+  busy.value = true;
   try {
-    await useItem(usingItem.value.id, targetPokemonId.value || undefined);
+    const options = { targetPokemonId: targetPokemonId.value || undefined, count };
+    await useItem(usingItem.value.id, options);
     message.value = t('bag.used', { name: itemName(usingItem.value.typeId) });
     await store.refreshItems();
+    usingItem.value = null;
+    targetPokemonId.value = '';
   } catch (e: any) {
     message.value = e?.response?.data?.message ?? t('bag.useFailed');
   } finally {
-    usingItem.value = null;
-    targetPokemonId.value = '';
+    busy.value = false;
   }
 }
 </script>
@@ -35,6 +69,11 @@ async function confirmUse() {
   <div class="page">
     <div class="px-panel">
       <h2>{{ t('bag.title') }}</h2>
+      <!-- --- [FEAT:bag] begin --- -->
+      <p v-if="duplicateTypes.length > 0" style="font-size: var(--px-fs-sm)">
+        <PixelButton :disabled="busy" @click="doMergeAll">合并重复堆叠（{{ duplicateTypes.length }} 类）</PixelButton>
+      </p>
+      <!-- --- [FEAT:bag] end --- -->
       <p v-if="message" class="mb-8" style="font-size: var(--px-fs-sm); color: var(--gba-blue)">{{ message }}</p>
       <p v-if="store.loading" class="blink">{{ t('common.loading') }}</p>
       <div v-else class="table-scroll"><table style="font-size: var(--px-fs-sm)">
@@ -90,13 +129,20 @@ async function confirmUse() {
     >
       <div class="px-field">
         <label>{{ t('bag.target') }}</label>
-        <select v-model="targetPokemonId" class="px-select">
+        <select v-model="targetPokemonId" class="px-select" :disabled="busy">
           <option value="">{{ t('bag.noTarget') }}</option>
           <option v-for="p in store.myPokemon" :key="p.id" :value="p.id">
             {{ monName(p.speciesId, p.name) }} Lv{{ p.level }}
           </option>
         </select>
       </div>
+      <!-- --- [FEAT:bag] begin --- -->
+      <p v-if="usingItem.typeId === 'rare-candy' && candyCount > 0" class="mt-8">
+        <PixelButton :disabled="busy" @click="confirmUse(candyCount)">
+          喂到 20 级（{{ candyCount }} 颗）
+        </PixelButton>
+      </p>
+      <!-- --- [FEAT:bag] end --- -->
     </PixelDialog>
   </div>
 </template>

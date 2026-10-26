@@ -103,6 +103,7 @@ export const zh: LocaleDictionary = {
     'dex.owned': '已拥有',
     'dex.unknown': '？？？',
     'dex.unknownType': '未知',
+    'dex.lockedHint': '还未捕获过这只宝可梦，解锁后才能看到属性与进化链',
     'dex.evolution': '进化链',
     'dex.evoNone': '没有已知的进化分支',
     'dex.evoLevel': 'Lv.{level}',
