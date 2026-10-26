@@ -52,7 +52,8 @@ services:
       - app
 
   minio:
-    image: minio/minio:latest
+    # MinIO 已从 Docker Hub 撤下，官方镜像在 quay.io（minio/minio 会报 pull access denied）
+    image: quay.io/minio/minio:latest
     container_name: pokechain-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -74,7 +75,7 @@ services:
 
   # 一次性初始化：创建 bucket 并开放匿名只读下载（前端 <img>/fetch 直链可用）
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: pokechain-minio-init
     depends_on:
       minio:

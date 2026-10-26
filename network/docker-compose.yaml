@@ -152,6 +152,8 @@ services:
       - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0:5984
       - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
       - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      # [FEAT:history] 宝可梦履历依赖 peer 的历史库（Fabric 默认 true，这里显式声明避免环境差异）
+      - CORE_LEDGER_HISTORY_ENABLEHISTORYDATABASE=true
     working_dir: /root
     command: peer node start
     volumes:
@@ -193,6 +195,8 @@ services:
       - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb1:5984
       - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
       - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      # [FEAT:history] 宝可梦履历依赖 peer 的历史库（Fabric 默认 true，这里显式声明避免环境差异）
+      - CORE_LEDGER_HISTORY_ENABLEHISTORYDATABASE=true
     working_dir: /root
     command: peer node start
     volumes:
