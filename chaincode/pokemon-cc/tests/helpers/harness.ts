@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import { normalizeWagerInput } from '../../src/common/bundle';
 import { canonicalJson, sha256hex } from '../../src/common/crypto';
 import { BattleContract, wagerHashOf } from '../../src/contracts/battle.contract';
+// --- [FEAT:breeding] begin ---
+import { BreedingContract } from '../../src/contracts/breeding.contract';
+// --- [FEAT:breeding] end ---
+import { HistoryContract } from '../../src/contracts/history.contract';
 import { ItemContract } from '../../src/contracts/item.contract';
 import { PlayerContract } from '../../src/contracts/player.contract';
 import { PokemonContract } from '../../src/contracts/pokemon.contract';
@@ -28,6 +32,15 @@ export function hash(s: string): string {
 
 export const IVS_JSON = JSON.stringify({ hp: 10, atk: 12, def: 8, spatk: 15, spdef: 14, speed: 20 });
 export const MOVES_JSON = JSON.stringify(['thunder-shock', 'growl']);
+
+// --- [FEAT:history] begin ---
+interface MockVersion {
+  txId: string;
+  seconds: number;
+  isDelete: boolean;
+  value: Buffer;
+}
+// --- [FEAT:history] end ---
 
 function deepEqual(a: unknown, b: unknown): boolean {
   return canonicalJson(a) === canonicalJson(b);
@@ -58,10 +71,22 @@ export class MockStub {
   /** 所有已提交交易的事件历史。 */
   public committedEvents: Array<{ name: string; payload: string }> = [];
   private txCounter = 0;
+  // --- [FEAT:history] begin ---
+  /** 已提交的键版本（仅测试用：Fabric 的 historydb 由 peer 维护，这里手工记一份）。 */
+  private versions = new Map<string, MockVersion[]>();
+  private currentTxId = '';
+  private currentTxMs = 0;
+  private histCounter = 0;
+  // --- [FEAT:history] end ---
 
   beginTx(): void {
     this.tx = new Map();
     this.events = [];
+    // --- [FEAT:history] begin ---
+    this.histCounter += 1;
+    this.currentTxId = `mock-tx-${this.histCounter}`;
+    this.currentTxMs = 1767225600000 + this.histCounter * 1000; // 2026-01-01T00:00:00Z 起每条 +1s
+    // --- [FEAT:history] end ---
   }
 
   commitTx(): void {
@@ -69,6 +94,11 @@ export class MockStub {
     for (const [k, v] of this.tx) {
       if (v === null) this.state.delete(k);
       else this.state.set(k, v);
+      // --- [FEAT:history] begin ---
+      const list = this.versions.get(k) ?? [];
+      list.push({ txId: this.currentTxId, seconds: Math.floor(this.currentTxMs / 1000), isDelete: v === null, value: v ?? Buffer.alloc(0) });
+      this.versions.set(k, list);
+      // --- [FEAT:history] end ---
     }
     this.committedEvents.push(...this.events);
     this.tx = null;
@@ -97,6 +127,36 @@ export class MockStub {
     if (!this.tx) throw new Error('mock: no active transaction');
     this.tx.set(key, null);
   }
+
+  // --- [FEAT:history] begin ---
+  /** 与 fabric-shim 的 getHistoryForKey 同形：按提交顺序（旧→新）返回该键的每个版本。 */
+  async getHistoryForKey(key: string): Promise<{
+    next: () => Promise<{
+      value: { txId: string; timestamp: { seconds: { toString: () => string }; nanos: number }; isDelete: boolean; value: Buffer };
+      done: boolean;
+    }>;
+    close: () => Promise<void>;
+  }> {
+    const list = this.versions.get(key) ?? [];
+    let index = 0;
+    return {
+      next: async () => {
+        if (index >= list.length) return { done: true } as never;
+        const version = list[index++];
+        return {
+          value: {
+            txId: version.txId,
+            timestamp: { seconds: { toString: () => String(version.seconds) }, nanos: 0 },
+            isDelete: version.isDelete,
+            value: Buffer.from(version.value),
+          },
+          done: false,
+        };
+      },
+      close: async () => undefined,
+    };
+  }
+  // --- [FEAT:history] end ---
 
   setEvent(name: string, payload: Buffer | Uint8Array): void {
     this.events.push({ name, payload: Buffer.from(payload).toString('utf8') });
@@ -182,6 +242,12 @@ export class World {
   readonly item = new ItemContract();
   readonly trade = new TradeContract();
   readonly battle = new BattleContract();
+  // --- [FEAT:history] begin ---
+  readonly history = new HistoryContract();
+  // --- [FEAT:history] end ---
+  // --- [FEAT:breeding] begin ---
+  readonly breeding = new BreedingContract();
+  // --- [FEAT:breeding] end ---
 
   /** 低层身份：显式 mspId/role/enrollmentId（enrollmentId 省略 = 证书无该属性）。 */
   ctx(mspId: string, role?: string, enrollmentId?: string): Context {
@@ -300,6 +366,20 @@ export class World {
   async getRand(eventId: string) {
     return JSON.parse(await this.run(() => this.random.GetRandom(this.systemCtx(), eventId)));
   }
+
+  // --- [FEAT:history] begin ---
+  async getHistory(
+    pokemonId: string,
+    max?: number,
+  ): Promise<{
+    summary: { firstOwner: string; currentOwner: string; transfers: number; versions: number; truncated: boolean };
+    entries: Array<Record<string, unknown>>;
+  }> {
+    return JSON.parse(
+      await this.run(() => this.history.GetPokemonHistory(this.systemCtx(), pokemonId, max === undefined ? undefined : String(max))),
+    );
+  }
+  // --- [FEAT:history] end ---
 
   eventNames(): string[] {
     return this.stub.committedEvents.map((e) => e.name);

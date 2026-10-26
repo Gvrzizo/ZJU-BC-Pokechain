@@ -16,6 +16,10 @@ import { useI18n } from '@/composables/useI18n';
 import type { EvolutionStep, Item, Pokemon, Stats } from '@/types';
 import { currentHpOf as curHp, isFainted as monFainted, maxHpOf as maxHp } from '@/utils/pokemon-hp';
 import BondHearts from '@/ui/BondHearts.vue';
+// --- [FEAT:history] begin ---
+import PokemonHistory from '@/components/PokemonHistory.vue';
+import BreedingDialog from '@/components/BreedingDialog.vue';
+// --- [FEAT:history] end ---
 import HpBar from '@/ui/HpBar.vue';
 import PixelButton from '@/ui/PixelButton.vue';
 import PixelDialog from '@/ui/PixelDialog.vue';
@@ -25,6 +29,12 @@ const store = usePokemonStore();
 const auth = useAuthStore();
 const { t, monName, moveName, itemName, natureName } = useI18n();
 const selected = ref<Pokemon | null>(null);
+// --- [FEAT:history] begin ---
+const historyOpen = ref(false);
+// --- [FEAT:breeding] begin ---
+const breedingOpen = ref(false);
+// --- [FEAT:breeding] end ---
+// --- [FEAT:history] end ---
 const releasing = ref<Pokemon | null>(null);
 const trainCost = ref(10);
 const message = ref('');
@@ -516,6 +526,13 @@ async function confirmUseItem() {
             <PixelButton variant="blue" :disabled="notIdle()" @click="openRename">
               {{ t('team.rename') }}
             </PixelButton>
+            <!-- --- [FEAT:history] begin --- -->
+            <PixelButton @click="historyOpen = true">{{ t('history.button') }}</PixelButton>
+            <!-- --- [FEAT:history] end --- -->
+
+            <!-- --- [FEAT:breeding] begin --- -->
+            <PixelButton :disabled="notIdle()" @click="breedingOpen = true">{{ t('breeding.title') }}</PixelButton>
+            <!-- --- [FEAT:breeding] end --- -->
             <PixelButton variant="danger" :disabled="notIdle()" @click="releasing = selected">
               {{ t('team.release') }}
             </PixelButton>
@@ -578,6 +595,24 @@ async function confirmUseItem() {
       </div>
       <p class="text-dim mt-8" style="font-size: var(--px-fs-sm)">{{ t('team.renameHint') }}</p>
     </PixelDialog>
+
+    <!-- --- [FEAT:history] begin --- -->
+    <PokemonHistory
+      v-if="historyOpen && selected"
+      :pokemon-id="selected.id"
+      :pokemon-name="monName(selected.speciesId, selected.name)"
+      @close="historyOpen = false"
+    />
+    <!-- --- [FEAT:history] end --- -->
+
+    <!-- --- [FEAT:breeding] begin --- -->
+    <BreedingDialog
+      v-if="breedingOpen && selected"
+      :parent-a-id="selected.id"
+      @close="breedingOpen = false"
+      @bred="store.refreshAll()"
+    />
+    <!-- --- [FEAT:breeding] end --- -->
 
     <PixelDialog
       v-if="releasing"

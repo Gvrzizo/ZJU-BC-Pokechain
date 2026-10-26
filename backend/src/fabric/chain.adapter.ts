@@ -1,9 +1,14 @@
 import {
   AssetOffer,
+  BreedArgs,
   BattleState,
+  BreedingConfigState,
   ChainEventListener,
+  ChainHistoryEntry,
+  ChainHistoryResult,
   ChainIdentity,
   GrowthPatch,
+  LineageState,
   ItemStackRef,
   ItemState,
   PlayerState,
@@ -111,6 +116,15 @@ export abstract class ChainAdapter {
   abstract getPokemon(id: string): Promise<PokemonState>;
   abstract queryPokemonByOwner(ownerId: string): Promise<PokemonState[]>;
   abstract queryPokedex(selector: Record<string, unknown>): Promise<PokemonState[]>;
+  // --- [FEAT:history] begin ---
+  /** 账本历史（只读查询；真链走 HistoryContract:GetPokemonHistory）。 */
+  abstract getPokemonHistory(id: string, maxEntries?: number): Promise<ChainHistoryResult>;
+  // --- [FEAT:history] end ---
+  // --- [FEAT:breeding] begin ---
+  abstract breed(as: ChainIdentity, args: BreedArgs & TxMeta): Promise<PokemonState>;
+  abstract getLineage(id: string): Promise<LineageState>;
+  abstract getBreedingConfig(): Promise<BreedingConfigState>;
+  // --- [FEAT:breeding] end ---
 
   // ---- ItemContract ----
   abstract mintItem(

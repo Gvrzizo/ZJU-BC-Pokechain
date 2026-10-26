@@ -3,10 +3,13 @@ import { randomUUID } from 'crypto';
 import { ChainAdapter, TxMeta } from './chain.adapter';
 import {
   AssetOffer,
+  BreedArgs,
   BattleState,
+  BreedingConfigState,
   ChainIdentity,
   GrowthPatch,
   ItemState,
+  LineageState,
   PlayerState,
   PokemonIvs,
   PokemonState,
@@ -187,4 +190,16 @@ export class ContractService {
   queryBattlesByPlayer(playerId: string): Promise<BattleState[]> {
     return this.chain.queryBattlesByPlayer(playerId);
   }
+
+  // --- [FEAT:breeding] begin ---
+  breed(as: ChainIdentity, args: BreedArgs, m?: TxMeta): Promise<PokemonState> {
+    return this.chain.breed(as, { ...args, ...this.meta(m) });
+  }
+  getLineage(id: string): Promise<LineageState> {
+    return this.chain.getLineage(id);
+  }
+  getBreedingConfig(): Promise<BreedingConfigState> {
+    return this.chain.getBreedingConfig();
+  }
+  // --- [FEAT:breeding] end ---
 }

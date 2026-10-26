@@ -9,10 +9,15 @@ import { findCodedMessage, splitCodedMessage } from '../common/utils/errors';
 import { ChainAdapter, normalizeWagerBundle, TxMeta } from './chain.adapter';
 import {
   AssetOffer,
+  BreedArgs,
   BattleState,
+  BreedingConfigState,
   ChainEventListener,
+  ChainHistoryEntry,
+  ChainHistoryResult,
   ChainIdentity,
   GrowthPatch,
+  LineageState,
   ItemState,
   PlayerState,
   PokemonIvs,
@@ -265,6 +270,40 @@ export class FabricChainAdapter extends ChainAdapter implements OnModuleInit, On
   async queryPokedex(selector: Record<string, unknown>): Promise<PokemonState[]> {
     return this.evaluate('PokemonContract:QueryPokedex', [JSON.stringify(selector)]);
   }
+
+  // --- [FEAT:history] begin ---
+  /** 只读查询：必须走 evaluateTransaction（getHistoryForKey 不可放进背书交易）。 */
+  async getPokemonHistory(id: string, maxEntries = 200): Promise<ChainHistoryResult> {
+    return this.evaluate('HistoryContract:GetPokemonHistory', [id, String(maxEntries)]);
+  }
+  // --- [FEAT:history] end ---
+
+  // --- [FEAT:breeding] begin ---
+  async breed(as: ChainIdentity, args: BreedArgs & TxMeta): Promise<PokemonState> {
+    const m = this.meta(args);
+    return this.submit(as, 'BreedingContract:Breed', [
+      args.childId,
+      args.parentAId,
+      args.parentBId,
+      String(args.speciesId),
+      args.name,
+      JSON.stringify(args.ivs),
+      args.nature,
+      args.ability,
+      String(args.shiny),
+      JSON.stringify(args.moves),
+      args.eventId,
+      m.nowISO,
+      m.idemKey,
+    ]);
+  }
+  async getLineage(id: string): Promise<LineageState> {
+    return this.evaluate('BreedingContract:GetLineage', [id]);
+  }
+  async getBreedingConfig(): Promise<BreedingConfigState> {
+    return this.evaluate('BreedingContract:GetBreedingConfig', []);
+  }
+  // --- [FEAT:breeding] end ---
 
   // ---------------------------------------------------------------- ItemContract
   async mintItem(as: ChainIdentity, args: { id: string; playerId: string; typeId: string; quantity: number; uri: string; metadataHash: string } & TxMeta): Promise<ItemState> {

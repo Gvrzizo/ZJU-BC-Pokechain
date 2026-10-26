@@ -86,3 +86,32 @@ export async function healTeam(): Promise<CenterHealResult> {
   const { data } = await http.post<CenterHealResult>('/pokemon/center/heal');
   return data;
 }
+
+// --- [FEAT:history] begin ---
+/** 履历事件（后端已把相邻版本比对成事件类型）。 */
+export interface PokemonHistoryEvent {
+  type: 'capture' | 'rename' | 'transfer' | 'evolve' | 'level' | 'bond' | 'release' | 'delete';
+  at: string;
+  txId: string;
+  from?: string | number;
+  to?: string | number;
+}
+
+export interface PokemonHistory {
+  pokemonId: string;
+  firstOwner: string;
+  currentOwner: string;
+  transfers: number;
+  versions: number;
+  truncated: boolean;
+  entries: PokemonHistoryEvent[];
+}
+
+/** `GET /pokemon/:id/history?max=` —— 数据直接来自链码的账本历史查询。 */
+export async function getPokemonHistory(id: string, max = 100): Promise<PokemonHistory> {
+  const { data } = await http.get<PokemonHistory>(`/pokemon/${encodeURIComponent(id)}/history`, {
+    params: { max },
+  });
+  return data;
+}
+// --- [FEAT:history] end ---

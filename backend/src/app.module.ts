@@ -22,6 +22,12 @@ import { ShopModule } from './shop/shop.module';
 import { TradesModule } from './trades/trades.module';
 import { BattlesModule } from './battles/battles.module';
 import { FairnessModule } from './fairness/fairness.module';
+// --- [FEAT:breeding] begin ---
+import { BreedingModule } from './breeding/breeding.module';
+// --- [FEAT:breeding] end ---
+// --- [FEAT:history] begin ---
+import { HistoryModule } from './history/history.module';
+// --- [FEAT:history] end ---
 import { AssetsModule } from './assets/assets.module';
 import { AdminModule } from './admin/admin.module';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
@@ -60,6 +66,12 @@ import { RankedModule } from './ranked/ranked.module';
     TradesModule,
     BattlesModule,
     FairnessModule,
+    // --- [FEAT:history] begin ---
+    HistoryModule,
+    // --- [FEAT:history] end ---
+    // --- [FEAT:breeding] begin ---
+    BreedingModule,
+    // --- [FEAT:breeding] end ---
     AssetsModule,
     AdminModule,
     LeaderboardModule,

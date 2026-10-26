@@ -88,6 +88,12 @@ export interface Pokemon {
   currentHp?: number;
   /** 是否濒死（currentHp = 0）：不能出战/进队伍，需治疗 */
   fainted?: boolean;
+  // --- [FEAT:breeding] begin ---
+  /** 双亲 id（仅繁殖产生的子代有，链上可选字段） */
+  parents?: string[];
+  /** 代数：野生/铸造为 0 或缺省，子代为 max(父,母)+1 */
+  generation?: number;
+  // --- [FEAT:breeding] end ---
   /**
    * 改名次数（0/缺省 = 从未改名）：第一次免费，之后每次 50P（docs/backend-api.md §2「改名」）。
    * 详情/列表接口附带，改名对话框据此显示「首次免费 / 本次 50P」。

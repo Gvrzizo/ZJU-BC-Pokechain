@@ -93,7 +93,45 @@ export interface PokemonState {
   bond: number;
   /** 链下按 game-data/stats 计算出的六项最终能力值（链上不存，API 组装时附带）。 */
   stats?: PokemonIvs;
+  // --- [FEAT:breeding] begin ---
+  /** 双亲 id（仅繁殖产生的子代有）。 */
+  parents?: string[];
+  /** 代数：野生/铸造为 0 或缺省，子代为 max(父,母)+1。 */
+  generation?: number;
+  // --- [FEAT:breeding] end ---
 }
+
+// --- [FEAT:history] begin ---
+/** 账本历史摘要（HistoryContract:GetPokemonHistory 的返回项，链码侧已裁剪字段）。 */
+export interface ChainHistoryEntry {
+  txId: string;
+  /** 区块时间（ISO）。业务时间请读状态的 createdAt。 */
+  at: string;
+  ownerId: string;
+  /** 昵称（改名会产生新版本）。 */
+  name: string;
+  level: number;
+  speciesId: number;
+  bond: number;
+  status: string;
+}
+
+/** 摘要基于**完整历史**统计，不受 maxEntries 截断影响。 */
+export interface ChainHistorySummary {
+  firstOwner: string;
+  currentOwner: string;
+  transfers: number;
+  versions: number;
+  /** 是否因为 maxEntries 而只返回了部分条目。 */
+  truncated: boolean;
+}
+
+export interface ChainHistoryResult {
+  summary: ChainHistorySummary;
+  /** 最新在前，最多 maxEntries 条。 */
+  entries: ChainHistoryEntry[];
+}
+// --- [FEAT:history] end ---
 
 export type ItemStatus = 'IDLE' | 'LOCKED_TRADE' | 'LOCKED_BATTLE';
 
@@ -275,3 +313,42 @@ export interface GrowthPatch {
   speciesId?: number;
   name?: string;
 }
+
+// --- [FEAT:breeding] begin ---
+export interface BreedArgs {
+  childId: string;
+  parentAId: string;
+  parentBId: string;
+  speciesId: number;
+  name: string;
+  ivs: PokemonIvs;
+  nature: string;
+  ability: string;
+  shiny: boolean;
+  moves: string[];
+  eventId: string;
+}
+
+export interface LineageParent {
+  id: string;
+  speciesId: number;
+  name: string;
+  level: number;
+  ownerId: string;
+}
+
+export interface LineageState {
+  id: string;
+  speciesId: number;
+  name: string;
+  generation: number;
+  dnaHash: string;
+  parents: LineageParent[];
+}
+
+export interface BreedingConfigState {
+  minLevel: number;
+  cost: number;
+  layout: Record<string, unknown>;
+}
+// --- [FEAT:breeding] end ---

@@ -10,9 +10,9 @@
 | `network` | Fabric 2.5.9, CA 1.5.12, CouchDB 0.4.22 | 双组织（Org1 运营/Org2 仲裁）+ 单 Raft orderer，通道 `gamechannel` |
 | `backend` | NestJS 10, TypeORM+pg, ioredis, Socket.IO, fabric-gateway | REST `/api/v1` + WS 命名空间 `/battle`；模块：auth/users · pokemon(+capture+**center 治疗**) · wild(野怪战斗) · items/shop(**buy/sell**) · trades · battles(**押注房 + 房名/备注/留言/请踢/屏蔽/押注模板**) · ranked(**排队扩圈/15s 接受期/机器人/积分场 arena/ELO/排行榜/羁绊**) · admin · fairness/assets/leaderboard |
 | `frontend` | Vue3 + Phaser 3 + Pinia + Vite | 丰缘像素菜单（统一主题/导航/卡片）+ 原作瓦片/完整 2×2 大树/1×2 小树/岩壁方向块/整栋建筑拼接（`native-map.ts` / `world-art.ts`）+ 原作四向人物（自绘仅缺图回退），nginx 反代后端；页面 `/game /bag /shop /pokedex /team /trade /lobby /ranked /battle/:id /starter /admin /fairness /login /register` |
-| `scripts` | bash | prereq/common（公共库）/up/down/reset/deployCC/seed-demo/e2e-smoke/`enroll-system`（真链服务身份）/`real-chain-smoke`（链码前置检查） |
+| `scripts` | bash | prereq/common（公共库）/up/down/reset/deployCC/seed-demo/e2e-smoke/`enroll-system`（真链服务身份）/`real-chain-smoke`（链码前置检查）/`prep-test-account`（造可直接繁殖的测试号：注册+领御三家+糖果+第二只） |
 | `test-vectors` | JSON | 链码 ↔ Mock 对拍向量（`chain/*.json`：身份/锁定/幂等/Forfeit/押注拆分/错误码），两侧 Jest 共跑 |
-| `docs` | 中文 | **blockchain-design（架构+区块链设计总览，先读）/ ppt-outline（答辩 PPT 规格）** / architecture / chaincode-api / backend-api / randomness / security / deployment / **setup（环境复刻）** / **visual-design（视觉与地图约定）** / review/remediation（评审与修复进度） |
+| `docs` | 中文 | **blockchain-design（架构+区块链设计总览，先读）/ ppt-outline（答辩 PPT 规格）/ feature-overview-history-breeding + feature-pokemon-history + feature-breeding（可删扩展功能）** / architecture / chaincode-api / backend-api / randomness / security / deployment / **setup（环境复刻）** / **visual-design（视觉与地图约定）** / review/remediation（评审与修复进度） |
 
 **权威契约文档**：改链码或 API 前先读 `docs/chaincode-api.md` 和 `docs/backend-api.md`，改完同步更新文档。
 
@@ -30,7 +30,7 @@ docker compose up -d --build && ./scripts/seed-demo.sh
 视觉侧保留此前树木/岩壁修正（完整大树 2×2、小树 1×2，显式位置与同一份碰撞占地，取消残格补半截树冠）。
 同日按 `docs/remediation-guide-2026-10-25.md` 完成 **P0 安全批次**（C1 身份、C2/C3 铸造/揭示/养成权限、C5 交易只锁 offer+TTL、C6 Forfeit 写结果、H1/H2 详情 BOLA+队伍去重）、**P1 批次全部工作包**、**P2 批次全部**（对拍向量/错误码、事件判别联合、注册 400P+72h 转账锁、价格回调/大师球图鉴奖励/机器人 rating 0/积分场零增发、nonce 回退/多标签 refresh/登出清缓存），以及此前未完成的四项：
 **C4 真链部署**（CA 属性/TLS 根证书、`enroll-system.sh` 生成 system+opsadmin、Docker 28+ 自动 ccaas、gateway 错误从 `grpc-status-details-bin` 展开、`real-chain-smoke.sh`、真链 compose 覆盖文件）、**H11 一次性传说钥匙**（1500P，创建传说区遇敌时消耗，传说区击倒 0 积分）、**P2-2 架构收敛**（去 `@Global`、`BondModule`、`team-eligibility`、`Leaderboard/AuditService`；前端区域表改由 `GET /capture/zones` 下发 + 类型漂移测试 + 快速捕捉成功率服务端下发）、**P2-3 收尾**（H20 admin 证书、移动端触控 D-pad、公平性页 `canonicalize(turnLog)` 复算 + secp256k1 验签）。
-**实测链码 117 单测（9 套）+ tsc、后端 451（44 套）、前端 241（41 文件）、4 项离线 Python 全绿，三端构建通过；重建 Mock 栈后 e2e 26/26；真链（ccaas 链码 1.2/sequence 3，固定 `SERVER_SIGNING_KEY`）e2e 26/26，并额外实测：`/fairness/ev_battle_*` 的 turnLog 复算与 serverSig 验签通过、传说钥匙 2→1→0 后第 3 次遇敌 403 `KEY_REQUIRED`、admin `GrantRole` 201。**
+**实测链码 134 单测（11 套）+ tsc、后端 469（46 套）、前端 249（43 文件）、4 项离线 Python 全绿，三端构建通过；重建 Mock 栈后 e2e 26/26；真链（ccaas 链码 1.2/sequence 3，固定 `SERVER_SIGNING_KEY`）e2e 26/26，并额外实测：`/fairness/ev_battle_*` 的 turnLog 复算与 serverSig 验签通过、传说钥匙 2→1→0 后第 3 次遇敌 403 `KEY_REQUIRED`、admin `GrantRole` 201。**
 进度、提交对照与本轮语义变化见 `docs/remediation-guide-2026-10-25.md` 文首「执行进度」。视觉约定与生成提示词见 `docs/visual-design.md`、`frontend/art/prompts.json`。
 
 **更新纪律（强制）**：任何改动合并前，必须同步更新本 `AGENTS.md` 的相关段落——结构/命令/**测试数**/架构决策四项，
@@ -42,12 +42,12 @@ docker compose up -d --build && ./scripts/seed-demo.sh
 
 ```bash
 # 链码
-cd chaincode/pokemon-cc && npm test && npm run build      # 117 单测（9 套）+ tsc
+cd chaincode/pokemon-cc && npm test && npm run build      # 134 单测（11 套）+ tsc
 # 后端
-cd backend && npm run build && npm test                   # nest build + 451 单测（44 套，内存 mock，免外部服务）
+cd backend && npm run build && npm test                   # nest build + 469 单测（46 套，内存 mock，免外部服务）
 cd backend && npm run seed                                # 演示数据（需先 build；PG/Redis 可达，mock 模式）；npm run seed:dev 免构建
 # 前端
-cd frontend && npm run build && npm test                  # vue-tsc + vite + 241 单测（vitest，41 个测试文件）
+cd frontend && npm run build && npm test                  # vue-tsc + vite + 249 单测（vitest，43 个测试文件）
 # 链码 ↔ Mock 对拍（两侧跑同一批 test-vectors/chain/*.json，必须同时绿）
 (cd chaincode/pokemon-cc && npx jest tests/vectors.test.ts) && (cd backend && npx jest test/chain-vectors.spec.ts)
 # 世界素材切片回归（Python 3 + Pillow，无需外部素材/网络）
@@ -93,6 +93,8 @@ BASE_URL=http://localhost:3100 ./scripts/e2e-smoke.sh     # 打本地实例（�
 17. **签名密钥与公平性披露（H19/H9）**：`SERVER_SIGNING_KEY`（secp256k1 PKCS8 PEM）生产/真链必须固定；空值仅本地演示（临时钥重启后旧 `serverSig` 不可验）。`SigningService.keyId` = sha256(公钥 PEM) 前 16 hex，`/fairness` 返回 `serverKeyId`，`battle_logs.server_key_id` 记录当次签名密钥。`/fairness` 对 `COMMITTED` 事件只给承诺（`revealed:false`），结算后才返回 `serverSeed`/`resultHash`。**P2-3**：`ev_battle_<id>` 额外返回 `battle:{resultHash,serverSig,serverKeyId,turnLog}`；前端用 `canonicalize(turnLog)` 复算 resultHash 并用 `@noble/curves` 验签（DER→compact、SPKI PEM→65 字节公钥、digest=sha256(resultHash bytes)）。
 
 18. **前端会话健壮性（P2-3）**：`X-Nonce` 走 `frontend/src/utils/nonce.ts::createNonce`（`crypto.randomUUID` → `getRandomValues` 回退，非安全上下文不崩）；多标签 refresh 用 localStorage 锁 + auth store 的 `storage` 事件同步（`refreshAccessTokenCrossTab`），避免两个标签同时轮换 refresh token；`KeepAlive` 以 username 为 key，登出/换号销毁 GameView 缓存。
+
+19. **可删除扩展：宝可梦履历 + 血统繁殖（2026-10-26）**：两个功能都做成独立合约 + 独立后端模块，用 `[FEAT:history]` / `[FEAT:breeding]` 成对标记接入点，卸载见 `docs/feature-overview-history-breeding.md` §4。**履历**只读账本历史（`getHistoryForKey` 必须 `@Transaction(false)`，peer 需开历史库）：Fabric 2.5.16 实测返回**新→旧**，链码按首尾时间戳归一化；`summary`（初训家/转手/版本）在完整历史上统计，只有 `entries` 受 `maxEntries` 截断。**繁殖**复用 `purpose='mint'` 随机事件（不改 RandomContract），子代 `dnaHash` 即血统承诺（`sha256(版本|双亲id/dnaHash|事件|子代id)`），且链码用同一 `serverSeed` 重算 IV/性格/闪光再比对（`HEREDITY_MISMATCH`），后端无法伪造；双亲不锁定，并发保护来自"扣积分写同一 player 键"，费用改 0 时该保护消失。两者均未接入 `test-vectors`（runner 无对应 op），靠链码/后端两侧单测 + 同一份黄金向量保证一致。
 
 ## 环境与服务
 

@@ -152,6 +152,9 @@ describe('mock chain shared through Redis (seed process -> API process)', () => 
     });
 
     expect((await redis.keys(`${MOCK_CHAIN_PREFIX}*`)).sort()).toEqual([
+      // --- [FEAT:history] begin ---
+      `${MOCK_CHAIN_PREFIX}hist`,
+      // --- [FEAT:history] end ---
       `${MOCK_CHAIN_PREFIX}idem`,
       `${MOCK_CHAIN_PREFIX}state`,
     ]);
@@ -193,6 +196,9 @@ describe('mock chain shared through Redis (seed process -> API process)', () => 
       'queryAll',
       'matchSelector',
       'resetAll',
+      // --- [FEAT:history] begin ---
+      'recordHistory',
+      // --- [FEAT:history] end ---
     ]);
     const unclassified = Object.getOwnPropertyNames(MockChainAdapter.prototype).filter(
       (name) => !internal.has(name) && !(PERSISTED_METHODS as readonly string[]).includes(name),

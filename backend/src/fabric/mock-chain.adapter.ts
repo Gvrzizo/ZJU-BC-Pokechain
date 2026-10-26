@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { canonicalize, sha256hex } from '../common/utils/crypto.util';
+import { canonicalize, DeriveStream, sha256hex } from '../common/utils/crypto.util';
 import { CodedError } from '../common/utils/errors';
 import {
   ChainAdapter,
@@ -10,11 +10,16 @@ import {
 } from './chain.adapter';
 import {
   AssetOffer,
+  BreedArgs,
   BattleState,
+  BreedingConfigState,
   ChainEventListener,
   ChainEventPayload,
+  ChainHistoryEntry,
+  ChainHistoryResult,
   ChainIdentity,
   GrowthPatch,
+  LineageState,
   ItemStackRef,
   ItemState,
   PlayerState,
@@ -38,6 +43,14 @@ const BOND_MIN_DELTA = 1;
 const BOND_MAX_DELTA = 50;
 const BOND_UP_MAX_IDS = 100;
 const RATING_DEFAULT = 1000;
+// --- [FEAT:breeding] begin ---
+const BREED_MIN_LEVEL = 20;
+const BREED_COST = 200;
+const BREED_IV_BLOCK = 50000;
+const BREED_NATURE_SLOT = 50012;
+const BREED_SHINY_SLOT = 50013;
+const BREED_IV_KEYS = ['hp', 'atk', 'def', 'spatk', 'spdef', 'speed'] as const;
+// --- [FEAT:breeding] end ---
 /** 注册积分与 72h 转账锁（H10；与链码 model.INITIAL_POINTS/TRANSFER_LOCK_MS 一致）。 */
 const INITIAL_POINTS = 400;
 const TRANSFER_LOCK_MS = 72 * 3600 * 1000;
@@ -145,6 +158,20 @@ export const PERSISTED_METHODS = [
   'getPokemon',
   'queryPokemonByOwner',
   'queryPokedex',
+  // --- [FEAT:history] begin ---
+  'getPokemonHistory',
+  // --- [FEAT:history] end ---
+
+  // --- [FEAT:breeding] begin ---
+  'breed',
+  'getLineage',
+  'getBreedingConfig',
+  // --- [FEAT:breeding] end ---
+  // --- [FEAT:breeding] begin ---
+  'breed',
+  'getLineage',
+  'getBreedingConfig',
+  // --- [FEAT:breeding] end ---
   // ItemContract
   'mintItem',
   'transferItem',
@@ -194,6 +221,12 @@ export class MockChainAdapter extends ChainAdapter {
   private readonly store?: MockChainStore;
   /** Snapshot as last loaded from the store; the flush diff is computed against it. */
   private loaded: MockChainSnapshot | null = null;
+  // --- [FEAT:history] begin ---
+  /** 键历史：Mock 没有账本，这里按"每次 putState 一个版本"自己记。 */
+  private history = new Map<string, ChainHistoryEntry[]>();
+  private loadedHistory = new Map<string, string>();
+  private historyCounter = 0;
+  // --- [FEAT:history] end ---
   /** Serializes persisted transactions so concurrent calls cannot interleave. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -239,6 +272,13 @@ export class MockChainAdapter extends ChainAdapter {
       this.state.set(key, JSON.parse(json) as Record<string, unknown>);
     }
     this.idem = new Map(remote.idem);
+    // --- [FEAT:history] begin ---
+    this.history = new Map();
+    for (const [key, json] of remote.history) {
+      this.history.set(key, JSON.parse(json) as ChainHistoryEntry[]);
+    }
+    this.loadedHistory = new Map(remote.history);
+    // --- [FEAT:history] end ---
   }
 
   private async flushRemote(): Promise<void> {
@@ -246,6 +286,9 @@ export class MockChainAdapter extends ChainAdapter {
     const delta: MockChainDelta = {
       state: { set: new Map(), del: [] },
       idem: { set: new Map(), del: [] },
+      // --- [FEAT:history] begin ---
+      history: { set: new Map() },
+      // --- [FEAT:history] end ---
     };
     for (const [key, value] of this.state) {
       const json = JSON.stringify(value);
@@ -260,8 +303,22 @@ export class MockChainAdapter extends ChainAdapter {
     for (const key of this.loaded.idem.keys()) {
       if (!this.idem.has(key)) delta.idem.del.push(key);
     }
+    // --- [FEAT:history] begin ---
+    for (const [key, entries] of this.history) {
+      const json = JSON.stringify(entries);
+      if (this.loadedHistory.get(key) !== json) delta.history.set.set(key, json);
+    }
+    // --- [FEAT:history] end ---
     this.loaded = null;
-    if (delta.state.set.size > 0 || delta.state.del.length > 0 || delta.idem.set.size > 0 || delta.idem.del.length > 0) {
+    if (
+      delta.state.set.size > 0 ||
+      delta.state.del.length > 0 ||
+      delta.idem.set.size > 0 ||
+      delta.idem.del.length > 0 ||
+      // --- [FEAT:history] begin ---
+      delta.history.set.size > 0
+      // --- [FEAT:history] end ---
+    ) {
       await this.store.apply(delta);
     }
   }
@@ -312,7 +369,32 @@ export class MockChainAdapter extends ChainAdapter {
 
   private put(key: string, value: unknown): void {
     this.state.set(key, JSON.parse(JSON.stringify(value)) as Record<string, unknown>);
+    // --- [FEAT:history] begin ---
+    this.recordHistory(key, value as Record<string, unknown>);
+    // --- [FEAT:history] end ---
   }
+
+  // --- [FEAT:history] begin ---
+  /** 每个写入的键版本记一条摘要（与链码 HistoryContract 的投影字段一致）。 */
+  private recordHistory(key: string, value: Record<string, unknown>): void {
+    this.historyCounter += 1;
+    const entry: ChainHistoryEntry = {
+      txId: `mock-hist-${this.historyCounter}`,
+      at: new Date().toISOString(),
+      ownerId: typeof value.ownerId === 'string' ? value.ownerId : '',
+      name: typeof value.name === 'string' ? value.name : '',
+      level: typeof value.level === 'number' ? value.level : 0,
+      speciesId: typeof value.speciesId === 'number' ? value.speciesId : 0,
+      bond: typeof value.bond === 'number' ? value.bond : 0,
+      status: typeof value.status === 'string' ? value.status : '',
+    };
+    const list = this.history.get(key) ?? [];
+    list.push(entry);
+    const MAX_VERSIONS = 200;
+    if (list.length > MAX_VERSIONS) list.splice(0, list.length - MAX_VERSIONS);
+    this.history.set(key, list);
+  }
+  // --- [FEAT:history] end ---
 
   private assertSafeInt(n: number, field: string): void {
     if (!Number.isSafeInteger(n)) {
@@ -761,6 +843,172 @@ export class MockChainAdapter extends ChainAdapter {
   async queryPokedex(selector: Record<string, unknown>): Promise<PokemonState[]> {
     return this.queryAll<PokemonState>('pokemon', (p) => this.matchSelector(p, selector)).map(withPokemonDefaults);
   }
+
+  // --- [FEAT:history] begin ---
+  async getPokemonHistory(id: string, maxEntries = 200): Promise<ChainHistoryResult> {
+    const all = this.history.get(`pokemon:${id}`) ?? [];
+    if (all.length === 0) {
+      throw new CodedError('POKEMON_NOT_FOUND', `pokemon ${id} has no ledger history`);
+    }
+    const limit = Math.max(1, maxEntries);
+    let transfers = 0;
+    for (let i = 1; i < all.length; i += 1) {
+      if (all[i].ownerId !== all[i - 1].ownerId) transfers += 1;
+    }
+    return {
+      summary: {
+        firstOwner: all[0].ownerId,
+        currentOwner: all[all.length - 1].ownerId,
+        transfers,
+        versions: all.length,
+        truncated: all.length > limit,
+      },
+      entries: all
+        .slice(-limit)
+        .reverse()
+        .map((entry) => ({ ...entry })),
+    };
+  }
+  // --- [FEAT:history] end ---
+
+  // --- [FEAT:breeding] begin ---
+  async breed(
+    as: ChainIdentity,
+    args: BreedArgs & TxMeta,
+  ): Promise<PokemonState> {
+    const { nowISO, idemKey } = this.meta(args);
+    return this.idempotent(idemKey, nowISO, () => {
+      if (args.parentAId === args.parentBId) {
+        throw new CodedError('INVALID_PARAM', 'parentAId and parentBId must differ');
+      }
+      const a = withPokemonDefaults(
+        this.mustGet<PokemonState>(`pokemon:${args.parentAId}`, 'POKEMON_NOT_FOUND', `pokemon ${args.parentAId}`),
+      );
+      const b = withPokemonDefaults(
+        this.mustGet<PokemonState>(`pokemon:${args.parentBId}`, 'POKEMON_NOT_FOUND', `pokemon ${args.parentBId}`),
+      );
+      if (a.ownerId !== b.ownerId) {
+        throw new CodedError('NOT_OWNER', `parents belong to different owners (${a.ownerId} / ${b.ownerId})`);
+      }
+      const owner = this.mustGet<PlayerState>(`player:${a.ownerId}`, 'PLAYER_NOT_FOUND', `player ${a.ownerId}`);
+      if (as.role !== 'system' && as.userId !== owner.playerId) {
+        throw new CodedError('NOT_OWNER', `caller ${as.userId} does not own the parents`);
+      }
+      for (const parent of [a, b]) {
+        if (parent.status !== 'IDLE') {
+          throw new CodedError('ASSET_LOCKED', `pokemon ${parent.id} is ${parent.status}`);
+        }
+        if (parent.level < BREED_MIN_LEVEL) {
+          throw new CodedError('INVALID_PARAM', `pokemon ${parent.id} must be level >= ${BREED_MIN_LEVEL}`);
+        }
+      }
+      if (this.state.has(`pokemon:${args.childId}`)) {
+        throw new CodedError('POKEMON_EXISTS', `pokemon ${args.childId} already exists`);
+      }
+      const rand = this.mustGet<RandomCommitState>(`rand:${args.eventId}`, 'RAND_NOT_FOUND', `random event ${args.eventId}`);
+      this.consumeRandom(args.eventId, 'mint', owner.playerId);
+
+      const stream = new DeriveStream(rand.serverSeed, rand.clientSeed, args.eventId);
+      const expectedIvs = {} as PokemonIvs;
+      BREED_IV_KEYS.forEach((key, index) => {
+        const choice = stream.at(BREED_IV_BLOCK + index * 2);
+        expectedIvs[key] =
+          choice < 0.4
+            ? a.ivs[key]
+            : choice < 0.8
+              ? b.ivs[key]
+              : Math.floor(stream.at(BREED_IV_BLOCK + index * 2 + 1) * 32);
+      });
+      const expectedNature = stream.at(BREED_NATURE_SLOT) < 0.5 ? a.nature : b.nature;
+      const expectedShiny = stream.at(BREED_SHINY_SLOT) < 1 / 4096;
+      if (
+        canonicalize(expectedIvs) !== canonicalize(args.ivs) ||
+        expectedNature !== args.nature ||
+        expectedShiny !== args.shiny
+      ) {
+        throw new CodedError('HEREDITY_MISMATCH', 'child attributes do not match the committed random stream');
+      }
+
+      if (owner.points < BREED_COST) {
+        throw new CodedError('INSUFFICIENT_POINTS', `breed costs ${BREED_COST}P, balance ${owner.points}`);
+      }
+      owner.points -= BREED_COST;
+      this.put(`player:${owner.playerId}`, owner);
+
+      const dnaHash = sha256hex(
+        `pokechain-breed-v1|${a.id}|${a.dnaHash}|${b.id}|${b.dnaHash}|${args.eventId}|${args.childId}`,
+      );
+      const child: PokemonState = {
+        docType: 'pokemon',
+        id: args.childId,
+        speciesId: args.speciesId,
+        name: args.name,
+        dnaHash,
+        ivs: args.ivs,
+        evs: { hp: 0, atk: 0, def: 0, spatk: 0, spdef: 0, speed: 0 },
+        nature: args.nature,
+        ability: args.ability,
+        shiny: args.shiny,
+        level: 1,
+        exp: 0,
+        moves: args.moves,
+        ownerId: owner.playerId,
+        status: 'IDLE',
+        lockRef: '',
+        captureEventId: args.eventId,
+        createdAt: nowISO,
+        bond: BOND_DEFAULT,
+        parents: [a.id, b.id],
+        generation: Math.max(a.generation ?? 0, b.generation ?? 0) + 1,
+      };
+      this.put(`pokemon:${child.id}`, child);
+      this.emit('PokemonBred', {
+        id: child.id,
+        parentAId: a.id,
+        parentBId: b.id,
+        ownerId: child.ownerId,
+        generation: child.generation,
+        cost: BREED_COST,
+      });
+      return child;
+    });
+  }
+
+  async getLineage(id: string): Promise<LineageState> {
+    const pokemon = withPokemonDefaults(
+      this.mustGet<PokemonState>(`pokemon:${id}`, 'POKEMON_NOT_FOUND', `pokemon ${id}`),
+    );
+    const parents = (pokemon.parents ?? []).map((parentId) => {
+      const parent = this.get<PokemonState>(`pokemon:${parentId}`);
+      return parent
+        ? { id: parent.id, speciesId: parent.speciesId, name: parent.name, level: parent.level, ownerId: parent.ownerId }
+        : { id: parentId, speciesId: 0, name: '', level: 0, ownerId: '' };
+    });
+    return {
+      id: pokemon.id,
+      speciesId: pokemon.speciesId,
+      name: pokemon.name,
+      generation: pokemon.generation ?? 0,
+      dnaHash: pokemon.dnaHash,
+      parents,
+    };
+  }
+
+  async getBreedingConfig(): Promise<BreedingConfigState> {
+    return {
+      minLevel: BREED_MIN_LEVEL,
+      cost: BREED_COST,
+      layout: {
+        version: 'pokechain-breed-v1',
+        ivBlock: BREED_IV_BLOCK,
+        natureSlot: BREED_NATURE_SLOT,
+        shinySlot: BREED_SHINY_SLOT,
+        shinyDenominator: 4096,
+        inherited: { parentA: 0.4, parentB: 0.4, random: 0.2 },
+      },
+    };
+  }
+  // --- [FEAT:breeding] end ---
 
   // ---------------------------------------------------------------- ItemContract
   /** 堆叠归一排序键：createdAt 升序（缺失视为 ''，最旧），同刻按 id 字典序。 */

@@ -132,6 +132,12 @@ export interface Pokemon {
   captureEventId: string;
   createdAt: string;
   bond: number;
+  // --- [FEAT:breeding] begin ---
+  /** 双亲 id（仅繁殖产生的子代有；野生/铸造缺省）。 */
+  parents?: string[];
+  /** 代数：野生/铸造为 0 或缺省，子代为 max(父,母)+1。 */
+  generation?: number;
+  // --- [FEAT:breeding] end ---
 }
 
 export interface Item {
