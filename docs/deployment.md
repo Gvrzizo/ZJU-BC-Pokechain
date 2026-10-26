@@ -27,7 +27,7 @@ Fabric 平台二进制（cryptogen/configtxgen/configtxlator/peer 等，默认 *
 | hyperledger/fabric-couchdb | 0.4.22 | 世界状态库 | B |
 | postgres | 16 | 后端数据库 | A+B |
 | redis | 7 | 会话/限流/缓存 | A+B |
-| minio/minio | latest（可选） | 资源存储（`MINIO_MOCK=true` 时不需要） | A+B 可选 |
+| quay.io/minio/minio | latest（可选） | 资源存储（`MINIO_MOCK=true` 时不需要）；MinIO 已从 Docker Hub 撤下，`minio/minio` 会报 `pull access denied` | A+B 可选 |
 | node | 20-alpine（构建期） | 后端/前端 Docker 构建 | 可选 |
 
 磁盘预留：镜像约 3–4 GB（其中 Fabric 四件套约 2.5 GB）+ 链码容器构建（peer 在容器内 `npm install`，每个 dev-peer0.* 镜像约 1 GB）+ 数据卷，建议 ≥ 8 GB 空闲。

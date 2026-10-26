@@ -28,6 +28,7 @@ docker compose up -d --build  # 启动 PostgreSQL/Redis/MinIO + 后端 + 前端�
 
 | 文档 | 内容 |
 |---|---|
+| `docs/blockchain-design.md` | **架构与区块链设计总览（先读这一篇）**：分层架构、Fabric 治理与背书、身份体系、六合约、可验证随机数、双链模式 |
 | `docs/architecture.md` | 总体架构与链上/链下职责划分 |
 | `docs/chaincode-api.md` | 链码合约接口规范（数据模型/交易/事件/安全规则） |
 | `docs/backend-api.md` | 后端 REST/WebSocket API 规范 |

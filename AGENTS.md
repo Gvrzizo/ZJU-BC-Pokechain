@@ -12,7 +12,7 @@
 | `frontend` | Vue3 + Phaser 3 + Pinia + Vite | 丰缘像素菜单（统一主题/导航/卡片）+ 原作瓦片/完整 2×2 大树/1×2 小树/岩壁方向块/整栋建筑拼接（`native-map.ts` / `world-art.ts`）+ 原作四向人物（自绘仅缺图回退），nginx 反代后端；页面 `/game /bag /shop /pokedex /team /trade /lobby /ranked /battle/:id /starter /admin /fairness /login /register` |
 | `scripts` | bash | prereq/common（公共库）/up/down/reset/deployCC/seed-demo/e2e-smoke/`enroll-system`（真链服务身份）/`real-chain-smoke`（链码前置检查） |
 | `test-vectors` | JSON | 链码 ↔ Mock 对拍向量（`chain/*.json`：身份/锁定/幂等/Forfeit/押注拆分/错误码），两侧 Jest 共跑 |
-| `docs` | 中文 | architecture / chaincode-api / backend-api / randomness / security / deployment / **setup（环境复刻）** / **visual-design（视觉与地图约定）** / review/remediation（评审与修复进度） |
+| `docs` | 中文 | **blockchain-design（架构+区块链设计总览，先读）/ ppt-outline（答辩 PPT 规格）** / architecture / chaincode-api / backend-api / randomness / security / deployment / **setup（环境复刻）** / **visual-design（视觉与地图约定）** / review/remediation（评审与修复进度） |
 
 **权威契约文档**：改链码或 API 前先读 `docs/chaincode-api.md` 和 `docs/backend-api.md`，改完同步更新文档。
 
